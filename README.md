@@ -188,6 +188,7 @@ steps go into `docs/ROADMAP.md` when the phase starts.
 ```sh
 # toolchain is pinned by rust-toolchain.toml; scion-proto also needs `protoc` on PATH
 # scion-ingest's tests also need `git` on PATH (apt-get install git / brew install git)
+# scripts/bench-real.sh also needs git-filter-repo (pip install git-filter-repo) and Docker
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 
