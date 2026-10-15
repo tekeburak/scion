@@ -7,7 +7,9 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use scion_types::{BlobId, Changeset, ChangesetId, Tree, TreeId};
 
-use crate::{MetadataStore, ObjectStore, RefState, Result, StoreError, is_allowed_ref_name};
+use crate::{
+    DerivedPointer, MetadataStore, ObjectStore, RefState, Result, StoreError, is_allowed_ref_name,
+};
 
 #[derive(Debug, Default)]
 struct Metadata {
@@ -40,22 +42,24 @@ impl MemoryStore {
 
 #[async_trait]
 impl MetadataStore for MemoryStore {
-    async fn put_changeset(&self, cs: &Changeset) -> Result<ChangesetId> {
-        let id = cs.id();
+    async fn put_changesets(&self, batch: &[Changeset]) -> Result<()> {
         let mut m = self.meta.write().expect("poisoned");
-        let key = (cs.repo.clone(), id);
-        if m.changesets.contains_key(&key) {
-            return Ok(id);
-        }
-        let mut generation = 0;
-        for p in &cs.parents {
-            match m.changesets.get(&(cs.repo.clone(), *p)) {
-                Some((_, g)) => generation = generation.max(g + 1),
-                None => return Err(StoreError::UnknownParent(id, *p)),
+        for cs in batch {
+            let id = cs.id();
+            let key = (cs.repo.clone(), id);
+            if m.changesets.contains_key(&key) {
+                continue;
             }
+            let mut generation = 0;
+            for p in &cs.parents {
+                match m.changesets.get(&(cs.repo.clone(), *p)) {
+                    Some((_, g)) => generation = generation.max(g + 1),
+                    None => return Err(StoreError::UnknownParent(id, *p)),
+                }
+            }
+            m.changesets.insert(key, (cs.clone(), generation));
         }
-        m.changesets.insert(key, (cs.clone(), generation));
-        Ok(id)
+        Ok(())
     }
 
     async fn get_changeset(&self, repo: &str, id: ChangesetId) -> Result<Option<Changeset>> {
@@ -121,17 +125,12 @@ impl MetadataStore for MemoryStore {
             .unwrap_or_default())
     }
 
-    async fn put_derived(
-        &self,
-        repo: &str,
-        ty: &str,
-        version: u32,
-        cs: ChangesetId,
-        pointer: Vec<u8>,
-    ) -> Result<()> {
+    async fn put_derived_many(&self, repo: &str, pointers: Vec<DerivedPointer>) -> Result<()> {
         let mut m = self.meta.write().expect("poisoned");
-        m.derived
-            .insert((repo.to_owned(), ty.to_owned(), version, cs), pointer);
+        for (ty, version, cs, pointer) in pointers {
+            m.derived
+                .insert((repo.to_owned(), ty, version, cs), pointer);
+        }
         Ok(())
     }
 
@@ -148,18 +147,16 @@ impl MetadataStore for MemoryStore {
             .cloned())
     }
 
-    async fn put_ingest_checkpoint(
+    async fn put_ingest_checkpoints(
         &self,
         repo: &str,
-        git_sha: &[u8],
-        cs: ChangesetId,
+        done: &[(Vec<u8>, ChangesetId)],
     ) -> Result<()> {
         let mut m = self.meta.write().expect("poisoned");
-        m.checkpoints
-            .entry(repo.to_owned())
-            .or_default()
-            .entry(git_sha.to_vec())
-            .or_insert(cs);
+        let checkpoints = m.checkpoints.entry(repo.to_owned()).or_default();
+        for (sha, cs) in done {
+            checkpoints.entry(sha.clone()).or_insert(*cs);
+        }
         Ok(())
     }
 

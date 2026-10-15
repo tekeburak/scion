@@ -3245,7 +3245,9 @@ dependencies = [
 name = "scion-server"
 version = "0.0.1"
 dependencies = [
+ "async-trait",
  "bytes",
+ "futures-util",
  "object_store",
  "scion-core",
  "scion-derived",

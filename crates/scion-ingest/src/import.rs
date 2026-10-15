@@ -6,7 +6,7 @@ use std::path::Path;
 use bytes::Bytes;
 use futures_util::{StreamExt, TryStreamExt, stream};
 use scion_store::{MetadataStore, ObjectStore};
-use scion_types::{BlobId, ChangesetId};
+use scion_types::{BlobId, Changeset, ChangesetId};
 use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
@@ -16,9 +16,11 @@ use crate::{GIT_SHA, GitRepo, IngestError, Mapped, ObjectId};
 /// Most blob uploads in flight at once for one commit.
 const UPLOAD_CONCURRENCY: usize = 16;
 /// Most commits whose blobs upload while earlier ones are being created.
-const UPLOAD_AHEAD: usize = 8;
+const UPLOAD_AHEAD: usize = 16;
 /// Most mapped commits waiting for their upload to start.
 const MAP_AHEAD: usize = 8;
+/// Most changesets created in one batch.
+const BATCH: usize = 64;
 
 /// The only ref an import creates or moves.
 pub const MAIN_REF: &str = "main";
@@ -36,9 +38,10 @@ pub struct Imported {
 /// Import every commit reachable from `rev` in `git` into repository `repo`,
 /// parents first, then create `main` at the tip or fast-forward it there.
 ///
-/// Each created changeset is recorded in `ingest_checkpoints` right after it
-/// is stored, so an interrupted import resumes where it stopped: a run skips
-/// every commit already recorded and creates exactly the rest. Re-running
+/// Each created batch of changesets is recorded in `ingest_checkpoints` right
+/// after its derived data is stored, so an interrupted import resumes where it
+/// stopped: a run skips every commit already recorded and creates exactly the
+/// rest. Re-running
 /// against an updated repository therefore imports only the new commits.
 /// If `main` already points at a commit that `rev` does not contain (the
 /// upstream history was rewritten), nothing is written.
@@ -92,11 +95,12 @@ pub async fn import(
         }
     }
 
-    // Three stages, so neither git nor the object store waits on the other:
-    // a blocking thread maps commits (a changeset's id is its hash, so it
+    // Three stages, so neither git nor the stores wait on each other: a
+    // blocking thread maps commits (a changeset's id is its hash, so it
     // needs no store to name the parents of the next one), up to
-    // `UPLOAD_AHEAD` commits upload their blobs concurrently, and changesets
-    // are created strictly in order through the shared create path.
+    // `UPLOAD_AHEAD` commits upload their blobs concurrently, and the
+    // uploaded ones are created in order, in batches of whatever is ready,
+    // through the shared create path.
     let pending: Vec<ObjectId> = commits
         .iter()
         .map(|c| c.id)
@@ -104,32 +108,30 @@ pub async fn import(
         .collect();
     let (mapper, rx) = spawn_mapper(git.git_dir(), repo, pending, imported.clone());
 
-    let mut ready = ReceiverStream::new(rx)
-        .map(|mapped| async move {
-            let (commit, Mapped { changeset, blobs }) = mapped?;
-            upload(objects, commit, blobs).await?;
-            Ok::<_, IngestError>((commit, changeset))
-        })
-        .buffered(UPLOAD_AHEAD);
-    let mut created = 0;
-    let result = async {
-        while let Some((commit, changeset)) = ready.try_next().await? {
-            let (id, _) = scion_server::create_changeset(meta, objects, &changeset)
-                .await
-                .map_err(|e| IngestError::Store(commit, e.message().to_owned()))?;
-            meta.put_ingest_checkpoint(repo, commit.as_bytes(), id)
-                .await
-                .map_err(store_err(commit))?;
-            imported.insert(commit, id);
-            created += 1;
+    let (uploaded_tx, uploaded_rx) = mpsc::channel(BATCH);
+    let upload_all = async move {
+        let mut ready = ReceiverStream::new(rx)
+            .map(|mapped| async move {
+                let (commit, Mapped { changeset, blobs }) = mapped?;
+                upload(objects, commit, blobs).await?;
+                Ok::<_, IngestError>((commit, changeset))
+            })
+            .buffered(UPLOAD_AHEAD);
+        while let Some(uploaded) = ready.try_next().await? {
+            if uploaded_tx.send(uploaded).await.is_err() {
+                break;
+            }
         }
+        // Dropping `ready` closes the mapper's channel, which stops it.
         Ok::<_, IngestError>(())
-    }
-    .await;
-    // Closing the channel stops the mapper.
-    drop(ready);
+    };
+    let create_all = create(uploaded_rx, repo, meta, objects, &mut imported);
+    // A failed stage drops its end of the channel between them, which ends
+    // the other one.
+    let (uploaded, created) = tokio::join!(upload_all, create_all);
     mapper.await.expect("the mapping thread does not panic");
-    result?;
+    uploaded?;
+    let created = created?;
 
     let tip = imported[&tip_commit];
     if current.as_ref().is_none_or(|c| c.target != tip) {
@@ -145,6 +147,40 @@ pub async fn import(
         .map_err(|e| IngestError::Ref(tip_commit, e.message().to_owned()))?;
     }
     Ok(Imported { tip, created })
+}
+
+/// Create the uploaded commits from `uploaded`, in order, in batches of
+/// whatever is ready, and record each batch's checkpoints once it is stored.
+/// Adds each created changeset to `imported`; returns how many there were.
+async fn create(
+    uploaded: mpsc::Receiver<(ObjectId, Changeset)>,
+    repo: &str,
+    meta: &dyn MetadataStore,
+    objects: &dyn ObjectStore,
+    imported: &mut HashMap<ObjectId, ChangesetId>,
+) -> Result<usize, IngestError> {
+    let mut created = 0;
+    let mut batches = ReceiverStream::new(uploaded).ready_chunks(BATCH);
+    while let Some(batch) = batches.next().await {
+        let (commits, changesets): (Vec<ObjectId>, Vec<_>) = batch.into_iter().unzip();
+        let last = *commits.last().expect("a chunk is never empty");
+        let ids = scion_server::create_changesets(meta, objects, &changesets)
+            .await
+            .map_err(|e| IngestError::Store(last, e.message().to_owned()))?;
+        let done: Vec<_> = commits
+            .iter()
+            .zip(&ids)
+            .map(|(commit, (id, _))| (commit.as_bytes().to_vec(), *id))
+            .collect();
+        meta.put_ingest_checkpoints(repo, &done)
+            .await
+            .map_err(|e| IngestError::Store(last, e.to_string()))?;
+        for (commit, (id, _)) in commits.into_iter().zip(ids) {
+            imported.insert(commit, id);
+        }
+        created += done.len();
+    }
+    Ok(created)
 }
 
 /// Upload the blobs of `commit` the store does not have yet: one presence

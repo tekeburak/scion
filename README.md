@@ -30,16 +30,17 @@ deliberate deviations from the reference design (trees in S3, canonical BLAKE3, 
   S3 (`log`, `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`, `move_ref`), and the
   `scn` CLI can `clone --sparse`, `status`, `log`, `diff`, `blame`, `add`, `commit` (an anonymous
   head) and `land` (fast-forward `main`). CI runs that loop end to end on Postgres + S3.
-- **Git import (Phase 6.1–6.8 merged):** `scion-ingest import <git-dir> <repo> [<rev>]` turns a
+- **Git import (Phase 6.1–6.8 and 6.11 merged):** `scion-ingest import <git-dir> <repo> [<rev>]` turns a
   git history into changesets (first-parent file changes, renames and copies as `copy_from`,
   the git sha kept in `extra`), resumes from checkpoints, syncs incrementally and refuses a
   rewritten upstream; `scion-ingest verify` compares every imported tree with `git ls-tree`.
+  Changesets are created in batches, so importing the benchmark slice takes about 6× git's push.
 - **Real-repository benchmark (Phase 6.9–6.10 merged):** `scripts/bench-real` rebuilds a
   pinned slice of a real repository's history and times import, clone, sparse clone, `status`,
   `log`, `blame` and `land` against git on Postgres + S3, writing a CSV. Results are not
   published yet.
-- **Next:** import, `log`, `blame` and `land` at least as fast as git on that slice
-  (Phase 6.11–6.12), the results as a table and chart in this README (6.13) and an import
+- **Next:** `log`, `blame` and `land` at least as fast as git on that slice
+  (Phase 6.12), the results as a table and chart in this README (6.13) and an import
   how-to (6.14); then the cache and daemon tiers (Phase 4), change requests and server-side rebase on land (Phase 5),
   IAM (Phase 7) and virtualized checkouts (Phase 8).
 

@@ -46,9 +46,9 @@ async fn corrupted(
     cs.parents = vec![parent];
     cs.file_changes = changes;
     cs.message = "corrupted".into();
-    scion_server::create_changeset(store, store, &cs)
+    scion_server::create_changesets(store, store, &[cs])
         .await
-        .unwrap()
+        .unwrap()[0]
         .0
 }
 

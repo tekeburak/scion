@@ -7,7 +7,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use async_trait::async_trait;
 use bytes::Bytes;
 use proptest::prelude::*;
-use scion_store::{MemoryStore, MetadataStore, ObjectStore, RefState};
+use scion_store::{DerivedPointer, MemoryStore, MetadataStore, ObjectStore, RefState};
 use scion_types::{
     BlobId, Changeset, ChangesetId, FileChange, FileType, Identity, RepoPath, Timestamp, Tree,
     TreeEntry, TreeId,
@@ -160,8 +160,8 @@ impl<'a> CountingMeta<'a> {
 
 #[async_trait]
 impl MetadataStore for CountingMeta<'_> {
-    async fn put_changeset(&self, cs: &Changeset) -> scion_store::Result<ChangesetId> {
-        self.inner.put_changeset(cs).await
+    async fn put_changesets(&self, batch: &[Changeset]) -> scion_store::Result<()> {
+        self.inner.put_changesets(batch).await
     }
     async fn get_changeset(
         &self,
@@ -199,15 +199,12 @@ impl MetadataStore for CountingMeta<'_> {
     async fn list_refs(&self, repo: &str) -> scion_store::Result<Vec<(String, RefState)>> {
         self.inner.list_refs(repo).await
     }
-    async fn put_derived(
+    async fn put_derived_many(
         &self,
         repo: &str,
-        ty: &str,
-        version: u32,
-        cs: ChangesetId,
-        pointer: Vec<u8>,
+        pointers: Vec<DerivedPointer>,
     ) -> scion_store::Result<()> {
-        self.inner.put_derived(repo, ty, version, cs, pointer).await
+        self.inner.put_derived_many(repo, pointers).await
     }
     async fn get_derived(
         &self,
@@ -219,13 +216,12 @@ impl MetadataStore for CountingMeta<'_> {
         self.derived_reads.fetch_add(1, Ordering::Relaxed);
         self.inner.get_derived(repo, ty, version, cs).await
     }
-    async fn put_ingest_checkpoint(
+    async fn put_ingest_checkpoints(
         &self,
         repo: &str,
-        git_sha: &[u8],
-        cs: ChangesetId,
+        done: &[(Vec<u8>, ChangesetId)],
     ) -> scion_store::Result<()> {
-        self.inner.put_ingest_checkpoint(repo, git_sha, cs).await
+        self.inner.put_ingest_checkpoints(repo, done).await
     }
     async fn ingest_checkpoints(
         &self,

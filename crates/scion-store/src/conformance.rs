@@ -73,6 +73,24 @@ pub async fn changesets<S: MetadataStore>(s: &S) {
     assert!(
         matches!(s.put_changeset(&orphan).await, Err(StoreError::UnknownParent(_, p)) if p == unknown)
     );
+
+    // A batch may name parents earlier in it and repeat stored changesets.
+    let a = changeset(vec![child_id], "batch a");
+    let b = changeset(vec![a.id()], "batch b");
+    let merge = changeset(vec![b.id(), root_id], "batch merge");
+    s.put_changesets(&[child, a, b.clone(), merge.clone()])
+        .await
+        .unwrap();
+    assert_eq!(s.generation(REPO, b.id()).await.unwrap(), Some(3));
+    assert_eq!(s.generation(REPO, merge.id()).await.unwrap(), Some(4));
+    assert_eq!(
+        s.get_changeset(REPO, merge.id()).await.unwrap().as_ref(),
+        Some(&merge)
+    );
+    assert!(matches!(
+        s.put_changesets(&[changeset(vec![unknown], "batched orphan")]).await,
+        Err(StoreError::UnknownParent(_, p)) if p == unknown
+    ));
 }
 
 /// Refs: policy, create-once, CAS semantics, listing.
@@ -138,6 +156,24 @@ pub async fn derived<S: MetadataStore>(s: &S) {
         s.get_derived(REPO, "root_tree", 1, cs).await.unwrap(),
         Some(vec![9, 9])
     );
+    let other = ChangesetId::from_bytes([4; 32]);
+    s.put_derived_many(
+        REPO,
+        vec![
+            ("root_tree".into(), 1, other, vec![1]),
+            ("skip_list".into(), 1, other, vec![2]),
+        ],
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        s.get_derived(REPO, "skip_list", 1, other).await.unwrap(),
+        Some(vec![2])
+    );
+    assert_eq!(
+        s.get_derived(REPO, "root_tree", 1, other).await.unwrap(),
+        Some(vec![1])
+    );
     assert!(
         s.get_derived(REPO, "root_tree", 2, cs)
             .await
@@ -159,9 +195,12 @@ pub async fn checkpoints<S: MetadataStore>(s: &S) {
         ChangesetId::from_bytes([1; 32]),
         ChangesetId::from_bytes([2; 32]),
     );
-    s.put_ingest_checkpoint(REPO, &[0xaa; 20], a).await.unwrap();
-    s.put_ingest_checkpoint(REPO, &[0xbb; 20], b).await.unwrap();
-    s.put_ingest_checkpoint(REPO, &[0xaa; 20], b).await.unwrap();
+    s.put_ingest_checkpoints(REPO, &[(vec![0xaa; 20], a), (vec![0xbb; 20], b)])
+        .await
+        .unwrap();
+    s.put_ingest_checkpoints(REPO, &[(vec![0xaa; 20], b)])
+        .await
+        .unwrap();
     assert_eq!(
         s.ingest_checkpoints(REPO).await.unwrap(),
         vec![(vec![0xaa; 20], a), (vec![0xbb; 20], b)]

@@ -17,6 +17,7 @@ use scion_store::{MetadataStore, ObjectStore, StoreError, is_allowed_ref_name};
 use scion_types::{BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, RepoPath, TreeId};
 use tonic::{Request, Response, Status};
 
+use crate::staged::Staged;
 use crate::store_status;
 
 /// Most changesets a single `Log` or `PathLog` call returns; larger limits are
@@ -131,23 +132,35 @@ fn diff_entry(e: scion_core::DiffEntry) -> DiffEntry {
     }
 }
 
-/// Store `cs` and derive what clone, log and diff need, as `CreateChangeset`
-/// does; returns its id and root tree. Shared with the git importer, which
-/// creates changesets on the stores directly.
-pub async fn create_changeset(
+/// Store `batch`, in order, and derive what clone, log and diff need, as
+/// `CreateChangeset` does for one changeset; returns each id and root tree.
+/// Shared with the git importer, which creates changesets on the stores
+/// directly. The changesets are stored in one call; their derived objects
+/// are then written concurrently and their pointers in one more call, so a
+/// batch costs a few round trips however many changesets it holds.
+pub async fn create_changesets(
     meta: &dyn MetadataStore,
     objects: &dyn ObjectStore,
-    cs: &Changeset,
-) -> Result<(ChangesetId, TreeId), Status> {
-    if cs.repo.is_empty() {
+    batch: &[Changeset],
+) -> Result<Vec<(ChangesetId, TreeId)>, Status> {
+    let Some(repo) = batch.first().map(|cs| cs.repo.as_str()) else {
+        return Ok(Vec::new());
+    };
+    if repo.is_empty() {
         return Err(Status::invalid_argument("changeset names no repository"));
+    }
+    if let Some(cs) = batch.iter().find(|cs| cs.repo != repo) {
+        return Err(Status::invalid_argument(format!(
+            "a batch spans repositories {repo:?} and {:?}",
+            cs.repo
+        )));
     }
 
     // Every blob must be uploaded first, or blame and checkout would find
     // a hole later.
-    let blobs: Vec<BlobId> = cs
-        .file_changes
-        .values()
+    let blobs: Vec<BlobId> = batch
+        .iter()
+        .flat_map(|cs| cs.file_changes.values())
         .filter_map(|change| match change {
             FileChange::Tracked { content, .. } => Some(*content),
             FileChange::Deleted => None,
@@ -167,7 +180,7 @@ pub async fn create_changeset(
         )));
     }
 
-    let id = meta.put_changeset(cs).await.map_err(|e| match e {
+    meta.put_changesets(batch).await.map_err(|e| match e {
         StoreError::UnknownParent(_, parent) => {
             Status::failed_precondition(format!("unknown parent {parent}"))
         }
@@ -177,11 +190,18 @@ pub async fn create_changeset(
     // Eager derivation: what clone, log and diff need right away. Each
     // costs O(size of the change) given the parents' values. Blame stays
     // lazy; it reads file contents and is only wanted for some paths.
-    let ctx = Deriver::new(&cs.repo, meta, objects);
-    let root = ctx.derive::<RootTree>(id).await.map_err(derive_status)?;
-    ctx.derive::<SkipList>(id).await.map_err(derive_status)?;
-    ctx.derive::<PathHistory>(id).await.map_err(derive_status)?;
-    Ok((id, root.0))
+    let staged = Staged::new(repo, meta, objects);
+    let ctx = Deriver::new(repo, &staged, &staged);
+    let mut created = Vec::with_capacity(batch.len());
+    for cs in batch {
+        let id = cs.id();
+        let root = ctx.derive::<RootTree>(id).await.map_err(derive_status)?;
+        ctx.derive::<SkipList>(id).await.map_err(derive_status)?;
+        ctx.derive::<PathHistory>(id).await.map_err(derive_status)?;
+        created.push((id, root.0));
+    }
+    staged.store().await.map_err(store_status)?;
+    Ok(created)
 }
 
 /// Create server ref `name` at `target` (`expected` absent) or move it there
@@ -271,7 +291,10 @@ impl ControlService for ControlServer {
     ) -> Result<Response<CreateChangesetResponse>, Status> {
         let cs = Changeset::decode(&request.get_ref().changeset)
             .map_err(|e| Status::invalid_argument(format!("changeset: {e}")))?;
-        let (id, root) = create_changeset(&*self.meta, &*self.objects, &cs).await?;
+        let [(id, root)] = create_changesets(&*self.meta, &*self.objects, &[cs])
+            .await?
+            .try_into()
+            .expect("one changeset in, one out");
         Ok(Response::new(CreateChangesetResponse {
             id: id.as_bytes().to_vec(),
             root_tree: root.as_bytes().to_vec(),

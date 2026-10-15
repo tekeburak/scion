@@ -22,7 +22,7 @@ use object_store::{
     ObjectStore as Backend, PutMultipartOptions, PutOptions, PutPayload, PutResult,
 };
 use scion_ingest::{GitRepo, import};
-use scion_store::{MemoryStore, MetadataStore, ObjectStorage, RefState};
+use scion_store::{DerivedPointer, MemoryStore, MetadataStore, ObjectStorage, RefState};
 use scion_types::{Changeset, ChangesetId};
 
 const REPO: &str = "trips";
@@ -30,15 +30,16 @@ const COMMITS: usize = 600;
 /// Commits per measured window.
 const WINDOW: usize = 100;
 /// Object-store requests one single-file commit at depth 2 costs: one
-/// presence check and one upload for its blob, then a tree and a path-history
-/// node for each of the two directories on its path. Re-reading what the
-/// parent wrote, and checking the blob again on create, are free.
-const MAX_OBJECT_REQUESTS: usize = 6;
-/// Metadata-store calls one commit may cost: the changeset, three derived
-/// pointers and a checkpoint, the reads that find them absent, the parent's
-/// values and the skip list's log-many ancestors. Postgres answers the
-/// write-once ones from memory, so this bounds its round trips from above.
-const MAX_METADATA_CALLS: usize = 40;
+/// presence check and one upload for its blob, a tree for each of the two
+/// directories on its path, and one page of path-history nodes. Re-reading
+/// what the parent wrote, and checking the blob again on create, are free.
+const MAX_OBJECT_REQUESTS: usize = 5;
+/// Metadata-store calls one commit may cost, the batch's shared calls
+/// (changesets, derived pointers, checkpoints) included: the reads that find
+/// its derived values absent, its changeset, the parent's values and the skip
+/// list's log-many ancestors. Postgres answers the write-once ones from
+/// memory, so this bounds its round trips from above.
+const MAX_METADATA_CALLS: usize = 20;
 
 /// A linear history where commit `i` rewrites one of 500 files in 20
 /// directories, written with `git fast-import`.
@@ -152,9 +153,9 @@ impl CountingMeta {
 
 #[async_trait]
 impl MetadataStore for CountingMeta {
-    async fn put_changeset(&self, cs: &Changeset) -> scion_store::Result<ChangesetId> {
+    async fn put_changesets(&self, batch: &[Changeset]) -> scion_store::Result<()> {
         self.tick();
-        self.inner.put_changeset(cs).await
+        self.inner.put_changesets(batch).await
     }
     async fn get_changeset(
         &self,
@@ -197,16 +198,13 @@ impl MetadataStore for CountingMeta {
         self.tick();
         self.inner.list_refs(repo).await
     }
-    async fn put_derived(
+    async fn put_derived_many(
         &self,
         repo: &str,
-        ty: &str,
-        version: u32,
-        cs: ChangesetId,
-        pointer: Vec<u8>,
+        pointers: Vec<DerivedPointer>,
     ) -> scion_store::Result<()> {
         self.tick();
-        self.inner.put_derived(repo, ty, version, cs, pointer).await
+        self.inner.put_derived_many(repo, pointers).await
     }
     async fn get_derived(
         &self,
@@ -218,14 +216,13 @@ impl MetadataStore for CountingMeta {
         self.tick();
         self.inner.get_derived(repo, ty, version, cs).await
     }
-    async fn put_ingest_checkpoint(
+    async fn put_ingest_checkpoints(
         &self,
         repo: &str,
-        git_sha: &[u8],
-        cs: ChangesetId,
+        done: &[(Vec<u8>, ChangesetId)],
     ) -> scion_store::Result<()> {
         self.tick();
-        self.inner.put_ingest_checkpoint(repo, git_sha, cs).await
+        self.inner.put_ingest_checkpoints(repo, done).await
     }
     async fn ingest_checkpoints(
         &self,

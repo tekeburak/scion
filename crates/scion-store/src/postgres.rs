@@ -15,7 +15,7 @@ use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
 use sqlx::{Executor, Postgres};
 
 use crate::recent::Recent;
-use crate::{MetadataStore, RefState, Result, StoreError, is_allowed_ref_name};
+use crate::{DerivedPointer, MetadataStore, RefState, Result, StoreError, is_allowed_ref_name};
 
 /// Embedded migrations from the repository's `migrations/` directory.
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
@@ -131,35 +131,128 @@ impl PostgresStore {
     }
 }
 
-/// Insert every file change of `cs` (stored as `id` in repository `repo`).
-async fn insert_file_changes(
+/// Most changeset rows in one `INSERT`, well under Postgres' 65,535 bind
+/// parameters at 15 per row.
+const CHANGESET_ROWS_PER_INSERT: usize = 1000;
+
+/// A changeset row to insert: repository id, changeset id, generation, the
+/// changeset and its canonical encoding.
+type ChangesetRow<'a> = (i64, ChangesetId, i64, &'a Changeset, Vec<u8>);
+
+/// Insert `rows` into `changesets`, and every one of their file changes into
+/// `file_changes`.
+async fn insert_changesets(
     tx: &mut sqlx::Transaction<'_, Postgres>,
-    repo: i64,
-    id: ChangesetId,
-    cs: &Changeset,
+    rows: &[ChangesetRow<'_>],
 ) -> Result<()> {
-    // One statement for every file change: an imported root commit
-    // touches thousands of paths, and a round trip each would dominate.
-    let n = cs.file_changes.len();
-    let (mut paths, mut kinds, mut blobs, mut ftypes, mut sizes, mut cf_paths, mut cf_css) = (
-        Vec::with_capacity(n),
-        Vec::with_capacity(n),
-        Vec::with_capacity(n),
-        Vec::with_capacity(n),
-        Vec::with_capacity(n),
-        Vec::with_capacity(n),
-        Vec::with_capacity(n),
-    );
-    for (path, change) in &cs.file_changes {
-        paths.push(path.as_str());
+    for chunk in rows.chunks(CHANGESET_ROWS_PER_INSERT) {
+        let mut insert = sqlx::QueryBuilder::<Postgres>::new(
+            "INSERT INTO changesets (repo, id, parents, first_parent, author_name, author_email, \
+             author_date, author_tz, committer_name, committer_email, committer_date, \
+             committer_tz, message, generation, canonical) ",
+        );
+        insert.push_values(chunk, |mut row, (repo, id, generation, cs, canonical)| {
+            let parents: Vec<Vec<u8>> = cs.parents.iter().map(|p| p.as_bytes().to_vec()).collect();
+            row.push_bind(*repo)
+                .push_bind(id.as_bytes().to_vec())
+                .push_bind(parents)
+                .push_bind(cs.first_parent().map(|p| p.as_bytes().to_vec()))
+                .push_bind(cs.author.name.clone())
+                .push_bind(cs.author.email.clone())
+                .push_bind(cs.author_date.unix_secs)
+                .push_bind(cs.author_date.tz_offset_minutes)
+                .push_bind(cs.committer.as_ref().map(|c| c.name.clone()))
+                .push_bind(cs.committer.as_ref().map(|c| c.email.clone()))
+                .push_bind(cs.committer_date.map(|t| t.unix_secs))
+                .push_bind(cs.committer_date.map(|t| t.tz_offset_minutes))
+                .push_bind(cs.message.clone())
+                .push_bind(*generation)
+                .push_bind(canonical.clone());
+        });
+        insert.build().execute(&mut **tx).await?;
+    }
+
+    // One statement for every file change of the batch: an imported root
+    // commit touches thousands of paths, and a round trip each would dominate.
+    let n = rows
+        .iter()
+        .map(|(_, _, _, cs, _)| cs.file_changes.len())
+        .sum();
+    if n == 0 {
+        return Ok(());
+    }
+    let mut cols = FileChangeColumns::with_capacity(n);
+    for (repo, id, _, cs, _) in rows {
+        for (path, change) in &cs.file_changes {
+            cols.push(*repo, *id, path.as_str(), change)?;
+        }
+    }
+    sqlx::query(
+        "INSERT INTO file_changes (repo, changeset_id, path, change_kind, blob_id, file_type, \
+         size, copy_from_path, copy_from_cs) \
+         SELECT * FROM UNNEST($1::bigint[], $2::bytea[], $3::text[], $4::smallint[], \
+         $5::bytea[], $6::smallint[], $7::bigint[], $8::text[], $9::bytea[])",
+    )
+    .bind(&cols.repos)
+    .bind(&cols.changesets)
+    .bind(&cols.paths)
+    .bind(&cols.kinds)
+    .bind(&cols.blobs)
+    .bind(&cols.ftypes)
+    .bind(&cols.sizes)
+    .bind(&cols.cf_paths)
+    .bind(&cols.cf_css)
+    .execute(&mut **tx)
+    .await?;
+    Ok(())
+}
+
+/// `file_changes` rows as one array per column, for `UNNEST`.
+struct FileChangeColumns<'a> {
+    repos: Vec<i64>,
+    changesets: Vec<Vec<u8>>,
+    paths: Vec<&'a str>,
+    kinds: Vec<i16>,
+    blobs: Vec<Option<Vec<u8>>>,
+    ftypes: Vec<Option<i16>>,
+    sizes: Vec<Option<i64>>,
+    cf_paths: Vec<Option<&'a str>>,
+    cf_css: Vec<Option<Vec<u8>>>,
+}
+
+impl<'a> FileChangeColumns<'a> {
+    fn with_capacity(n: usize) -> Self {
+        Self {
+            repos: Vec::with_capacity(n),
+            changesets: Vec::with_capacity(n),
+            paths: Vec::with_capacity(n),
+            kinds: Vec::with_capacity(n),
+            blobs: Vec::with_capacity(n),
+            ftypes: Vec::with_capacity(n),
+            sizes: Vec::with_capacity(n),
+            cf_paths: Vec::with_capacity(n),
+            cf_css: Vec::with_capacity(n),
+        }
+    }
+
+    fn push(
+        &mut self,
+        repo: i64,
+        cs: ChangesetId,
+        path: &'a str,
+        change: &'a FileChange,
+    ) -> Result<()> {
+        self.repos.push(repo);
+        self.changesets.push(cs.as_bytes().to_vec());
+        self.paths.push(path);
         match change {
             FileChange::Deleted => {
-                kinds.push(0i16);
-                blobs.push(None);
-                ftypes.push(None);
-                sizes.push(None);
-                cf_paths.push(None);
-                cf_css.push(None);
+                self.kinds.push(0);
+                self.blobs.push(None);
+                self.ftypes.push(None);
+                self.sizes.push(None);
+                self.cf_paths.push(None);
+                self.cf_css.push(None);
             }
             FileChange::Tracked {
                 content,
@@ -167,103 +260,87 @@ async fn insert_file_changes(
                 size,
                 copy_from,
             } => {
-                kinds.push(1i16);
-                blobs.push(Some(content.as_bytes().to_vec()));
-                ftypes.push(Some(i16::from(kind.tag())));
-                sizes.push(Some(to_i64(*size)?));
-                cf_paths.push(copy_from.as_ref().map(|(p, _)| p.as_str()));
-                cf_css.push(copy_from.as_ref().map(|(_, c)| c.as_bytes().to_vec()));
+                self.kinds.push(1);
+                self.blobs.push(Some(content.as_bytes().to_vec()));
+                self.ftypes.push(Some(i16::from(kind.tag())));
+                self.sizes.push(Some(to_i64(*size)?));
+                self.cf_paths
+                    .push(copy_from.as_ref().map(|(p, _)| p.as_str()));
+                self.cf_css
+                    .push(copy_from.as_ref().map(|(_, c)| c.as_bytes().to_vec()));
             }
         }
+        Ok(())
     }
-    if n > 0 {
-        sqlx::query(
-            "INSERT INTO file_changes (repo, changeset_id, path, change_kind, blob_id, file_type, \
-             size, copy_from_path, copy_from_cs) \
-             SELECT $1, $2, * FROM UNNEST($3::text[], $4::smallint[], $5::bytea[], \
-             $6::smallint[], $7::bigint[], $8::text[], $9::bytea[])",
-        )
-        .bind(repo)
-        .bind(id.as_bytes().as_slice())
-        .bind(&paths)
-        .bind(&kinds)
-        .bind(&blobs)
-        .bind(&ftypes)
-        .bind(&sizes)
-        .bind(&cf_paths)
-        .bind(&cf_css)
-        .execute(&mut **tx)
-        .await?;
-    }
-    Ok(())
 }
 
 #[async_trait]
 impl MetadataStore for PostgresStore {
-    async fn put_changeset(&self, cs: &Changeset) -> Result<ChangesetId> {
-        let id = cs.id();
-        let canonical = cs.encode_to_vec();
-        let repo = self.ensure_repo(&cs.repo).await?;
-        let mut tx = self.pool.begin().await?;
+    async fn put_changesets(&self, batch: &[Changeset]) -> Result<()> {
+        let mut repos: HashMap<&str, i64> = HashMap::new();
+        for cs in batch {
+            if !repos.contains_key(cs.repo.as_str()) {
+                repos.insert(&cs.repo, self.ensure_repo(&cs.repo).await?);
+            }
+        }
+        let ids: Vec<(i64, ChangesetId)> = batch
+            .iter()
+            .map(|cs| (repos[cs.repo.as_str()], cs.id()))
+            .collect();
 
-        let exists: Option<(i32,)> =
-            sqlx::query_as("SELECT 1 FROM changesets WHERE repo = $1 AND id = $2")
-                .bind(repo)
-                .bind(id.as_bytes().as_slice())
-                .fetch_optional(&mut *tx)
-                .await?;
-        if exists.is_some() {
-            tx.rollback().await?;
-            return Ok(id);
+        let mut tx = self.pool.begin().await?;
+        // One read finds which changesets are already stored and the
+        // generation of every parent outside the batch.
+        let (mut key_repos, mut key_ids) = (Vec::new(), Vec::new());
+        for (cs, (repo, id)) in batch.iter().zip(&ids) {
+            for key in std::iter::once(id).chain(&cs.parents) {
+                key_repos.push(*repo);
+                key_ids.push(key.as_bytes().to_vec());
+            }
+        }
+        let known: Vec<(i64, Vec<u8>, i64)> = sqlx::query_as(
+            "SELECT c.repo, c.id, c.generation FROM changesets c \
+             JOIN UNNEST($1::bigint[], $2::bytea[]) AS k(repo, id) \
+             ON c.repo = k.repo AND c.id = k.id",
+        )
+        .bind(&key_repos)
+        .bind(&key_ids)
+        .fetch_all(&mut *tx)
+        .await?;
+        let mut generations: HashMap<(i64, ChangesetId), i64> = HashMap::new();
+        for (repo, id, generation) in known {
+            let id = ChangesetId::try_from_slice(&id)
+                .map_err(|e| StoreError::Corrupt(format!("changeset id: {e}")))?;
+            generations.insert((repo, id), generation);
         }
 
         // Generation = max(parent generation) + 1; every parent must exist.
-        let parent_bytes: Vec<Vec<u8>> = cs.parents.iter().map(|p| p.as_bytes().to_vec()).collect();
-        let rows: Vec<(Vec<u8>, i64)> = sqlx::query_as(
-            "SELECT id, generation FROM changesets WHERE repo = $1 AND id = ANY($2)",
-        )
-        .bind(repo)
-        .bind(&parent_bytes)
-        .fetch_all(&mut *tx)
-        .await?;
-        let gens: HashMap<Vec<u8>, i64> = rows.into_iter().collect();
-        let mut generation = 0i64;
-        for p in &cs.parents {
-            match gens.get(p.as_bytes().as_slice()) {
-                Some(g) => generation = generation.max(g + 1),
-                None => return Err(StoreError::UnknownParent(id, *p)),
+        let mut rows = Vec::new();
+        for (cs, &(repo, id)) in batch.iter().zip(&ids) {
+            if generations.contains_key(&(repo, id)) {
+                continue;
             }
+            let mut generation = 0i64;
+            for p in &cs.parents {
+                match generations.get(&(repo, *p)) {
+                    Some(g) => generation = generation.max(g + 1),
+                    None => return Err(StoreError::UnknownParent(id, *p)),
+                }
+            }
+            generations.insert((repo, id), generation);
+            rows.push((repo, id, generation, cs, cs.encode_to_vec()));
         }
-
-        sqlx::query(
-            "INSERT INTO changesets (repo, id, parents, first_parent, author_name, author_email, \
-             author_date, author_tz, committer_name, committer_email, committer_date, committer_tz, \
-             message, generation, canonical) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
-        )
-        .bind(repo)
-        .bind(id.as_bytes().as_slice())
-        .bind(&parent_bytes)
-        .bind(cs.first_parent().map(|p| p.as_bytes().to_vec()))
-        .bind(&cs.author.name)
-        .bind(&cs.author.email)
-        .bind(cs.author_date.unix_secs)
-        .bind(cs.author_date.tz_offset_minutes)
-        .bind(cs.committer.as_ref().map(|c| &c.name))
-        .bind(cs.committer.as_ref().map(|c| &c.email))
-        .bind(cs.committer_date.map(|t| t.unix_secs))
-        .bind(cs.committer_date.map(|t| t.tz_offset_minutes))
-        .bind(&cs.message)
-        .bind(generation)
-        .bind(&canonical)
-        .execute(&mut *tx)
-        .await?;
-
-        insert_file_changes(&mut tx, repo, id, cs).await?;
+        if rows.is_empty() {
+            tx.rollback().await?;
+            return Ok(());
+        }
+        insert_changesets(&mut tx, &rows).await?;
         tx.commit().await?;
-        self.changesets
-            .insert((cs.repo.clone(), id), cs.clone(), canonical.len());
-        Ok(id)
+        for (_, id, _, cs, canonical) in rows {
+            self.changesets
+                .insert((cs.repo.clone(), id), cs.clone(), canonical.len());
+        }
+        Ok(())
     }
 
     async fn get_changeset(&self, repo: &str, id: ChangesetId) -> Result<Option<Changeset>> {
@@ -402,37 +479,43 @@ impl MetadataStore for PostgresStore {
             .collect()
     }
 
-    async fn put_derived(
-        &self,
-        repo: &str,
-        ty: &str,
-        version: u32,
-        cs: ChangesetId,
-        pointer: Vec<u8>,
-    ) -> Result<()> {
+    async fn put_derived_many(&self, repo: &str, pointers: Vec<DerivedPointer>) -> Result<()> {
+        if pointers.is_empty() {
+            return Ok(());
+        }
         let repo_id = self.ensure_repo(repo).await?;
+        let mut types = Vec::with_capacity(pointers.len());
+        let mut versions = Vec::with_capacity(pointers.len());
+        let mut css = Vec::with_capacity(pointers.len());
+        let mut values = Vec::with_capacity(pointers.len());
+        for (ty, version, cs, pointer) in &pointers {
+            types.push(ty.as_str());
+            versions.push(
+                i32::try_from(*version)
+                    .map_err(|_| StoreError::Corrupt("derived version overflow".into()))?,
+            );
+            css.push(cs.as_bytes().to_vec());
+            values.push(pointer.as_slice());
+        }
         sqlx::query(
             "INSERT INTO derived (repo, type, version, changeset_id, pointer) \
-             VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
+             SELECT $1, * FROM UNNEST($2::text[], $3::int[], $4::bytea[], $5::bytea[]) \
+             ON CONFLICT DO NOTHING",
         )
         .bind(repo_id)
-        .bind(ty)
-        .bind(
-            i32::try_from(version)
-                .map_err(|_| StoreError::Corrupt("derived version overflow".into()))?,
-        )
-        .bind(cs.as_bytes().as_slice())
-        .bind(&pointer)
+        .bind(&types)
+        .bind(&versions)
+        .bind(&css)
+        .bind(&values)
         .execute(&self.pool)
         .await?;
         // A conflicting insert kept the first pointer; both are the same
         // value of a deterministic derivation, so either may be memoised.
-        let weight = pointer.len() + ty.len() + repo.len() + 40;
-        self.derived.insert(
-            (repo.to_owned(), ty.to_owned(), version, cs),
-            pointer,
-            weight,
-        );
+        for (ty, version, cs, pointer) in pointers {
+            let weight = pointer.len() + ty.len() + repo.len() + 40;
+            self.derived
+                .insert((repo.to_owned(), ty, version, cs), pointer, weight);
+        }
         Ok(())
     }
 
@@ -467,20 +550,27 @@ impl MetadataStore for PostgresStore {
         Ok(row.map(|(p,)| p))
     }
 
-    async fn put_ingest_checkpoint(
+    async fn put_ingest_checkpoints(
         &self,
         repo: &str,
-        git_sha: &[u8],
-        cs: ChangesetId,
+        done: &[(Vec<u8>, ChangesetId)],
     ) -> Result<()> {
+        if done.is_empty() {
+            return Ok(());
+        }
         let repo_id = self.ensure_repo(repo).await?;
+        let shas: Vec<&[u8]> = done.iter().map(|(sha, _)| sha.as_slice()).collect();
+        let css: Vec<&[u8]> = done
+            .iter()
+            .map(|(_, cs)| cs.as_bytes().as_slice())
+            .collect();
         sqlx::query(
             "INSERT INTO ingest_checkpoints (repo, git_sha, changeset_id) \
-             VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+             SELECT $1, * FROM UNNEST($2::bytea[], $3::bytea[]) ON CONFLICT DO NOTHING",
         )
         .bind(repo_id)
-        .bind(git_sha)
-        .bind(cs.as_bytes().as_slice())
+        .bind(&shas)
+        .bind(&css)
         .execute(&self.pool)
         .await?;
         Ok(())

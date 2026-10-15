@@ -235,7 +235,7 @@ async fn file_at(
     };
     let history = ctx.derive::<PathHistory>(at).await?;
     let Some(HistoryEntry::File { last_changed }) = history.lookup(ctx.objects, path).await? else {
-        return Err(DeriveError::CorruptObject(history.0));
+        return Err(DeriveError::CorruptObject(history.0.page));
     };
     let blame = ctx.derive::<Blame>(last_changed).await?;
     let node = BlameNode::load(ctx.objects, blame.0).await?;

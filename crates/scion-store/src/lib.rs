@@ -57,12 +57,22 @@ pub enum StoreError {
 /// Result alias for store operations.
 pub type Result<T> = std::result::Result<T, StoreError>;
 
+/// One derived-data pointer of a repository: `(type, version, changeset,
+/// pointer)`.
+pub type DerivedPointer = (String, u32, ChangesetId, Vec<u8>);
+
 /// Changesets, refs and derived-data pointers.
 #[async_trait]
 pub trait MetadataStore: Send + Sync {
-    /// Store a changeset. Idempotent: storing the same changeset twice is a
-    /// no-op that returns the same id. All parents must already exist.
-    async fn put_changeset(&self, cs: &Changeset) -> Result<ChangesetId>;
+    /// Store changesets in order. Idempotent: storing a changeset again is a
+    /// no-op. Every parent must already exist or come earlier in `batch`.
+    async fn put_changesets(&self, batch: &[Changeset]) -> Result<()>;
+
+    /// Store one changeset; see [`put_changesets`](Self::put_changesets).
+    async fn put_changeset(&self, cs: &Changeset) -> Result<ChangesetId> {
+        self.put_changesets(std::slice::from_ref(cs)).await?;
+        Ok(cs.id())
+    }
 
     /// Fetch a changeset by id.
     async fn get_changeset(&self, repo: &str, id: ChangesetId) -> Result<Option<Changeset>>;
@@ -89,7 +99,11 @@ pub trait MetadataStore: Send + Sync {
     /// All refs of a repository, sorted by name.
     async fn list_refs(&self, repo: &str) -> Result<Vec<(String, RefState)>>;
 
-    /// Record a derived-data pointer. Idempotent.
+    /// Record derived-data pointers of `repo`. Idempotent.
+    async fn put_derived_many(&self, repo: &str, pointers: Vec<DerivedPointer>) -> Result<()>;
+
+    /// Record one derived-data pointer; see
+    /// [`put_derived_many`](Self::put_derived_many).
     async fn put_derived(
         &self,
         repo: &str,
@@ -97,7 +111,10 @@ pub trait MetadataStore: Send + Sync {
         version: u32,
         cs: ChangesetId,
         pointer: Vec<u8>,
-    ) -> Result<()>;
+    ) -> Result<()> {
+        self.put_derived_many(repo, vec![(ty.to_owned(), version, cs, pointer)])
+            .await
+    }
 
     /// Read a derived-data pointer.
     async fn get_derived(
@@ -108,12 +125,12 @@ pub trait MetadataStore: Send + Sync {
         cs: ChangesetId,
     ) -> Result<Option<Vec<u8>>>;
 
-    /// Record that git commit `git_sha` was imported as `cs`. Idempotent.
-    async fn put_ingest_checkpoint(
+    /// Record that each git commit `(git_sha, cs)` was imported as `cs`.
+    /// Idempotent: the first record of a sha wins.
+    async fn put_ingest_checkpoints(
         &self,
         repo: &str,
-        git_sha: &[u8],
-        cs: ChangesetId,
+        done: &[(Vec<u8>, ChangesetId)],
     ) -> Result<()>;
 
     /// Every git commit imported into `repo` so far, with its changeset.

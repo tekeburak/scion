@@ -3,13 +3,20 @@
 //! The structure mirrors the root tree: a history node per directory, with
 //! one entry per tree entry recording `last_changed` — the most recent
 //! first-parent ancestor (inclusive) in which that file's content, or
-//! anything beneath that directory, differed. Nodes are stored as blobs.
+//! anything beneath that directory, differed.
 //!
 //! Derivation is driven by the *diff* between the changeset's root tree and
 //! its first parent's root tree: subtrees with equal ids reuse the parent's
-//! history node pointer unchanged, so only nodes on actually-changed paths are
+//! history node unchanged, so only nodes on actually-changed paths are
 //! rewritten. No-op changes (deleting a file that does not exist) therefore
 //! leave the history untouched, because they leave the tree untouched.
+//!
+//! The nodes one changeset rewrites are stored together, children before
+//! parents, in pages of about `PAGE_BYTES`: one blob per page, so a
+//! one-file change writes one object however deep the file is. A node is
+//! named by its page and its index there ([`NodeAt`]); a node refers to a
+//! child in its own page by index alone, since the page's id is not known
+//! while it is being written.
 //!
 //! "Which changesets touched `path`?" is answered by repeatedly looking up
 //! `path` in the history of `first_parent(last_changed)`; each hop costs one
@@ -30,9 +37,20 @@ use scion_types::{
 use crate::root_tree::WRITE_CONCURRENCY;
 use crate::{Derivable, DeriveError, Deriver, Result, RootTree};
 
+/// A page is closed once its nodes' encodings reach this many bytes. Small
+/// enough that a page stays in the object store's memo of small blobs.
+const PAGE_BYTES: usize = 16 << 10;
+
+/// A stored history node: the page (blob) holding it and its index there.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct NodeAt {
+    pub page: BlobId,
+    pub index: u32,
+}
+
 /// The root history node of a changeset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct PathHistory(pub BlobId);
+pub struct PathHistory(pub NodeAt);
 
 /// History of one tree entry.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,7 +60,7 @@ pub enum HistoryEntry {
     },
     Dir {
         last_changed: ChangesetId,
-        node: BlobId,
+        node: NodeAt,
     },
 }
 
@@ -62,64 +80,181 @@ pub struct HistoryNode {
     pub entries: BTreeMap<PathComponent, HistoryEntry>,
 }
 
+/// An entry as written in a page: a child directory in the same page is
+/// named by its index alone.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PageEntry {
+    Stored(HistoryEntry),
+    Here {
+        last_changed: ChangesetId,
+        index: u32,
+    },
+}
+
+type PageNode = BTreeMap<PathComponent, PageEntry>;
+
 const ENTRY_FILE: u8 = 0;
 const ENTRY_DIR: u8 = 1;
+const ENTRY_DIR_HERE: u8 = 2;
 
-impl HistoryNode {
-    fn encode(&self) -> Vec<u8> {
-        let mut w = Writer::new();
-        w.seq(self.entries.iter(), |w, (name, entry)| {
+fn encode_page(nodes: &[PageNode]) -> Vec<u8> {
+    let mut w = Writer::new();
+    w.seq(nodes.iter(), |w, node| {
+        w.seq(node.iter(), |w, (name, entry)| {
             w.str(name.as_str());
             match entry {
-                HistoryEntry::File { last_changed } => {
+                PageEntry::Stored(HistoryEntry::File { last_changed }) => {
                     w.u8(ENTRY_FILE);
                     w.id(last_changed.as_bytes());
                 }
-                HistoryEntry::Dir { last_changed, node } => {
+                PageEntry::Stored(HistoryEntry::Dir { last_changed, node }) => {
                     w.u8(ENTRY_DIR);
                     w.id(last_changed.as_bytes());
-                    w.id(node.as_bytes());
+                    w.id(node.page.as_bytes());
+                    w.u64(u64::from(node.index));
+                }
+                PageEntry::Here {
+                    last_changed,
+                    index,
+                } => {
+                    w.u8(ENTRY_DIR_HERE);
+                    w.id(last_changed.as_bytes());
+                    w.u64(u64::from(*index));
                 }
             }
         });
-        w.into_vec()
-    }
+    });
+    w.into_vec()
+}
 
-    fn decode(bytes: &[u8]) -> Option<Self> {
-        let mut r = Reader::new(bytes);
-        let n = r.seq_len().ok()?;
-        let mut entries = BTreeMap::new();
-        for _ in 0..n {
+/// Node `index` of the page `page` whose bytes are `bytes`.
+fn decode_node(bytes: &[u8], page: BlobId, index: u32) -> Option<HistoryNode> {
+    let mut r = Reader::new(bytes);
+    let n = r.seq_len().ok()?;
+    let mut wanted = None;
+    for i in 0..n {
+        let mut node = HistoryNode::default();
+        for _ in 0..r.seq_len().ok()? {
             let name = PathComponent::new(r.str().ok()?).ok()?;
-            let entry = match r.u8().ok()? {
-                ENTRY_FILE => HistoryEntry::File {
-                    last_changed: ChangesetId::from_bytes(r.id().ok()?),
-                },
+            let tag = r.u8().ok()?;
+            let last_changed = ChangesetId::from_bytes(r.id().ok()?);
+            let entry = match tag {
+                ENTRY_FILE => HistoryEntry::File { last_changed },
                 ENTRY_DIR => HistoryEntry::Dir {
-                    last_changed: ChangesetId::from_bytes(r.id().ok()?),
-                    node: BlobId::from_bytes(r.id().ok()?),
+                    last_changed,
+                    node: NodeAt {
+                        page: BlobId::from_bytes(r.id().ok()?),
+                        index: u32::try_from(r.u64().ok()?).ok()?,
+                    },
                 },
+                ENTRY_DIR_HERE => {
+                    let index = u32::try_from(r.u64().ok()?).ok()?;
+                    // Children come before their parent in a page.
+                    if u64::from(index) >= i {
+                        return None;
+                    }
+                    HistoryEntry::Dir {
+                        last_changed,
+                        node: NodeAt { page, index },
+                    }
+                }
                 _ => return None,
             };
-            entries.insert(name, entry);
+            node.entries.insert(name, entry);
         }
-        r.finish().ok()?;
-        Some(Self { entries })
+        if i == u64::from(index) {
+            wanted = Some(node);
+        }
+    }
+    r.finish().ok()?;
+    wanted
+}
+
+impl HistoryNode {
+    async fn load(objects: &dyn ObjectStore, at: NodeAt) -> Result<Self> {
+        let bytes = objects
+            .get_blob(at.page)
+            .await?
+            .ok_or(DeriveError::MissingObject(at.page))?;
+        decode_node(&bytes, at.page, at.index).ok_or(DeriveError::CorruptObject(at.page))
+    }
+}
+
+/// A node rewritten by the derivation in progress: already stored, or the
+/// `index`th node of page number `page`.
+#[derive(Debug, Clone, Copy)]
+enum Built {
+    Stored(NodeAt),
+    New { page: usize, index: u32 },
+}
+
+/// The pages one derivation writes, filled in order.
+#[derive(Default)]
+struct Pages {
+    closed: Vec<(BlobId, Bytes)>,
+    open: Vec<PageNode>,
+    open_bytes: usize,
+}
+
+impl Pages {
+    /// Append a node whose children are `entries`; returns where it is.
+    fn push(&mut self, entries: Vec<(PathComponent, ChangesetId, Option<Built>)>) -> Built {
+        let page = self.closed.len();
+        let mut node = PageNode::new();
+        for (name, last_changed, dir) in entries {
+            self.open_bytes += name.as_str().len() + 64;
+            let entry = match dir {
+                None => PageEntry::Stored(HistoryEntry::File { last_changed }),
+                Some(Built::Stored(at)) => PageEntry::Stored(HistoryEntry::Dir {
+                    last_changed,
+                    node: at,
+                }),
+                Some(Built::New { page: p, index }) if p == page => PageEntry::Here {
+                    last_changed,
+                    index,
+                },
+                Some(Built::New { page: p, index }) => PageEntry::Stored(HistoryEntry::Dir {
+                    last_changed,
+                    node: NodeAt {
+                        page: self.closed[p].0,
+                        index,
+                    },
+                }),
+            };
+            node.insert(name, entry);
+        }
+        let index = u32::try_from(self.open.len()).expect("a page holds fewer than 2^32 nodes");
+        self.open.push(node);
+        if self.open_bytes >= PAGE_BYTES {
+            self.close();
+        }
+        Built::New { page, index }
     }
 
-    async fn load(objects: &dyn ObjectStore, id: BlobId) -> Result<Self> {
-        let bytes = objects
-            .get_blob(id)
-            .await?
-            .ok_or(DeriveError::MissingObject(id))?;
-        Self::decode(&bytes).ok_or(DeriveError::CorruptObject(id))
+    fn close(&mut self) {
+        if !self.open.is_empty() {
+            let bytes = Bytes::from(encode_page(&self.open));
+            self.closed.push((BlobId::hash(&bytes), bytes));
+            self.open.clear();
+            self.open_bytes = 0;
+        }
+    }
+
+    fn at(&self, built: Built) -> NodeAt {
+        match built {
+            Built::Stored(at) => at,
+            Built::New { page, index } => NodeAt {
+                page: self.closed[page].0,
+                index,
+            },
+        }
     }
 }
 
 #[async_trait]
 impl Derivable for PathHistory {
     const NAME: &'static str = "path_history";
-    const VERSION: u32 = 1;
+    const VERSION: u32 = 2;
 
     async fn derive(ctx: &Deriver<'_>, cs: &Changeset, parents: &[Self]) -> Result<Self> {
         let cs_id = cs.id();
@@ -131,40 +266,53 @@ impl Derivable for PathHistory {
             }
             _ => None,
         };
-        let mut rewritten = Vec::new();
-        let root = rebuild(ctx.objects, new_root, old, cs_id, &mut rewritten).await?;
-        // Node ids are content hashes, so every rewritten node is written in
-        // one concurrent batch; nothing points at them until the pointer is
+        let mut pages = Pages::default();
+        let root = rebuild(ctx.objects, new_root, old, cs_id, &mut pages).await?;
+        pages.close();
+        let root = pages.at(root);
+        // Page ids are content hashes, so every page is written in one
+        // concurrent batch; nothing points at them until the pointer is
         // recorded.
-        stream::iter(rewritten.into_iter().map(|node| ctx.objects.put_blob(node)))
-            .buffer_unordered(WRITE_CONCURRENCY)
-            .try_for_each(|_| async { Ok(()) })
-            .await?;
+        stream::iter(
+            pages
+                .closed
+                .into_iter()
+                .map(|(_, page)| ctx.objects.put_blob(page)),
+        )
+        .buffer_unordered(WRITE_CONCURRENCY)
+        .try_for_each(|_| async { Ok(()) })
+        .await?;
         Ok(Self(root))
     }
 
     fn to_pointer(&self) -> Vec<u8> {
-        self.0.as_bytes().to_vec()
+        let mut pointer = self.0.page.as_bytes().to_vec();
+        pointer.extend_from_slice(&self.0.index.to_be_bytes());
+        pointer
     }
 
     fn from_pointer(bytes: &[u8]) -> Option<Self> {
-        BlobId::try_from_slice(bytes).ok().map(Self)
+        let (page, index) = bytes.split_at_checked(BlobId::LEN)?;
+        Some(Self(NodeAt {
+            page: BlobId::try_from_slice(page).ok()?,
+            index: u32::from_be_bytes(index.try_into().ok()?),
+        }))
     }
 }
 
 /// Build the history node for `new_tree` given the parent's `(tree, history)`
 /// for the same directory, attributing every difference to `cs`. Every new
-/// node's encoding is appended to `rewritten` for the caller to store.
+/// node is appended to `pages`, children first.
 async fn rebuild(
     objects: &dyn ObjectStore,
     new_tree: TreeId,
-    old: Option<(TreeId, BlobId)>,
+    old: Option<(TreeId, NodeAt)>,
     cs: ChangesetId,
-    rewritten: &mut Vec<Bytes>,
-) -> Result<BlobId> {
+    pages: &mut Pages,
+) -> Result<Built> {
     if let Some((old_tree, old_history)) = old {
         if old_tree == new_tree {
-            return Ok(old_history);
+            return Ok(Built::Stored(old_history));
         }
     }
 
@@ -177,18 +325,22 @@ async fn rebuild(
         None => (Tree::empty(), HistoryNode::default()),
     };
 
-    let mut node = HistoryNode::default();
+    let mut entries = Vec::with_capacity(new.entries.len());
     for (name, entry) in &new.entries {
         if old_tree.entries.get(name) == Some(entry) {
             let unchanged = old_history
                 .entries
                 .get(name)
-                .ok_or(DeriveError::CorruptObject(old.expect("old exists").1))?;
-            node.entries.insert(name.clone(), *unchanged);
+                .ok_or(DeriveError::CorruptObject(old.expect("old exists").1.page))?;
+            let dir = match unchanged {
+                HistoryEntry::File { .. } => None,
+                HistoryEntry::Dir { node, .. } => Some(Built::Stored(*node)),
+            };
+            entries.push((name.clone(), unchanged.last_changed(), dir));
             continue;
         }
-        let history = match entry {
-            TreeEntry::Blob { .. } => HistoryEntry::File { last_changed: cs },
+        let dir = match entry {
+            TreeEntry::Blob { .. } => None,
             TreeEntry::Tree { id } => {
                 let old_sub = match (old_tree.entries.get(name), old_history.entries.get(name)) {
                     (Some(TreeEntry::Tree { id: t }), Some(HistoryEntry::Dir { node, .. })) => {
@@ -196,19 +348,12 @@ async fn rebuild(
                     }
                     _ => None,
                 };
-                let sub = Box::pin(rebuild(objects, *id, old_sub, cs, rewritten)).await?;
-                HistoryEntry::Dir {
-                    last_changed: cs,
-                    node: sub,
-                }
+                Some(Box::pin(rebuild(objects, *id, old_sub, cs, pages)).await?)
             }
         };
-        node.entries.insert(name.clone(), history);
+        entries.push((name.clone(), cs, dir));
     }
-    let bytes = Bytes::from(node.encode());
-    let id = BlobId::hash(&bytes);
-    rewritten.push(bytes);
-    Ok(id)
+    Ok(pages.push(entries))
 }
 
 async fn load_tree(objects: &dyn ObjectStore, id: TreeId) -> Result<Tree> {
@@ -230,8 +375,8 @@ impl PathHistory {
         let (last, dirs) = components.split_last().expect("paths are non-empty");
         for component in dirs {
             match node.entries.get(component) {
-                Some(HistoryEntry::Dir { node: id, .. }) => {
-                    node = HistoryNode::load(objects, *id).await?;
+                Some(HistoryEntry::Dir { node: at, .. }) => {
+                    node = HistoryNode::load(objects, *at).await?;
                 }
                 _ => return Ok(None),
             }
@@ -298,23 +443,77 @@ mod tests {
     // ---- tests ----------------------------------------------------------
 
     #[test]
-    fn node_encoding_roundtrips() {
-        let mut node = HistoryNode::default();
-        node.entries.insert(
-            PathComponent::new("f").unwrap(),
-            HistoryEntry::File {
-                last_changed: ChangesetId::from_bytes([1; 32]),
-            },
+    fn page_encoding_roundtrips() {
+        let (a, b) = (
+            ChangesetId::from_bytes([1; 32]),
+            ChangesetId::from_bytes([2; 32]),
         );
-        node.entries.insert(
-            PathComponent::new("d").unwrap(),
+        let elsewhere = NodeAt {
+            page: BlobId::from_bytes([3; 32]),
+            index: 7,
+        };
+        let name = |s| PathComponent::new(s).unwrap();
+        let file = HistoryEntry::File { last_changed: a };
+        let child = PageNode::from([(name("f"), PageEntry::Stored(file))]);
+        let parent = PageNode::from([
+            (
+                name("d"),
+                PageEntry::Here {
+                    last_changed: b,
+                    index: 0,
+                },
+            ),
+            (
+                name("e"),
+                PageEntry::Stored(HistoryEntry::Dir {
+                    last_changed: a,
+                    node: elsewhere,
+                }),
+            ),
+        ]);
+        let bytes = encode_page(&[child, parent]);
+        let page = BlobId::hash(&bytes);
+
+        assert_eq!(
+            decode_node(&bytes, page, 0).unwrap().entries[&name("f")],
+            file
+        );
+        let parent = decode_node(&bytes, page, 1).unwrap();
+        assert_eq!(
+            parent.entries[&name("d")],
             HistoryEntry::Dir {
-                last_changed: ChangesetId::from_bytes([2; 32]),
-                node: BlobId::from_bytes([3; 32]),
+                last_changed: b,
+                node: NodeAt { page, index: 0 },
             },
+            "a child in the same page is named by the page being read"
         );
-        assert_eq!(HistoryNode::decode(&node.encode()), Some(node));
-        assert_eq!(HistoryNode::decode(b"garbage"), None);
+        assert_eq!(
+            parent.entries[&name("e")],
+            HistoryEntry::Dir {
+                last_changed: a,
+                node: elsewhere,
+            }
+        );
+        assert_eq!(decode_node(&bytes, page, 2), None, "no such node");
+        assert_eq!(decode_node(b"garbage", page, 0), None);
+        let forward = encode_page(&[PageNode::from([(
+            name("d"),
+            PageEntry::Here {
+                last_changed: b,
+                index: 0,
+            },
+        )])]);
+        assert_eq!(
+            decode_node(&forward, page, 0),
+            None,
+            "a node names only earlier nodes of its page"
+        );
+    }
+
+    /// Nodes in `page`.
+    async fn page_len(store: &MemoryStore, page: BlobId) -> u64 {
+        let bytes = store.get_blob(page).await.unwrap().unwrap();
+        Reader::new(&bytes).seq_len().unwrap()
     }
 
     #[tokio::test]
@@ -415,10 +614,15 @@ mod tests {
             .put_changeset(&changeset(vec![], changes, "big"))
             .await
             .unwrap();
-        Deriver::new(REPO, &store, &store)
+        let counting = Counting::new(&store);
+        Deriver::new(REPO, &store, &counting)
             .derive::<PathHistory>(root)
             .await
             .unwrap();
+        assert!(
+            counting.blob_puts() > 1,
+            "a large change spans several pages"
+        );
 
         let mut one = BTreeMap::new();
         one.insert(
@@ -435,7 +639,12 @@ mod tests {
             .derive::<PathHistory>(child)
             .await
             .unwrap();
-        assert_eq!(counting.blob_puts(), DEPTH + 1, "history nodes rewritten");
+        assert_eq!(counting.blob_puts(), 1, "one page of history nodes");
+        assert_eq!(
+            page_len(&store, h.0.page).await,
+            DEPTH as u64 + 1,
+            "history nodes rewritten"
+        );
         assert_eq!(counting.tree_puts(), DEPTH + 1, "tree nodes rewritten");
 
         let last = |p: &str| {
