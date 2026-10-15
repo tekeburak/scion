@@ -2,14 +2,15 @@
 
 use std::collections::HashMap;
 
-use futures_util::{StreamExt, TryStreamExt, stream};
 use scion_store::{MetadataStore, ObjectStore};
 use scion_types::ChangesetId;
+use tokio::sync::mpsc;
 
+use crate::staged::{QUEUE_DEPTH, Shared, Staged, write_behind};
 use crate::{GIT_SHA, GitRepo, IngestError, Mapped, ObjectId};
 
-/// Most blob uploads in flight at once.
-const UPLOAD_CONCURRENCY: usize = 16;
+/// Commits mapped ahead of the one being created.
+const MAP_AHEAD: usize = 16;
 
 /// The only ref an import creates or moves.
 pub const MAIN_REF: &str = "main";
@@ -83,38 +84,55 @@ pub async fn import(
         }
     }
 
-    let mut created = 0;
-    for commit in &commits {
-        if imported.contains_key(&commit.id) {
-            continue;
+    // Three stages run at once: a thread maps commits ahead of creation,
+    // changesets are created one by one through the shared create path over
+    // the staged stores, and the writer stores what that queues.
+    let (to_create, mut ready) = mpsc::channel(MAP_AHEAD);
+    let mapper = {
+        let (dir, repo, mut ids) = (git.dir(), repo.to_owned(), imported.clone());
+        tokio::task::spawn_blocking(move || -> Result<(), IngestError> {
+            // A repository handle stays on the thread that opened it.
+            let git = GitRepo::open(&dir)?;
+            for commit in commits {
+                if ids.contains_key(&commit.id) {
+                    continue;
+                }
+                let m = git.changeset(commit.id, &repo, &ids)?;
+                ids.insert(commit.id, m.changeset.id());
+                if to_create.blocking_send((commit.id, m)).is_err() {
+                    break;
+                }
+            }
+            Ok(())
+        })
+    };
+    let cache = Shared::default();
+    let (queue, queued) = mpsc::channel(QUEUE_DEPTH);
+    let writer = write_behind(meta, objects, &cache, queued);
+    let create = async {
+        let staged = Staged::new(meta, objects, &cache, queue);
+        let mut created = 0;
+        while let Some((sha, Mapped { changeset, blobs })) = ready.recv().await {
+            staged.begin(sha);
+            for (id, data) in blobs {
+                staged.put_file(id, data).await.map_err(store_err(sha))?;
+            }
+            let (id, _) = scion_server::create_changeset(&staged, &staged, &changeset)
+                .await
+                .map_err(|e| IngestError::Store(sha, e.message().to_owned()))?;
+            staged
+                .put_ingest_checkpoint(repo, sha.as_bytes(), id)
+                .await
+                .map_err(store_err(sha))?;
+            imported.insert(sha, id);
+            created += 1;
         }
-        let Mapped { changeset, blobs } = git.changeset(commit.id, repo, &imported)?;
-        // One presence check per commit; only missing blobs are uploaded.
-        let ids: Vec<_> = blobs.keys().copied().collect();
-        let present = objects
-            .has_blobs(&ids)
-            .await
-            .map_err(store_err(commit.id))?;
-        stream::iter(
-            blobs
-                .into_values()
-                .zip(present)
-                .filter(|(_, present)| !present)
-                .map(|(data, _)| objects.put_blob(data)),
-        )
-        .buffer_unordered(UPLOAD_CONCURRENCY)
-        .try_for_each(|_| async { Ok(()) })
-        .await
-        .map_err(store_err(commit.id))?;
-        let (id, _) = scion_server::create_changeset(meta, objects, &changeset)
-            .await
-            .map_err(|e| IngestError::Store(commit.id, e.message().to_owned()))?;
-        meta.put_ingest_checkpoint(repo, commit.id.as_bytes(), id)
-            .await
-            .map_err(store_err(commit.id))?;
-        imported.insert(commit.id, id);
-        created += 1;
-    }
+        // Closes the queue: the writer stores what is left and returns.
+        drop(staged);
+        mapper.await.expect("the mapping thread does not panic")?;
+        Ok(created)
+    };
+    let (created, ()) = tokio::try_join!(create, writer)?;
 
     let tip = imported[&tip_commit];
     if current.as_ref().is_none_or(|c| c.target != tip) {

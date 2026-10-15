@@ -25,6 +25,7 @@
 #![forbid(unsafe_code)]
 
 mod import;
+mod staged;
 mod verify;
 
 pub use import::{Imported, MAIN_REF, import};
@@ -120,12 +121,21 @@ type Change = (Vec<u8>, Option<File>, Option<File>);
 /// past this only exact renames and copies are found, like git's rename limit.
 const MAX_INEXACT_PAIRS: usize = 10_000;
 
+/// Decoded git objects kept in memory: consecutive commits share most trees.
+const OBJECT_CACHE_BYTES: usize = 64 << 20;
+
 impl GitRepo {
     /// Open the repository at `git_dir` (a work tree or a bare repository).
     pub fn open(git_dir: &Path) -> Result<Self, IngestError> {
-        let repo = gix::open(git_dir)
+        let mut repo = gix::open(git_dir)
             .map_err(|e| IngestError::Open(git_dir.display().to_string(), e.to_string()))?;
+        repo.object_cache_size_if_unset(OBJECT_CACHE_BYTES);
         Ok(Self { repo })
+    }
+
+    /// The repository's git directory.
+    fn dir(&self) -> std::path::PathBuf {
+        self.repo.git_dir().to_owned()
     }
 
     /// Every commit reachable from `rev`, each after all of its parents.
@@ -296,23 +306,30 @@ impl GitRepo {
         if sources.is_empty() || added.is_empty() {
             return Ok(out);
         }
-        let compare = sources.len() * added.len() <= MAX_INEXACT_PAIRS;
-        let mut source_data: HashMap<ObjectId, Vec<u8>> = HashMap::new();
+        let mut inexact = Vec::new();
         for (path, blob) in added {
-            if let Some((from, _)) = sources.iter().find(|(_, s)| *s == blob) {
-                out.insert(path.clone(), (*from).clone());
-                continue;
-            }
-            if !compare {
-                continue;
-            }
-            let data = self.blob(blob)?;
-            let mut best: Option<(u64, &Vec<u8>)> = None;
-            for (from, source) in &sources {
-                if !source_data.contains_key(source) {
-                    source_data.insert(*source, self.blob(*source)?);
+            match sources.iter().find(|(_, s)| *s == blob) {
+                Some((from, _)) => {
+                    out.insert(path.clone(), (*from).clone());
                 }
-                let score = similarity(&source_data[source], &data);
+                None => inexact.push((path, blob)),
+            }
+        }
+        if inexact.is_empty() || sources.len() * inexact.len() > MAX_INEXACT_PAIRS {
+            return Ok(out);
+        }
+        // Each file's lines are counted once, not once per pair.
+        let source_data = sources
+            .iter()
+            .map(|(_, blob)| self.blob(*blob))
+            .collect::<Result<Vec<_>, _>>()?;
+        let source_lines: Vec<Lines<'_>> = source_data.iter().map(|d| Lines::new(d)).collect();
+        for (path, blob) in inexact {
+            let data = self.blob(blob)?;
+            let lines = Lines::new(&data);
+            let mut best: Option<(u64, &Vec<u8>)> = None;
+            for ((from, _), source) in sources.iter().zip(&source_lines) {
+                let score = source.similarity(&lines);
                 if score >= 50 && best.is_none_or(|(b, _)| score > b) {
                     best = Some((score, from));
                 }
@@ -430,27 +447,44 @@ fn file_type(commit: ObjectId, path: &[u8], mode: EntryMode) -> Result<FileType,
     }
 }
 
-/// Percentage of lines two files share (each line counted as often as it
-/// occurs in both), relative to their average length. Empty files are never
-/// similar.
-fn similarity(a: &[u8], b: &[u8]) -> u64 {
-    let lines = |d: &[u8]| d.split_inclusive(|c| *c == b'\n').count() as u64;
-    let (la, lb) = (lines(a), lines(b));
-    if la == 0 || lb == 0 {
-        return 0;
-    }
-    let mut counts: HashMap<&[u8], u64> = HashMap::new();
-    for line in a.split_inclusive(|c| *c == b'\n') {
-        *counts.entry(line).or_default() += 1;
-    }
-    let mut shared = 0;
-    for line in b.split_inclusive(|c| *c == b'\n') {
-        if let Some(n) = counts.get_mut(line).filter(|n| **n > 0) {
-            *n -= 1;
-            shared += 1;
+/// A file's lines and how often each occurs.
+struct Lines<'a> {
+    total: u64,
+    counts: HashMap<&'a [u8], u64>,
+}
+
+impl<'a> Lines<'a> {
+    fn new(data: &'a [u8]) -> Self {
+        let mut counts: HashMap<&[u8], u64> = HashMap::new();
+        let mut total = 0;
+        for line in data.split_inclusive(|c| *c == b'\n') {
+            *counts.entry(line).or_default() += 1;
+            total += 1;
         }
+        Self { total, counts }
     }
-    200 * shared / (la + lb)
+
+    /// Percentage of lines two files share (each line counted as often as it
+    /// occurs in both), relative to their average length. Empty files are
+    /// never similar.
+    fn similarity(&self, other: &Lines<'_>) -> u64 {
+        let sum = self.total + other.total;
+        // At most the shorter file's lines are shared: below 50 already.
+        if self.total == 0 || other.total == 0 || 4 * self.total.min(other.total) < sum {
+            return 0;
+        }
+        let (small, large) = if self.counts.len() <= other.counts.len() {
+            (self, other)
+        } else {
+            (other, self)
+        };
+        let shared: u64 = small
+            .counts
+            .iter()
+            .map(|(line, n)| (*n).min(large.counts.get(line).copied().unwrap_or(0)))
+            .sum();
+        200 * shared / sum
+    }
 }
 
 fn identity(sig: gix::actor::SignatureRef<'_>) -> Identity {

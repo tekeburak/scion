@@ -102,6 +102,71 @@ impl PostgresStore {
     }
 }
 
+/// Insert every file change of changeset `id` in one statement: a changeset
+/// touching the whole tree (an imported root, a large refactor) costs one
+/// round trip.
+async fn insert_file_changes(
+    tx: &mut Transaction<'_, Postgres>,
+    repo: i64,
+    id: ChangesetId,
+    cs: &Changeset,
+) -> Result<()> {
+    let n = cs.file_changes.len();
+    let mut paths = Vec::with_capacity(n);
+    let mut kinds = Vec::with_capacity(n);
+    let mut blobs = Vec::with_capacity(n);
+    let mut ftypes = Vec::with_capacity(n);
+    let mut sizes = Vec::with_capacity(n);
+    let mut cf_paths = Vec::with_capacity(n);
+    let mut cf_css = Vec::with_capacity(n);
+    for (path, change) in &cs.file_changes {
+        paths.push(path.as_str());
+        match change {
+            FileChange::Deleted => {
+                kinds.push(0i16);
+                blobs.push(None);
+                ftypes.push(None);
+                sizes.push(None);
+                cf_paths.push(None);
+                cf_css.push(None);
+            }
+            FileChange::Tracked {
+                content,
+                kind,
+                size,
+                copy_from,
+            } => {
+                kinds.push(1i16);
+                blobs.push(Some(content.as_bytes().to_vec()));
+                ftypes.push(Some(i16::from(kind.tag())));
+                sizes.push(Some(to_i64(*size)?));
+                cf_paths.push(copy_from.as_ref().map(|(p, _)| p.as_str()));
+                cf_css.push(copy_from.as_ref().map(|(_, c)| c.as_bytes().to_vec()));
+            }
+        }
+    }
+    if n > 0 {
+        sqlx::query(
+            "INSERT INTO file_changes (repo, changeset_id, path, change_kind, blob_id, file_type, \
+             size, copy_from_path, copy_from_cs) \
+             SELECT $1, $2, * FROM UNNEST($3::text[], $4::smallint[], $5::bytea[], \
+             $6::smallint[], $7::bigint[], $8::text[], $9::bytea[])",
+        )
+        .bind(repo)
+        .bind(id.as_bytes().as_slice())
+        .bind(&paths)
+        .bind(&kinds)
+        .bind(&blobs)
+        .bind(&ftypes)
+        .bind(&sizes)
+        .bind(&cf_paths)
+        .bind(&cf_css)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
+}
+
 #[async_trait]
 impl MetadataStore for PostgresStore {
     async fn put_changeset(&self, cs: &Changeset) -> Result<ChangesetId> {
@@ -163,41 +228,7 @@ impl MetadataStore for PostgresStore {
         .execute(&mut *tx)
         .await?;
 
-        // TODO(perf): batch with UNNEST once changesets routinely touch many files.
-        for (path, change) in &cs.file_changes {
-            let (kind, blob, ftype, size, cf_path, cf_cs) = match change {
-                FileChange::Deleted => (0i16, None, None, None, None, None),
-                FileChange::Tracked {
-                    content,
-                    kind,
-                    size,
-                    copy_from,
-                } => (
-                    1i16,
-                    Some(content.as_bytes().to_vec()),
-                    Some(i16::from(kind.tag())),
-                    Some(to_i64(*size)?),
-                    copy_from.as_ref().map(|(p, _)| p.as_str().to_owned()),
-                    copy_from.as_ref().map(|(_, c)| c.as_bytes().to_vec()),
-                ),
-            };
-            sqlx::query(
-                "INSERT INTO file_changes (repo, changeset_id, path, change_kind, blob_id, file_type, \
-                 size, copy_from_path, copy_from_cs) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
-            )
-            .bind(repo)
-            .bind(id.as_bytes().as_slice())
-            .bind(path.as_str())
-            .bind(kind)
-            .bind(blob)
-            .bind(ftype)
-            .bind(size)
-            .bind(cf_path)
-            .bind(cf_cs)
-            .execute(&mut *tx)
-            .await?;
-        }
-
+        insert_file_changes(&mut tx, repo, id, cs).await?;
         tx.commit().await?;
         Ok(id)
     }

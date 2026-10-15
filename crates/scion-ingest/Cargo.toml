@@ -8,8 +8,9 @@ repository.workspace = true
 rust-version.workspace = true
 
 [dependencies]
+async-trait.workspace = true
 # Pure Rust, no network features; only this crate builds it (docs/ARCHITECTURE.md).
-gix = { version = "0.89", default-features = false, features = ["sha1", "revision"] }
+gix = { version = "0.89", default-features = false, features = ["sha1", "revision", "pack-cache-lru-dynamic"] }
 bytes.workspace = true
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 object_store = { version = "0.14.2", features = ["aws"] }
@@ -18,10 +19,9 @@ scion-server.workspace = true
 scion-store.workspace = true
 scion-types.workspace = true
 thiserror.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync"] }
 
 [dev-dependencies]
-async-trait.workspace = true
 scion-client.workspace = true
 tempfile = "3"
 tokio = { workspace = true, features = ["net"] }
