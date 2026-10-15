@@ -170,3 +170,109 @@ async fn errors_are_reported() {
         .unwrap();
     assert!(!out.status.success());
 }
+
+/// Run `scn args` in `dir` as author `Ada`; returns (success, stdout, stderr).
+fn scn_try(dir: &Path, args: &[&str]) -> (bool, String, String) {
+    let out = Command::new(env!("CARGO_BIN_EXE_scn"))
+        .current_dir(dir)
+        .env("SCN_AUTHOR", "Ada <ada@example.com>")
+        .args(args)
+        .output()
+        .unwrap();
+    (
+        out.status.success(),
+        String::from_utf8(out.stdout).unwrap(),
+        String::from_utf8(out.stderr).unwrap(),
+    )
+}
+
+/// The changeset id at the end of `committed <id>` / `cloned … at <id> …`.
+fn id_after(out: &str, marker: &str) -> ChangesetId {
+    let rest = &out[out.find(marker).expect(marker) + marker.len()..];
+    rest[..64].parse().unwrap()
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn add_commit_land_end_to_end() {
+    let (server, _, c1) = serve().await;
+    let dir = tempfile::tempdir().unwrap();
+    scn(dir.path(), &["clone", &server, REPO, "a"]);
+    scn(dir.path(), &["clone", &server, REPO, "b"]);
+    let a = dir.path().join("a");
+    let b = dir.path().join("b");
+
+    let (ok, _, err) = scn_try(&a, &["commit", "-m", "empty"]);
+    assert!(!ok && err.contains("nothing to commit"), "{err}");
+
+    // Edit, delete, create; only added files join the commit.
+    std::fs::write(a.join("README"), b"one\ntwo\nthree\nfour\n").unwrap();
+    std::fs::remove_file(a.join("srv/web/index.html")).unwrap();
+    std::fs::create_dir_all(a.join("docs")).unwrap();
+    std::fs::write(a.join("docs/guide.md"), b"# guide\n").unwrap();
+    std::fs::write(a.join("scratch.txt"), b"not for commit\n").unwrap();
+    assert_eq!(scn(&a.join("docs"), &["add", "."]), "A docs/guide.md\n");
+    assert_eq!(
+        scn(&a, &["status"]),
+        "M README\nA docs/guide.md\n? scratch.txt\nD srv/web/index.html\n"
+    );
+    let diff = scn(&a, &["diff"]);
+    assert!(diff.contains("new regular file\n--- /dev/null\n+++ b/docs/guide.md\n"));
+    let (ok, _, err) = scn_try(&a, &["add", "nope"]);
+    assert!(!ok && err.contains("no such file"), "{err}");
+
+    let (ok, out, err) = scn_try(&a, &["commit", "-m", "extend the readme"]);
+    assert!(ok, "{err}");
+    let c2 = id_after(&out, "committed ");
+    assert_eq!(scn(&a, &["status"]), "? scratch.txt\n");
+
+    // The commit is an anonymous head: main has not moved.
+    let log = scn(&a, &["log", "-n", "2"]);
+    assert!(log.contains(&format!("changeset {c2}")), "{log}");
+    assert!(log.contains("Author: Ada <ada@example.com>"), "{log}");
+    assert!(scn(&a, &["log", "-r", "main", "-n", "1"]).contains(&c1.to_hex()));
+    assert!(scn(&a, &["blame", "README"]).ends_with(&format!("{} four\n", &c2.to_hex()[..12])));
+
+    assert!(scn(&a, &["land"]).starts_with(&format!("landed {c2} on main (version ")));
+    assert_eq!(scn(&a, &["land"]), format!("main is already at {c2}\n"));
+    assert!(scn(&b, &["log", "-r", "main", "-n", "1"]).contains(&c2.to_hex()));
+
+    // b still sits on c1: its commit does not descend from main any more.
+    std::fs::write(b.join("README"), b"diverged\n").unwrap();
+    let (ok, out, err) = scn_try(&b, &["commit", "-m", "diverge"]);
+    assert!(ok, "{err}");
+    let c3 = id_after(&out, "committed ");
+    let (ok, _, err) = scn_try(&b, &["land"]);
+    assert!(
+        !ok && err.contains("cannot land") && err.contains("fast-forward"),
+        "{err}"
+    );
+    assert!(!scn(&b, &["log", "-r", "main", "-n", "1"]).contains(&c3.to_hex()));
+
+    // A fresh clone of main sees the landed tree.
+    let out = scn(dir.path(), &["clone", &server, REPO, "c"]);
+    assert_eq!(id_after(&out, "at "), c2);
+    let c = dir.path().join("c");
+    assert_eq!(
+        std::fs::read(c.join("docs/guide.md")).unwrap(),
+        b"# guide\n"
+    );
+    assert!(!c.join("srv/web/index.html").exists());
+    assert!(!c.join("scratch.txt").exists());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn commit_needs_an_author() {
+    let (server, ..) = serve().await;
+    let dir = tempfile::tempdir().unwrap();
+    scn(dir.path(), &["clone", &server, REPO, "wc"]);
+    let wc = dir.path().join("wc");
+    std::fs::write(wc.join("README"), b"x\n").unwrap();
+    let out = Command::new(env!("CARGO_BIN_EXE_scn"))
+        .current_dir(&wc)
+        .env_remove("SCN_AUTHOR")
+        .args(["commit", "-m", "m"])
+        .output()
+        .unwrap();
+    assert!(!out.status.success());
+    assert!(String::from_utf8_lossy(&out.stderr).contains("--author"));
+}

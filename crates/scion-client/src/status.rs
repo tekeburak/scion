@@ -3,7 +3,7 @@
 //! A file whose kind, size and mtime still match its index entry is taken as
 //! unchanged without reading it; any other file is rehashed. There are no
 //! ignore files: every file outside `.scn/` that the index does not know is
-//! untracked.
+//! untracked unless `scn add` marked it.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
@@ -23,7 +23,9 @@ pub enum FileStatus {
     Modified,
     /// In the index, gone from disk.
     Deleted,
-    /// On disk, not in the index.
+    /// On disk, not in the index, marked by `scn add`.
+    Added,
+    /// On disk, not in the index, not added.
     Untracked,
 }
 
@@ -34,6 +36,7 @@ impl FileStatus {
         match self {
             Self::Modified => 'M',
             Self::Deleted => 'D',
+            Self::Added => 'A',
             Self::Untracked => '?',
         }
     }
@@ -91,9 +94,13 @@ fn walk(root: &Path, dir: &Path, out: &mut Vec<PathBuf>) -> Result<(), StatusErr
     Ok(())
 }
 
-/// Compare the working copy under `root` with `index`. Unchanged files are
-/// left out.
-pub fn status(root: &Path, index: &Index) -> Result<BTreeMap<RepoPath, FileStatus>, StatusError> {
+/// Compare the working copy under `root` with `index`; untracked paths in
+/// `added` are reported as added. Unchanged files are left out.
+pub fn status(
+    root: &Path,
+    index: &Index,
+    added: &BTreeSet<RepoPath>,
+) -> Result<BTreeMap<RepoPath, FileStatus>, StatusError> {
     let mut files = Vec::new();
     walk(root, root, &mut files)?;
     let mut out = BTreeMap::new();
@@ -106,7 +113,12 @@ pub fn status(root: &Path, index: &Index) -> Result<BTreeMap<RepoPath, FileStatu
             .and_then(|s| RepoPath::new(s).ok())
             .ok_or_else(|| StatusError::BadPath(file.clone()))?;
         let Some(entry) = index.entries.get(&path) else {
-            out.insert(path, FileStatus::Untracked);
+            let st = if added.contains(&path) {
+                FileStatus::Added
+            } else {
+                FileStatus::Untracked
+            };
+            out.insert(path, st);
             continue;
         };
         seen.insert(path.clone());
@@ -173,7 +185,7 @@ mod tests {
                 ("same", b"s\n"),
             ],
         );
-        assert!(status(root, &index).unwrap().is_empty());
+        assert!(status(root, &index, &BTreeSet::new()).unwrap().is_empty());
 
         std::fs::write(root.join("a.txt"), b"changed\n").unwrap();
         std::fs::remove_file(root.join("d/b.txt")).unwrap();
@@ -182,7 +194,9 @@ mod tests {
         // Same bytes, new mtime: rehashed and found unchanged.
         std::fs::write(root.join("same"), b"s\n").unwrap();
 
-        let got: Vec<(String, char)> = status(root, &index)
+        let added = BTreeSet::from([RepoPath::new("d/new.txt").unwrap()]);
+        std::fs::write(root.join("other.txt"), b"o\n").unwrap();
+        let got: Vec<(String, char)> = status(root, &index, &added)
             .unwrap()
             .into_iter()
             .map(|(p, s)| (p.as_str().to_owned(), s.code()))
@@ -192,8 +206,9 @@ mod tests {
             [
                 ("a.txt".to_owned(), 'M'),
                 ("d/b.txt".to_owned(), 'D'),
-                ("d/new.txt".to_owned(), '?'),
+                ("d/new.txt".to_owned(), 'A'),
                 ("exe".to_owned(), 'M'),
+                ("other.txt".to_owned(), '?'),
             ]
         );
     }
@@ -213,11 +228,11 @@ mod tests {
                 mtime_ns: 0,
             },
         );
-        assert!(status(root, &index).unwrap().is_empty());
+        assert!(status(root, &index, &BTreeSet::new()).unwrap().is_empty());
         std::fs::remove_file(root.join("link")).unwrap();
         std::os::unix::fs::symlink("elsewhere", root.join("link")).unwrap();
         assert_eq!(
-            status(root, &index).unwrap()[&RepoPath::new("link").unwrap()],
+            status(root, &index, &BTreeSet::new()).unwrap()[&RepoPath::new("link").unwrap()],
             FileStatus::Modified
         );
     }

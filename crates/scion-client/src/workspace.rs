@@ -1,10 +1,10 @@
 //! The `.scn/` directory of a working copy.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::path::{Path, PathBuf};
 
-use scion_types::ChangesetId;
+use scion_types::{ChangesetId, RepoPath};
 use serde::{Deserialize, Serialize};
 
 use crate::index::Index;
@@ -215,12 +215,34 @@ impl Workspace {
     pub fn write_index(&self, index: &Index) -> Result<(), WorkspaceError> {
         write_atomic(self.file("index"), &index.encode())
     }
+
+    /// Untracked paths marked for the next commit; empty if none.
+    pub fn read_added(&self) -> Result<BTreeSet<RepoPath>, WorkspaceError> {
+        let path = self.file("added");
+        if !path.exists() {
+            return Ok(BTreeSet::new());
+        }
+        read_string(path.clone())?
+            .lines()
+            .map(|l| {
+                RepoPath::new(l).map_err(|e| WorkspaceError::Parse(path.clone(), e.to_string()))
+            })
+            .collect()
+    }
+
+    pub fn write_added(&self, added: &BTreeSet<RepoPath>) -> Result<(), WorkspaceError> {
+        let mut text = String::new();
+        for p in added {
+            text.push_str(p.as_str());
+            text.push('\n');
+        }
+        write_atomic(self.file("added"), text.as_bytes())
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use scion_types::RepoPath;
 
     #[test]
     fn layout_round_trips() {
@@ -237,6 +259,13 @@ mod tests {
         assert_eq!(ws.read_config().unwrap(), config);
         assert_eq!(ws.read_sparse().unwrap(), SparseProfile::full());
         assert_eq!(ws.read_index().unwrap(), Index::default());
+        assert!(ws.read_added().unwrap().is_empty());
+        let added = BTreeSet::from([
+            RepoPath::new("a/new.rs").unwrap(),
+            RepoPath::new("b").unwrap(),
+        ]);
+        ws.write_added(&added).unwrap();
+        assert_eq!(ws.read_added().unwrap(), added);
 
         let id = ChangesetId::hash(b"head");
         let state = State {

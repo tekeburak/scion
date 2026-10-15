@@ -4,11 +4,11 @@
 
 > **Status: pre-MVP, Phase 3 (the MVP) in progress.** Phases 0–2 are merged: data model and
 > canonical encoding, Postgres + S3 stores, derived data, diff / merge-base / merge / rebase.
-> Phase 3.1–3.7 are merged: `scion-server` serves the object and control gRPC services
+> Phase 3.1–3.8 are merged: `scion-server` serves the object and control gRPC services
 > (`log`, `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`, `move_ref`), and the
-> `scn` CLI has its read commands (`clone --sparse`, `status`, `log`, `diff`, `blame`). `scn`
-> cannot commit or land yet (Phase 3.8), and the cache/daemon tiers (Phase 4) do not exist.
-> Nothing here is usable by end users.
+> `scn` CLI can `clone --sparse`, `status`, `log`, `diff`, `blame`, `add`, `commit` (an
+> anonymous head) and `land` (fast-forward `main`). The cache/daemon tiers (Phase 4) do not
+> exist. Nothing here is usable by end users yet.
 
 Scion is *not* a general replacement for git. Git's distributed, offline-first model is the right
 design for the overwhelming majority of repositories. Scion targets one specific situation: a

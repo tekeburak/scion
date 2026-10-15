@@ -1,8 +1,13 @@
 //! `scn`: the Scion command-line client.
 //!
-//! Reading commands only so far: `clone`, `status`, `log`, `diff`, `blame`.
-//! Every history question is an RPC to `scion-server`; the working copy is
-//! only needed for `status` and for diffing local edits.
+//! Reading: `clone`, `status`, `log`, `diff`, `blame`. Every history question
+//! is an RPC to `scion-server`; the working copy is only needed for `status`
+//! and for diffing local edits.
+//!
+//! Writing: `add` marks untracked files for the next commit (there are no
+//! ignore files); `commit` creates a changeset on the server and makes it the
+//! working copy's anonymous head; `land` fast-forwards `main` to that head.
+//! There is no branch command: work is shared by changeset id.
 //!
 //! A revision is `@` (the working copy's current head), a 64-hex changeset
 //! id, a local head label, or a server ref (`main`, `release/*`).
@@ -11,14 +16,16 @@
 
 use std::borrow::Cow;
 use std::io::{self, Write};
-use std::path::{Component, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, Subcommand};
 use scion_client::{
-    Config, FileStatus, Remote, SparseProfile, State, Workspace, read_working_file, status,
+    Config, FileStatus, MAIN_REF, Remote, RemoteError, SparseProfile, State, Workspace,
+    read_working_file, status,
 };
-use scion_types::{Changeset, ChangesetId, FileChange, FileType, RepoPath, Timestamp};
+use scion_types::{Changeset, ChangesetId, FileChange, FileType, Identity, RepoPath, Timestamp};
 
 type Result<T, E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
 
@@ -75,6 +82,55 @@ enum Command {
         #[arg(short, long, default_value = "@")]
         rev: String,
     },
+    /// Mark untracked files (or every untracked file under a directory) for
+    /// the next commit.
+    Add {
+        #[arg(required = true)]
+        paths: Vec<String>,
+    },
+    /// Commit modified, deleted and added files as a new anonymous head.
+    Commit {
+        #[arg(short, long)]
+        message: String,
+        #[arg(long, env = "SCN_AUTHOR", value_name = "NAME <EMAIL>")]
+        author: String,
+    },
+    /// Fast-forward `main` to the current head.
+    Land,
+}
+
+/// The path `arg` names relative to the current directory, as a path
+/// relative to `root`; empty for `root` itself.
+fn relative_path(root: &Path, arg: &str) -> Result<String> {
+    let mut abs = PathBuf::new();
+    for c in std::env::current_dir()?.join(arg).components() {
+        match c {
+            Component::ParentDir => {
+                abs.pop();
+            }
+            Component::CurDir => {}
+            c => abs.push(c),
+        }
+    }
+    let rel = abs
+        .strip_prefix(root)
+        .map_err(|_| format!("{arg}: outside the working copy"))?;
+    Ok(rel
+        .to_str()
+        .ok_or_else(|| format!("{arg}: not UTF-8"))?
+        .to_owned())
+}
+
+/// `Name <email>`.
+fn parse_identity(s: &str) -> Result<Identity> {
+    let bad = || format!("author {s:?}: expected `Name <email>`");
+    let (name, rest) = s.split_once('<').ok_or_else(bad)?;
+    let email = rest.strip_suffix('>').ok_or_else(bad)?;
+    let name = name.trim();
+    if name.is_empty() || email.is_empty() {
+        return Err(bad().into());
+    }
+    Ok(Identity::new(name, email))
 }
 
 /// An opened working copy and a connection to its server.
@@ -115,20 +171,7 @@ impl Session {
 
     /// The repository path `arg` names, relative to the current directory.
     fn repo_path(&self, arg: &str) -> Result<RepoPath> {
-        let mut abs = PathBuf::new();
-        for c in std::env::current_dir()?.join(arg).components() {
-            match c {
-                Component::ParentDir => {
-                    abs.pop();
-                }
-                Component::CurDir => {}
-                c => abs.push(c),
-            }
-        }
-        let rel = abs
-            .strip_prefix(self.ws.root())
-            .map_err(|_| format!("{arg}: outside the working copy"))?;
-        let rel = rel.to_str().ok_or_else(|| format!("{arg}: not UTF-8"))?;
+        let rel = relative_path(self.ws.root(), arg)?;
         Ok(RepoPath::new(rel).map_err(|e| format!("{arg}: {e}"))?)
     }
 }
@@ -248,7 +291,7 @@ async fn clone(
 
 fn print_status(out: &mut impl Write) -> Result<()> {
     let ws = Workspace::find(&std::env::current_dir()?)?;
-    for (path, st) in status(ws.root(), &ws.read_index()?)? {
+    for (path, st) in status(ws.root(), &ws.read_index()?, &ws.read_added()?)? {
         writeln!(out, "{} {path}", st.code())?;
     }
     Ok(())
@@ -271,20 +314,24 @@ async fn log(out: &mut impl Write, path: Option<&str>, rev: &str, limit: u32) ->
     Ok(())
 }
 
-/// Local edits against the checked-out head; untracked files are left out.
+/// Local edits against the checked-out head, as the next commit would record
+/// them; untracked files are left out.
 async fn diff_working_copy(out: &mut impl Write) -> Result<()> {
     let mut s = Session::open().await?;
     let index = s.ws.read_index()?;
-    for (path, st) in status(s.ws.root(), &index)? {
+    for (path, st) in status(s.ws.root(), &index, &s.ws.read_added()?)? {
         let old = match st {
             FileStatus::Untracked => continue,
+            FileStatus::Added => None,
             FileStatus::Modified | FileStatus::Deleted => {
                 let e = index.entries[&path];
                 Some((e.kind, s.remote.get_blob(e.id).await?))
             }
         };
         let new = match st {
-            FileStatus::Modified => Some(read_working_file(&s.ws.root().join(path.as_str()))?),
+            FileStatus::Modified | FileStatus::Added => {
+                Some(read_working_file(&s.ws.root().join(path.as_str()))?)
+            }
             _ => None,
         };
         print_file_diff(out, &path, &old, &new)?;
@@ -340,6 +387,63 @@ async fn blame(out: &mut impl Write, path: &str, rev: &str) -> Result<()> {
     Ok(())
 }
 
+fn add(out: &mut impl Write, args: &[String]) -> Result<()> {
+    let ws = Workspace::find(&std::env::current_dir()?)?;
+    let mut added = ws.read_added()?;
+    let changes = status(ws.root(), &ws.read_index()?, &added)?;
+    for arg in args {
+        let prefix = relative_path(ws.root(), arg)?;
+        if std::fs::symlink_metadata(ws.root().join(&prefix)).is_err() {
+            return Err(format!("{arg}: no such file or directory").into());
+        }
+        let under = |p: &RepoPath| {
+            prefix.is_empty()
+                || p.as_str()
+                    .strip_prefix(prefix.as_str())
+                    .is_some_and(|rest| rest.is_empty() || rest.starts_with('/'))
+        };
+        for (path, st) in &changes {
+            if *st == FileStatus::Untracked && under(path) && added.insert(path.clone()) {
+                writeln!(out, "A {path}")?;
+            }
+        }
+    }
+    ws.write_added(&added)?;
+    Ok(())
+}
+
+async fn commit(out: &mut impl Write, message: &str, author: &str) -> Result<()> {
+    let author = parse_identity(author)?;
+    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+    let date = Timestamp::new(i64::try_from(now)?, 0);
+    let s = Session::open().await?;
+    let id = scion_client::commit(&s.ws, &s.remote, author, date, message).await?;
+    writeln!(out, "committed {id}")?;
+    Ok(())
+}
+
+async fn land(out: &mut impl Write) -> Result<()> {
+    let mut s = Session::open().await?;
+    let repo = s.config.repo.clone();
+    let head = s.state.current_head;
+    let main = s.remote.get_ref(&repo, MAIN_REF).await?;
+    if main.target == head {
+        writeln!(out, "{MAIN_REF} is already at {head}")?;
+        return Ok(());
+    }
+    let version = match s.remote.move_ref(&repo, MAIN_REF, head, main.version).await {
+        Ok(v) => v,
+        Err(RemoteError::Rpc(st)) if st.code() == tonic::Code::FailedPrecondition => {
+            return Err(format!("cannot land: {}", st.message()).into());
+        }
+        Err(e) => return Err(e.into()),
+    };
+    s.state.base = head;
+    s.ws.write_state(&s.state)?;
+    writeln!(out, "landed {head} on {MAIN_REF} (version {version})")?;
+    Ok(())
+}
+
 async fn run(cli: Cli) -> Result<()> {
     let mut out = io::BufWriter::new(io::stdout().lock());
     match cli.command {
@@ -356,6 +460,9 @@ async fn run(cli: Cli) -> Result<()> {
             _ => diff_working_copy(&mut out).await?,
         },
         Command::Blame { path, rev } => blame(&mut out, &path, &rev).await?,
+        Command::Add { paths } => add(&mut out, &paths)?,
+        Command::Commit { message, author } => commit(&mut out, &message, &author).await?,
+        Command::Land => land(&mut out).await?,
     }
     out.flush()?;
     Ok(())
@@ -391,6 +498,17 @@ mod tests {
             format_date(Timestamp::new(951_782_400, -330)),
             "2000-02-28 18:30:00 -0530"
         );
+    }
+
+    #[test]
+    fn parses_identities() {
+        assert_eq!(
+            parse_identity("Ada Lovelace <ada@example.com>").unwrap(),
+            Identity::new("Ada Lovelace", "ada@example.com")
+        );
+        for bad in ["ada", "<ada@example.com>", "Ada <>", "Ada <ada"] {
+            assert!(parse_identity(bad).is_err(), "{bad}");
+        }
     }
 
     #[test]

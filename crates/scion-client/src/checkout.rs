@@ -20,8 +20,8 @@ use crate::workspace::{Config, State, Workspace, WorkspaceError};
 /// The server ref a clone starts from.
 pub const MAIN_REF: &str = "main";
 
-/// Most object requests in flight at once during a checkout.
-const FETCH_CONCURRENCY: usize = 64;
+/// Most object requests in flight at once during a checkout or commit.
+pub(crate) const FETCH_CONCURRENCY: usize = 64;
 
 /// Failure during clone or checkout.
 #[derive(Debug, thiserror::Error)]
