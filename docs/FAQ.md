@@ -44,7 +44,8 @@ Not for real work: there is no authentication (Phase 7) and no cache tier yet (P
 The MVP (Phase 3) is done: `scion-server` serves the object and control gRPC services over
 Postgres + S3, and `scn` can `clone --sparse`, `status`, `log`, `diff`, `blame`, `add`,
 `commit` (an anonymous head) and `land` (fast-forward `main` only; server-side rebase is
-Phase 5). Git import (Phase 6) works; the benchmark on a real repository is still to come.
+Phase 5). Git import (Phase 6) works and a benchmark script runs it against git on a real
+repository; its results are not published yet.
 The README status section tracks this.
 
 ## Can I bring an existing git repository?

@@ -34,8 +34,13 @@ deliberate deviations from the reference design (trees in S3, canonical BLAKE3, 
   git history into changesets (first-parent file changes, renames and copies as `copy_from`,
   the git sha kept in `extra`), resumes from checkpoints, syncs incrementally and refuses a
   rewritten upstream; `scion-ingest verify` compares every imported tree with `git ls-tree`.
-- **Next:** a benchmark on a real repository and its results in this README (Phase 6.9–6.10),
-  then the cache and daemon tiers (Phase 4), change requests and server-side rebase on land (Phase 5),
+- **Real-repository benchmark (Phase 6.9–6.10 merged):** `scripts/bench-real` rebuilds a
+  pinned slice of a real repository's history and times import, clone, sparse clone, `status`,
+  `log`, `blame` and `land` against git on Postgres + S3, writing a CSV. Results are not
+  published yet.
+- **Next:** import, `log`, `blame` and `land` at least as fast as git on that slice
+  (Phase 6.11–6.12), the results as a table and chart in this README (6.13) and an import
+  how-to (6.14); then the cache and daemon tiers (Phase 4), change requests and server-side rebase on land (Phase 5),
   IAM (Phase 7) and virtualized checkouts (Phase 8).
 
 Scion is *not* a general replacement for git. Git's distributed, offline-first model is the right
@@ -147,7 +152,8 @@ Full details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
   always online.
 - **Planned, not built:** the cache and daemon tiers (Phase 4), change
   requests and the serial land worker (Phase 5), and IAM (Phase 7). Git import (Phase 6) is
-  in progress: the importer works, the real-repository benchmark is not done yet.
+  in progress: the importer and the real-repository benchmark script work; the benchmark
+  results are not published yet.
 - **Out of scope for now:** git wire compatibility, offline operation, Windows, a review UI,
   garbage collection, large-file chunking (there is a per-blob size limit) and ignore files. See
   [`docs/FAQ.md`](docs/FAQ.md#what-is-scion-not-a-good-fit-for).

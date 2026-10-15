@@ -50,7 +50,7 @@ ROADMAP = [
 # Phases run in the order listed: git import comes right after the MVP so real repositories
 # can be tested and benchmarked.
 STATUS_DONE = "MVP done: scion-server on Postgres + S3, scn clone --sparse, status, log, diff, blame, add, commit, land"
-STATUS_NEXT = "in progress: Phase 6 git import (6.1-6.8 merged; benchmark 6.9-6.10 next), then tiers (4), change requests (5), IAM (7), FUSE (8)"
+STATUS_NEXT = "in progress: Phase 6 git import (6.1-6.10 merged; 6.11-6.14 next: match git on the real-repo slice, publish results), then 4, 5, 7, 8"
 
 
 def t(x, y, s, size=20, fill=TEXT, weight=400, anchor="start", mono=False, extra=""):
