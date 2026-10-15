@@ -18,10 +18,6 @@
 //! * one-directory clone: git partial clone + `sparse-checkout set dir0000`
 //!   against `scion_client::clone` with a one-directory sparse profile.
 //!
-//! The workloads, fixture shape and hermetic git invocation are adapted from
-//! CarterT27/scion's benchmark runner (Apache-2.0; see `NOTICE`) so results are
-//! comparable.
-//!
 //! Correctness is checked outside the timers. Medians in milliseconds go to
 //! stdout as a Markdown table; per-run samples go to stderr.
 

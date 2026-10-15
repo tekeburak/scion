@@ -55,7 +55,8 @@ commit, `file_changes` relative to the first parent only (invariant 8), the comm
 - **6.9 Real-repository benchmark script.** `scripts/bench-real` imports a pinned subset of a
   real open-source repository (a path-limited first-parent range of `rust-lang/rust`), then
   measures import, sparse clone, `log`, `blame` and `land` side by side with git and with
-  CarterT27/scion (see "Performance bar" in `docs/ARCHITECTURE.md`), writing a CSV. *Accepted
+  the public implementations of the reference design (see "Performance bar" in
+  `docs/ARCHITECTURE.md`), writing a CSV. *Accepted
   when* it runs end to end from a clean checkout with only `git`, `protoc` and Docker
   installed, and records the repository, commit range and machine in its output.
 - **6.10 Benchmark results in the README.** The CSV from 6.9 is rendered as a table and an SVG
