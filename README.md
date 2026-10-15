@@ -93,7 +93,7 @@ Full details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
 | 4 | `scion-cache` and `scion-daemon` tiers, manifest-based seeding | post-MVP |
 | 5 | Server-side rebase/merge UX, change requests, serial land worker | post-MVP |
 | 6 | git → Scion ingestion | post-MVP |
-| 7 | IAM (repo + directory ACLs), fuzzing, hermetic simulation | post-MVP |
+| 7 | IAM (GitHub device-flow login, service principals, repo + directory ACLs), fuzzing, hermetic simulation | post-MVP |
 | 8 | Virtualized checkouts (FUSE / NFS) | post-MVP |
 
 ## Development

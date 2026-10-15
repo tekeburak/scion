@@ -105,6 +105,36 @@ changeset's root tree (optionally per sparse profile), written to the object sto
 daemon fetches the manifest and pulls the listed objects from its regional cache in parallel. No
 tier ever holds a materialized copy of the repository.
 
+### Identity and access (phase 7)
+
+Clients authenticate with **GitHub device-flow login** (`scn login`): the CLI shows a device
+code, the server exchanges the resulting GitHub identity for a short-lived Scion token, and
+every RPC carries that token. CI jobs and agents use **service principals** with tokens
+issued by an admin. Tokens are checked once, at the server boundary; tiers below the server
+forward them and never decide access themselves. Authorization is repo- and directory-scoped
+(`repo` is part of every rule, invariant 7); moving `main` and `release/*` requires admin.
+
+### Performance bar
+
+Every phase-6+ benchmark runs the same workloads against git **and** against
+[CarterT27/scion](https://github.com/CarterT27/scion), the closest independent
+implementation of the same reference design. Scion is expected to be at least as fast on each
+workload; a regression against either is a bug, and the table in `README.md` shows all three.
+
+### Reuse from CarterT27/scion
+
+CarterT27/scion is Apache-2.0. Code from it may be adapted, with attribution in `NOTICE` and
+in the PR, under these rules:
+
+- our invariants win: its changeset carries a root-tree pointer and its encoding uses 34-byte
+  typed ids and varints, so nothing that encodes, hashes or stores objects is taken;
+- worth adapting: the stat-cache status walk and `openat`-based filesystem access, the git
+  test corpus and bundle tooling, the importer structure, the benchmark runner, the
+  linearizability checker, the verified disk cache, and the GitHub device-flow login;
+- never taken: ignore files, redaction purge (objects are append-only), branch-like refs
+  (`green/*`, arbitrary `CreateRef`), a daemon that bypasses the cache tier, and retry
+  layers on land or transactions.
+
 ## Non-goals (first 12 months)
 
 git wire compatibility (import only); offline operation; a code-review UI; Windows; garbage
