@@ -10,7 +10,8 @@ client-server: the server is authoritative, holds history, and answers questions
 diff, merge-base, blame) over RPC. A client holds only the objects it has fetched and a sparse
 working copy. A commit is created on the server directly, so there is no push, no packfile and
 no repository maintenance. Hashes are BLAKE3 over Scion's own canonical encoding, so ids are not
-git SHAs. Git → Scion import is planned for Phase 6; git wire compatibility is a non-goal.
+git SHAs. A git history can be imported one way (see below); git wire compatibility is a
+non-goal.
 
 ## Why are there no branches?
 
@@ -39,11 +40,25 @@ changing any id or any client.
 
 ## Can I use it today?
 
-Not for real work. Phase 3 (the MVP) is in progress. `scion-server` serves the object and
-control gRPC services over Postgres + S3, and `scn` can `clone --sparse`, `status`, `log`,
-`diff`, `blame`, `add`, `commit` (an anonymous head) and `land` (fast-forward `main` only;
-server-side rebase is Phase 5). The cache and daemon tiers are Phase 4. The README status
-section tracks this.
+Not for real work: there is no authentication (Phase 7) and no cache tier yet (Phase 4).
+The MVP (Phase 3) is done: `scion-server` serves the object and control gRPC services over
+Postgres + S3, and `scn` can `clone --sparse`, `status`, `log`, `diff`, `blame`, `add`,
+`commit` (an anonymous head) and `land` (fast-forward `main` only; server-side rebase is
+Phase 5). Git import (Phase 6) works; the benchmark on a real repository is still to come.
+The README status section tracks this.
+
+## Can I bring an existing git repository?
+
+Yes, one way. `scion-ingest import <git-dir> <repo> [<rev>]` is an operator tool that writes
+straight to Postgres and the object store (`DATABASE_URL`, `AWS_*`) through the same create
+path as `CreateChangeset`. Each commit reachable from `<rev>` (default `HEAD`) becomes one
+changeset with its parents, its files changed against the first parent, renames and copies as
+`copy_from` (so `scn blame` follows a moved file), and the git sha in `extra["git-sha"]`. Only
+`main` is created or moved. An interrupted import resumes from its checkpoints, a re-run
+imports only new commits, and an upstream history rewrite is refused. Submodules, paths Scion
+cannot represent and blobs over the per-blob limit stop the import with the commit and path.
+`scion-ingest verify <git-dir> <repo> [--sample <n>]` compares the imported trees with
+`git ls-tree -r`. There is no export back to git.
 
 ## Does a commit get slower as the repository grows?
 
@@ -59,8 +74,8 @@ rewrites only the directories on the changed paths: one changed file at depth fo
 They are the two pieces most teams already run and know how to operate. Postgres holds small,
 mutable-by-CAS metadata (changesets, refs, derived-data pointers); the object store holds the
 bulk immutable bytes (blobs, trees, snapshot manifests). Neither needs repository maintenance,
-and both have managed, horizontally scalable equivalents (CockroachDB is a drop-in target for
-the metadata store; any S3-compatible service works for objects).
+and both have managed, horizontally scalable equivalents (the store is plain SQL so that
+CockroachDB stays a drop-in target, though CI does not test it yet; any S3-compatible service works for objects).
 
 ## What is Scion not a good fit for?
 
