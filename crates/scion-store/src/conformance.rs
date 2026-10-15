@@ -154,7 +154,7 @@ pub async fn derived<S: MetadataStore>(s: &S) {
 /// Ingest checkpoints are per repository and idempotent: the first record of
 /// a git sha wins.
 pub async fn checkpoints<S: MetadataStore>(s: &S) {
-    assert!(s.ingest_checkpoints(REPO).await.unwrap().is_empty());
+    assert_eq!(s.ingest_checkpoints(REPO).await.unwrap(), vec![]);
     let (a, b) = (
         ChangesetId::from_bytes([1; 32]),
         ChangesetId::from_bytes([2; 32]),
@@ -166,8 +166,9 @@ pub async fn checkpoints<S: MetadataStore>(s: &S) {
         s.ingest_checkpoints(REPO).await.unwrap(),
         vec![(vec![0xaa; 20], a), (vec![0xbb; 20], b)]
     );
-    assert!(
-        s.ingest_checkpoints("other").await.unwrap().is_empty(),
+    assert_eq!(
+        s.ingest_checkpoints("other").await.unwrap(),
+        vec![],
         "scoped by repo"
     );
 }
