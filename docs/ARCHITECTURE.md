@@ -129,7 +129,9 @@ forward them and never decide access themselves. Authorization is repo- and dire
 
 Every phase-6+ benchmark runs the same workloads against git and against public
 implementations of the same reference design, on the same machine. Scion is expected to be at
-least as fast on each workload; a regression against any of them is a bug. The workloads cover
+least as fast on each workload except import, and a regression against any of them is a bug.
+Import is held to at most ten times git's time (Phase 6.11): git writes local packfiles, Scion
+writes one immutable object per blob and tree to a remote object store. The workloads cover
 import, full and sparse checkout, status, one-file commit, land, log and blame; the results go
 into a table in `README.md` (Phase 6.13, not published yet) and the measurement script
 (`scripts/bench-real`) stays in the repository.

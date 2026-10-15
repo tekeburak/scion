@@ -1,0 +1,69 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="700" viewBox="0 0 1600 700" role="img" aria-label="One edited file in a 2,500-file tree rewrites 5 of 7,551 tree nodes">
+<title>One edited file in a 2,500-file tree rewrites 5 of 7,551 tree nodes</title>
+<defs><marker id="a-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2dd4bf"/></marker><marker id="a-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f5b545"/></marker><marker id="a-violet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#a78bfa"/></marker><marker id="a-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#93a1b8"/></marker><linearGradient id="glow" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#16213a"/><stop offset="1" stop-color="#0d1321"/></linearGradient></defs>
+<rect x="0" y="0" width="1600" height="700" rx="24" fill="url(#glow)"/>
+<text x="64" y="72" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="34" fill="#e8edf5" font-weight="700" text-anchor="start">A commit costs what it changes</text>
+<text x="64" y="108" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#93a1b8" font-weight="400" text-anchor="start">Editing one file derives a new tree for each directory on its path; every other subtree keeps its id and is shared with the parent.</text>
+<path d="M264,339.0 C288,339.0 280,171.0 304,171.0" fill="none" stroke="#2a3650" stroke-width="2"/>
+<path d="M264,339.0 C288,339.0 280,227.0 304,227.0" fill="none" stroke="#2a3650" stroke-width="2"/>
+<path d="M264,339.0 C288,339.0 280,339.0 304,339.0" fill="none" stroke="#a78bfa" stroke-width="3"/>
+<path d="M264,339.0 C288,339.0 280,451.0 304,451.0" fill="none" stroke="#2a3650" stroke-width="2"/>
+<path d="M504,339.0 C528,339.0 520,171.0 544,171.0" fill="none" stroke="#2a3650" stroke-width="2"/>
+<path d="M504,339.0 C528,339.0 520,227.0 544,227.0" fill="none" stroke="#2a3650" stroke-width="2"/>
+<path d="M504,339.0 C528,339.0 520,339.0 544,339.0" fill="none" stroke="#a78bfa" stroke-width="3"/>
+<path d="M504,339.0 C528,339.0 520,451.0 544,451.0" fill="none" stroke="#2a3650" stroke-width="2"/>
+<path d="M744,339.0 C768,339.0 760,339.0 784,339.0" fill="none" stroke="#a78bfa" stroke-width="3"/>
+<path d="M984,339.0 C1008,339.0 1000,339.0 1024,339.0" fill="none" stroke="#a78bfa" stroke-width="3"/>
+<rect x="64" y="318" width="200" height="42" rx="10" fill="#2a2148" stroke="#a78bfa" stroke-width="2.5"/>
+<text x="82" y="346" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#e8edf5" font-weight="600" text-anchor="start">/</text>
+<text x="248" y="346" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#a78bfa" font-weight="700" text-anchor="end">new</text>
+<rect x="304" y="150" width="200" height="42" rx="10" fill="#151d2e" stroke="#2a3650" stroke-width="2"/>
+<text x="322" y="178" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#93a1b8" font-weight="400" text-anchor="start">d0_0/</text>
+<text x="488" y="178" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="end">shared</text>
+<rect x="304" y="206" width="200" height="42" rx="10" fill="#151d2e" stroke="#2a3650" stroke-width="2"/>
+<text x="322" y="234" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#93a1b8" font-weight="400" text-anchor="start">d0_1/</text>
+<text x="488" y="234" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="end">shared</text>
+<text x="404.0" y="292" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="22" fill="#93a1b8" font-weight="700" text-anchor="middle">⋮</text>
+<rect x="304" y="318" width="200" height="42" rx="10" fill="#2a2148" stroke="#a78bfa" stroke-width="2.5"/>
+<text x="322" y="346" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#e8edf5" font-weight="600" text-anchor="start">d0_7/</text>
+<text x="488" y="346" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#a78bfa" font-weight="700" text-anchor="end">new</text>
+<text x="404.0" y="404" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="22" fill="#93a1b8" font-weight="700" text-anchor="middle">⋮</text>
+<rect x="304" y="430" width="200" height="42" rx="10" fill="#151d2e" stroke="#2a3650" stroke-width="2"/>
+<text x="322" y="458" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#93a1b8" font-weight="400" text-anchor="start">d0_49/</text>
+<text x="488" y="458" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="end">shared</text>
+<rect x="544" y="150" width="200" height="42" rx="10" fill="#151d2e" stroke="#2a3650" stroke-width="2"/>
+<text x="562" y="178" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#93a1b8" font-weight="400" text-anchor="start">d1_0/</text>
+<text x="728" y="178" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="end">shared</text>
+<rect x="544" y="206" width="200" height="42" rx="10" fill="#151d2e" stroke="#2a3650" stroke-width="2"/>
+<text x="562" y="234" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#93a1b8" font-weight="400" text-anchor="start">d1_1/</text>
+<text x="728" y="234" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="end">shared</text>
+<text x="644.0" y="292" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="22" fill="#93a1b8" font-weight="700" text-anchor="middle">⋮</text>
+<rect x="544" y="318" width="200" height="42" rx="10" fill="#2a2148" stroke="#a78bfa" stroke-width="2.5"/>
+<text x="562" y="346" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#e8edf5" font-weight="600" text-anchor="start">d1_9/</text>
+<text x="728" y="346" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#a78bfa" font-weight="700" text-anchor="end">new</text>
+<text x="644.0" y="404" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="22" fill="#93a1b8" font-weight="700" text-anchor="middle">⋮</text>
+<rect x="544" y="430" width="200" height="42" rx="10" fill="#151d2e" stroke="#2a3650" stroke-width="2"/>
+<text x="562" y="458" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#93a1b8" font-weight="400" text-anchor="start">d1_49/</text>
+<text x="728" y="458" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="end">shared</text>
+<rect x="784" y="318" width="200" height="42" rx="10" fill="#2a2148" stroke="#a78bfa" stroke-width="2.5"/>
+<text x="802" y="346" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#e8edf5" font-weight="600" text-anchor="start">d2/</text>
+<text x="968" y="346" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#a78bfa" font-weight="700" text-anchor="end">new</text>
+<rect x="1024" y="318" width="200" height="42" rx="10" fill="#2a2148" stroke="#a78bfa" stroke-width="2.5"/>
+<text x="1042" y="346" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#e8edf5" font-weight="600" text-anchor="start">d3/</text>
+<text x="1208" y="346" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#a78bfa" font-weight="700" text-anchor="end">new</text>
+<line x1="1224" y1="339.0" x2="1260" y2="339.0" stroke="#2dd4bf" stroke-width="3" marker-end="url(#a-teal)"/>
+<rect x="1264" y="318" width="272" height="42" rx="10" fill="#11302d" stroke="#2dd4bf" stroke-width="2.5"/>
+<text x="1282" y="346" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#e8edf5" font-weight="600" text-anchor="start">f_7_9.txt</text>
+<text x="1518" y="346" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#2dd4bf" font-weight="700" text-anchor="end">edited</text>
+<text x="1264" y="394" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">the changeset records only this path</text>
+<rect x="64.0" y="500" width="474.7" height="112" rx="12" fill="#151d2e" stroke="#93a1b8" stroke-width="2"/>
+<text x="88.0" y="548" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="30" fill="#e8edf5" font-weight="700" text-anchor="start">2,500 files</text>
+<text x="88.0" y="582" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="17" fill="#93a1b8" font-weight="400" text-anchor="start">7,551 tree nodes before the edit</text>
+<rect x="562.7" y="500" width="474.7" height="112" rx="12" fill="#151d2e" stroke="#a78bfa" stroke-width="2"/>
+<text x="586.7" y="548" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="30" fill="#e8edf5" font-weight="700" text-anchor="start">5 trees rewritten</text>
+<text x="586.7" y="582" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="17" fill="#93a1b8" font-weight="400" text-anchor="start">the directories on the edited path</text>
+<rect x="1061.3" y="500" width="474.7" height="112" rx="12" fill="#151d2e" stroke="#4ade80" stroke-width="2"/>
+<text x="1085.3" y="548" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="30" fill="#e8edf5" font-weight="700" text-anchor="start">7,546 trees reused</text>
+<text x="1085.3" y="582" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="17" fill="#93a1b8" font-weight="400" text-anchor="start">same ids as in the parent, nothing written</text>
+<text x="64" y="656" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#93a1b8" font-weight="400" text-anchor="start">Asserted by scion-derived's rewritten_nodes_bounded_by_depth_not_file_count test: the work grows with path depth, not with the number of files.</text>
+</svg>
