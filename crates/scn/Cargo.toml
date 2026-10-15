@@ -10,9 +10,10 @@ rust-version.workspace = true
 [dependencies]
 scion-types.workspace = true
 scion-client.workspace = true
-clap = { version = "4.6", features = ["derive"] }
+clap = { version = "4.6", features = ["derive", "env"] }
 diffy = { workspace = true, features = ["std"] }
 tokio = { workspace = true, features = ["fs"] }
+tonic.workspace = true
 
 [dev-dependencies]
 bytes.workspace = true

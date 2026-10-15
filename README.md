@@ -21,12 +21,12 @@ clients are always online and whose commits come mostly from coding agents.</b><
 
 **Pre-MVP. Nothing here is usable by end users yet.**
 
-- **Works today:** `scion-server` serves the object and control gRPC services over Postgres + S3
-  (`log`, `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`, `move_ref`), and the
-  `scn` CLI has its read commands: `clone --sparse`, `status`, `log`, `diff`, `blame`
-  (Phase 3.1–3.7).
-- **Not yet:** `scn` cannot commit or land (Phase 3.8+); the cache and daemon tiers (Phase 4),
-  change requests (Phase 5), git import (Phase 6) and IAM (Phase 7) are planned.
+- **Works today (Phase 3.1–3.8):** `scion-server` serves the object and control gRPC services
+  over Postgres + S3 (`log`, `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`,
+  `move_ref`), and the `scn` CLI can `clone --sparse`, `status`, `log`, `diff`, `blame`, `add`,
+  `commit` (an anonymous head) and `land` (fast-forward `main`).
+- **Not yet:** server-side rebase on land and change requests (Phase 5); the cache and daemon
+  tiers (Phase 4), git import (Phase 6) and IAM (Phase 7) are planned.
 
 Scion is *not* a general replacement for git. Git's distributed, offline-first model is the right
 design for the overwhelming majority of repositories. Scion targets one specific situation: a
@@ -87,8 +87,8 @@ seven runs and the 10,000-file case uses five. All times are in milliseconds; lo
 
 Read these numbers with their limits:
 
-- **\*Commit is not like-for-like yet.** There is no `scn commit` (Phase 3), so the Scion
-  figure times only the server side: `PutBlob` + `CreateChangeset` (with eager derivation) +
+- **\*Commit is not like-for-like yet.** The runner predates `scn commit` (Phase 3.8), so the
+  Scion figure times only the server side: `PutBlob` + `CreateChangeset` (with eager derivation) +
   `MoveRef`. `git commit -a` also scans the working copy. Treat this row as a lower bound for
   Scion.
 - **Storage.** The server runs in-process over loopback gRPC (plain HTTP/2, no TLS) with the
@@ -135,7 +135,7 @@ Full details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
 
 - **Target:** one server serving many repositories, with Linux and macOS clients that are
   always online.
-- **Planned, not built:** `scn commit` and landing (Phase 3.8+), the cache and daemon tiers (Phase 4), change
+- **Planned, not built:** the cache and daemon tiers (Phase 4), change
   requests and the serial land worker (Phase 5), git import (Phase 6), and IAM (Phase 7).
 - **Out of scope for now:** git wire compatibility, offline operation, Windows, a review UI,
   garbage collection, large-file chunking (there is a per-blob size limit) and ignore files. See

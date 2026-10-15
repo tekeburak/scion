@@ -47,8 +47,8 @@ ROADMAP = [
     ("7", "IAM, fuzzing, simulation", "planned"),
     ("8", "Virtual checkouts (FUSE / NFS)", "planned"),
 ]
-PHASE3_DONE = "3.1–3.7 merged: gRPC server, read RPCs, create_changeset, move_ref, client, scn read commands"
-PHASE3_NEXT = "next: scn commit and land (3.8+)"
+PHASE3_DONE = "3.1\u20133.8 merged: gRPC server, read RPCs, create_changeset, move_ref, client, scn clone, status, log, diff, blame, add, commit, land"
+PHASE3_NEXT = "not yet: server-side rebase on land (Phase 5), cache and daemon tiers (Phase 4)"
 
 
 def t(x, y, s, size=20, fill=TEXT, weight=400, anchor="start", mono=False, extra=""):

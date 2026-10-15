@@ -6,10 +6,12 @@ use std::time::Duration;
 use scion_proto::v1::control_service_client::ControlServiceClient;
 use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_proto::v1::{
-    BlameRequest, DiffRequest, GetBlobRequest, GetRefRequest, GetTreeRequest, LogRequest,
-    LogResponse, PathLogRequest,
+    BlameRequest, CreateChangesetRequest, DiffRequest, GetBlobRequest, GetRefRequest,
+    GetTreeRequest, LogRequest, LogResponse, MoveRefRequest, PathLogRequest, PutBlobRequest,
 };
-use scion_types::{BlobId, Changeset, ChangesetId, Decode, FileType, RepoPath, Tree, TreeId};
+use scion_types::{
+    BlobId, Changeset, ChangesetId, Decode, Encode, FileType, RepoPath, Tree, TreeId,
+};
 use tonic::transport::{Channel, Endpoint};
 
 /// Deadline the client attaches to every RPC.
@@ -249,5 +251,50 @@ impl Remote {
                 })
             })
             .collect()
+    }
+
+    /// Upload one blob; returns its id.
+    pub async fn put_blob(&mut self, data: Vec<u8>) -> Result<BlobId, RemoteError> {
+        let resp = self
+            .objects
+            .put_blob(PutBlobRequest { data })
+            .await?
+            .into_inner();
+        BlobId::try_from_slice(&resp.id).map_err(|_| RemoteError::Malformed("blob id"))
+    }
+
+    /// Create `cs` on the server; its blobs must be uploaded first.
+    pub async fn create_changeset(&mut self, cs: &Changeset) -> Result<ChangesetId, RemoteError> {
+        let resp = self
+            .control
+            .create_changeset(CreateChangesetRequest {
+                changeset: cs.encode_to_vec(),
+            })
+            .await?
+            .into_inner();
+        changeset_id(&resp.id, "changeset id")
+    }
+
+    /// Move server ref `name` to `target` if it is still at
+    /// `expected_version` and `target` descends from it; returns the new
+    /// version.
+    pub async fn move_ref(
+        &mut self,
+        repo: &str,
+        name: &str,
+        target: ChangesetId,
+        expected_version: u64,
+    ) -> Result<u64, RemoteError> {
+        Ok(self
+            .control
+            .move_ref(MoveRefRequest {
+                repo: repo.to_owned(),
+                name: name.to_owned(),
+                target: target.as_bytes().to_vec(),
+                expected_version: Some(expected_version),
+            })
+            .await?
+            .into_inner()
+            .version)
     }
 }

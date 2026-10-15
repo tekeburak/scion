@@ -8,7 +8,10 @@
 //! * `sparse` — the sparse profile: one directory or file per line, empty
 //!   for the whole repository;
 //! * `index` — what is checked out: path, blob id, kind, size and mtime of
-//!   every file, so `status` only rehashes files whose metadata changed.
+//!   every file, so `status` only rehashes files whose metadata changed;
+//! * `added` — untracked paths `scn add` marked for the next commit, one per
+//!   line. There are no ignore files: nothing untracked is committed unless
+//!   it was added.
 //!
 //! Checkout starts from a root tree id, fetches the trees the sparse profile
 //! reaches level by level, then the blobs, every request naming one immutable
@@ -18,6 +21,7 @@
 #![forbid(unsafe_code)]
 
 mod checkout;
+mod commit;
 mod index;
 mod remote;
 mod sparse;
@@ -25,6 +29,7 @@ mod status;
 mod workspace;
 
 pub use checkout::{CheckoutError, MAIN_REF, checkout, clone};
+pub use commit::{CommitError, commit};
 pub use index::{Index, IndexEntry};
 pub use remote::{BlameRun, DiffEntry, FileEntry, RPC_DEADLINE, Remote, RemoteError, RemoteRef};
 pub use sparse::{SparseError, SparseProfile};
