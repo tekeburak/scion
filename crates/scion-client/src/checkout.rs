@@ -89,7 +89,7 @@ async fn list_files(
     Ok(files)
 }
 
-fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
+pub(crate) fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
     meta.modified()
         .ok()
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())

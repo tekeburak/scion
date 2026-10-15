@@ -9,6 +9,7 @@ members = [
     "crates/scion-proto",
     "crates/scion-server",
     "crates/scion-client",
+    "crates/scn",
 ]
 
 [workspace.package]
@@ -27,6 +28,7 @@ scion-core = { path = "crates/scion-core", version = "0.0.1" }
 scion-diff3 = { path = "crates/scion-diff3", version = "0.0.1" }
 scion-proto = { path = "crates/scion-proto", version = "0.0.1" }
 scion-server = { path = "crates/scion-server", version = "0.0.1" }
+scion-client = { path = "crates/scion-client", version = "0.0.1" }
 
 # Diff / merge
 diffy = "0.5.2"

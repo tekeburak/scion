@@ -21,10 +21,12 @@ mod checkout;
 mod index;
 mod remote;
 mod sparse;
+mod status;
 mod workspace;
 
 pub use checkout::{CheckoutError, MAIN_REF, checkout, clone};
 pub use index::{Index, IndexEntry};
-pub use remote::{RPC_DEADLINE, Remote, RemoteError, RemoteRef};
+pub use remote::{BlameRun, DiffEntry, FileEntry, RPC_DEADLINE, Remote, RemoteError, RemoteRef};
 pub use sparse::{SparseError, SparseProfile};
+pub use status::{FileStatus, StatusError, read_working_file, status};
 pub use workspace::{Config, Head, State, Workspace, WorkspaceError};
