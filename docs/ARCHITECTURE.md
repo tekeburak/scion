@@ -120,6 +120,8 @@ Every phase-6+ benchmark runs the same workloads against git **and** against
 [CarterT27/scion](https://github.com/CarterT27/scion), the closest independent
 implementation of the same reference design. Scion is expected to be at least as fast on each
 workload; a regression against either is a bug, and the table in `README.md` shows all three.
+The workloads include CarterT27/scion's own four (directory import, one-file commit, full and
+one-directory checkout) in addition to ours, so the comparison is on their terms too.
 
 ### Reuse from CarterT27/scion
 
@@ -131,6 +133,8 @@ in the PR, under these rules:
 - worth adapting: the stat-cache status walk and `openat`-based filesystem access, the git
   test corpus and bundle tooling, the importer structure, the benchmark runner, the
   linearizability checker, the verified disk cache, and the GitHub device-flow login;
+- `scion-ingest` (phase 6) reads git repositories with `gix` (pure Rust, `zlib-rs`, no
+  network features); the dependency stays in that crate so no other crate builds it;
 - never taken: ignore files, redaction purge (objects are append-only), branch-like refs
   (`green/*`, arbitrary `CreateRef`), a daemon that bypasses the cache tier, and retry
   layers on land or transactions.
