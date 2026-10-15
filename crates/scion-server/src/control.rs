@@ -1,10 +1,11 @@
 //! `ControlService`: thin wrappers over `scion-core` and `scion-derived`.
 //! Requests come from clients, so ids, paths and limits are validated here.
-//! Derived data is computed on first request if it is not stored yet.
+//! `CreateChangeset` derives what clone, log and diff need eagerly; anything
+//! else is derived on first request.
 
 use std::sync::Arc;
 
-use scion_derived::{Blame, DeriveError, Deriver, RootTree, SkipList};
+use scion_derived::{Blame, DeriveError, Deriver, PathHistory, RootTree, SkipList};
 use scion_proto::v1::control_service_server::ControlService;
 use scion_proto::v1::{
     BlameRequest, BlameResponse, BlameRun, CreateChangesetRequest, CreateChangesetResponse,
@@ -12,8 +13,8 @@ use scion_proto::v1::{
     LogRequest, LogResponse, MergeBaseRequest, MergeBaseResponse, MoveRefRequest, MoveRefResponse,
     PathLogRequest,
 };
-use scion_store::{MetadataStore, ObjectStore};
-use scion_types::{ChangesetId, Encode, RepoPath};
+use scion_store::{MetadataStore, ObjectStore, StoreError};
+use scion_types::{BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, RepoPath};
 use tonic::{Request, Response, Status};
 
 use crate::store_status;
@@ -140,12 +141,57 @@ impl ControlService for ControlServer {
 
     async fn create_changeset(
         &self,
-        _request: Request<CreateChangesetRequest>,
+        request: Request<CreateChangesetRequest>,
     ) -> Result<Response<CreateChangesetResponse>, Status> {
-        // TODO(Phase 3.4): blob check, WAL write, eager derivation.
-        Err(Status::unimplemented(
-            "CreateChangeset arrives in Phase 3.4",
-        ))
+        let cs = Changeset::decode(&request.get_ref().changeset)
+            .map_err(|e| Status::invalid_argument(format!("changeset: {e}")))?;
+        if cs.repo.is_empty() {
+            return Err(Status::invalid_argument("changeset names no repository"));
+        }
+
+        // Every blob must be uploaded first, or blame and checkout would find
+        // a hole later.
+        let blobs: Vec<BlobId> = cs
+            .file_changes
+            .values()
+            .filter_map(|change| match change {
+                FileChange::Tracked { content, .. } => Some(*content),
+                FileChange::Deleted => None,
+            })
+            .collect();
+        let present = self.objects.has_blobs(&blobs).await.map_err(store_status)?;
+        let missing: Vec<String> = blobs
+            .iter()
+            .zip(present)
+            .filter(|(_, present)| !present)
+            .map(|(id, _)| id.to_hex())
+            .collect();
+        if !missing.is_empty() {
+            return Err(Status::failed_precondition(format!(
+                "blobs not uploaded: {}",
+                missing.join(", ")
+            )));
+        }
+
+        let id = self.meta.put_changeset(&cs).await.map_err(|e| match e {
+            StoreError::UnknownParent(_, parent) => {
+                Status::failed_precondition(format!("unknown parent {parent}"))
+            }
+            e => store_status(e),
+        })?;
+
+        // Eager derivation: what clone, log and diff need right away. Each
+        // costs O(size of the change) given the parents' values. Blame stays
+        // lazy; it reads file contents and is only wanted for some paths.
+        let ctx = self.deriver(&cs.repo);
+        let root = ctx.derive::<RootTree>(id).await.map_err(derive_status)?;
+        ctx.derive::<SkipList>(id).await.map_err(derive_status)?;
+        ctx.derive::<PathHistory>(id).await.map_err(derive_status)?;
+
+        Ok(Response::new(CreateChangesetResponse {
+            id: id.as_bytes().to_vec(),
+            root_tree: root.0.as_bytes().to_vec(),
+        }))
     }
 
     async fn move_ref(
