@@ -2,11 +2,14 @@
 
 use std::collections::HashMap;
 
-use bytes::Bytes;
+use futures_util::{StreamExt, TryStreamExt, stream};
 use scion_store::{MetadataStore, ObjectStore};
 use scion_types::ChangesetId;
 
-use crate::{GIT_SHA, GitRepo, IngestError, ObjectId};
+use crate::{GIT_SHA, GitRepo, IngestError, Mapped, ObjectId};
+
+/// Most blob uploads in flight at once.
+const UPLOAD_CONCURRENCY: usize = 16;
 
 /// The only ref an import creates or moves.
 pub const MAIN_REF: &str = "main";
@@ -85,15 +88,25 @@ pub async fn import(
         if imported.contains_key(&commit.id) {
             continue;
         }
-        let mapped = git.changeset(commit.id, repo, &imported)?;
-        for (_, blob) in &mapped.blobs {
-            let data = git.blob(*blob)?;
-            objects
-                .put_blob(Bytes::from(data))
-                .await
-                .map_err(store_err(commit.id))?;
-        }
-        let (id, _) = scion_server::create_changeset(meta, objects, &mapped.changeset)
+        let Mapped { changeset, blobs } = git.changeset(commit.id, repo, &imported)?;
+        // One presence check per commit; only missing blobs are uploaded.
+        let ids: Vec<_> = blobs.keys().copied().collect();
+        let present = objects
+            .has_blobs(&ids)
+            .await
+            .map_err(store_err(commit.id))?;
+        stream::iter(
+            blobs
+                .into_values()
+                .zip(present)
+                .filter(|(_, present)| !present)
+                .map(|(data, _)| objects.put_blob(data)),
+        )
+        .buffer_unordered(UPLOAD_CONCURRENCY)
+        .try_for_each(|_| async { Ok(()) })
+        .await
+        .map_err(store_err(commit.id))?;
+        let (id, _) = scion_server::create_changeset(meta, objects, &changeset)
             .await
             .map_err(|e| IngestError::Store(commit.id, e.message().to_owned()))?;
         meta.put_ingest_checkpoint(repo, commit.id.as_bytes(), id)

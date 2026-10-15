@@ -11,6 +11,7 @@ rust-version.workspace = true
 # Pure Rust, no network features; only this crate builds it (docs/ARCHITECTURE.md).
 gix = { version = "0.89", default-features = false, features = ["sha1", "revision"] }
 bytes.workspace = true
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 object_store = { version = "0.14.2", features = ["aws"] }
 scion-derived.workspace = true
 scion-server.workspace = true

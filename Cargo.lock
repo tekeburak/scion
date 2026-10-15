@@ -3214,6 +3214,7 @@ version = "0.0.1"
 dependencies = [
  "async-trait",
  "bytes",
+ "futures-util",
  "gix",
  "object_store",
  "scion-client",

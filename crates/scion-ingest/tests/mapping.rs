@@ -100,11 +100,7 @@ fn file_changes_match_git_diff_tree() {
                     };
                     assert_eq!(*kind, want_kind, "{path}");
                     assert_eq!(*copy_from, None);
-                    assert!(
-                        mapped
-                            .blobs
-                            .contains(&(*content, ObjectId::from_hex(sha.as_bytes()).unwrap()))
-                    );
+                    assert_eq!(mapped.blobs[content], data);
                 }
                 (want, got) => panic!("commit {id} {path}: want {want:?}, got {got:?}"),
             }

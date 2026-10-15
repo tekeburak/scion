@@ -33,6 +33,8 @@ pub use verify::{verify, verify_commit};
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
 
+use bytes::Bytes;
+
 pub use gix::ObjectId;
 use gix::objs::tree::{EntryKind, EntryMode};
 use scion_types::{
@@ -92,9 +94,10 @@ pub struct GitCommit {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Mapped {
     pub changeset: Changeset,
-    /// The git blob behind each new or changed file, to upload before the
-    /// changeset is created.
-    pub blobs: Vec<(BlobId, ObjectId)>,
+    /// The contents of each new or changed file, to upload before the
+    /// changeset is created. Held for one commit at a time, so the importer's
+    /// memory follows the largest commit, not the history.
+    pub blobs: BTreeMap<BlobId, Bytes>,
 }
 
 /// A git repository opened for import.
@@ -211,7 +214,7 @@ impl GitRepo {
         };
 
         let mut file_changes = BTreeMap::new();
-        let mut blobs = Vec::new();
+        let mut blobs = BTreeMap::new();
         for (raw, _, new) in &changes {
             let new = *new;
             let to_path = |raw: &[u8]| {
@@ -241,11 +244,12 @@ impl GitRepo {
                         });
                     }
                     let content = BlobId::hash(&data);
-                    blobs.push((content, blob));
+                    let size = data.len() as u64;
+                    blobs.insert(content, Bytes::from(data));
                     FileChange::Tracked {
                         content,
                         kind,
-                        size: data.len() as u64,
+                        size,
                         copy_from,
                     }
                 }
