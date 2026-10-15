@@ -2165,6 +2165,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "scion-server"
+version = "0.0.1"
+dependencies = [
+ "bytes",
+ "object_store",
+ "scion-proto",
+ "scion-store",
+ "scion-types",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-health",
+]
+
+[[package]]
 name = "scion-store"
 version = "0.0.1"
 dependencies = [
@@ -2734,6 +2749,7 @@ dependencies = [
  "futures-core",
  "pin-project-lite",
  "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -2789,6 +2805,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.119",
+]
+
+[[package]]
+name = "tonic-health"
+version = "0.14.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f4ff0636fef47afb3ec02818f5bceb4377b8abb9d6a386aeade18bd6212f8eb7"
+dependencies = [
+ "prost",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tonic-prost",
 ]
 
 [[package]]

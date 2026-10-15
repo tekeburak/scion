@@ -7,6 +7,7 @@ members = [
     "crates/scion-core",
     "crates/scion-diff3",
     "crates/scion-proto",
+    "crates/scion-server",
 ]
 
 [workspace.package]
@@ -38,6 +39,7 @@ prost = "0.14"
 tonic = "0.14"
 tonic-prost = "0.14"
 tonic-prost-build = "0.14"
+tonic-health = "0.14"
 
 # Async
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }

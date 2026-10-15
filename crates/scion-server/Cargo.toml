@@ -1,0 +1,25 @@
+[package]
+name = "scion-server"
+description = "Authoritative Scion server: control plane and object origin over gRPC"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+scion-types.workspace = true
+scion-store.workspace = true
+scion-proto.workspace = true
+bytes.workspace = true
+object_store = { version = "0.14.2", features = ["aws"] }
+tokio = { workspace = true, features = ["net"] }
+tokio-stream.workspace = true
+tonic.workspace = true
+tonic-health.workspace = true
+
+[dev-dependencies]
+scion-types.workspace = true
+
+[lints]
+workspace = true
