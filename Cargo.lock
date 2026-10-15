@@ -3213,6 +3213,8 @@ name = "scion-ingest"
 version = "0.0.1"
 dependencies = [
  "gix",
+ "scion-server",
+ "scion-types",
  "tempfile",
  "thiserror",
 ]

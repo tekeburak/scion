@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
 
-use scion_ingest::{IngestError, ObjectId, commits};
+use scion_ingest::{GitRepo, IngestError, ObjectId};
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -65,7 +65,8 @@ fn lists_every_reachable_commit_parents_first() {
     let dir = tmp.path();
     fixture(dir);
 
-    let walk = commits(dir, "main").unwrap();
+    let repo = GitRepo::open(dir).unwrap();
+    let walk = repo.commits("main").unwrap();
     let ids: Vec<ObjectId> = walk.iter().map(|c| c.id).collect();
     assert_eq!(ids.len(), 8);
     assert_eq!(
@@ -101,21 +102,22 @@ fn lists_every_reachable_commit_parents_first() {
     );
 
     // Deterministic, and any revision works.
-    assert_eq!(commits(dir, "main").unwrap(), walk);
-    assert_eq!(commits(dir, "feature").unwrap().len(), 4);
-    assert_eq!(commits(dir, "main~1").unwrap().len(), 6);
+    assert_eq!(repo.commits("main").unwrap(), walk);
+    assert_eq!(repo.commits("feature").unwrap().len(), 4);
+    assert_eq!(repo.commits("main~1").unwrap().len(), 6);
 }
 
 #[test]
 fn reports_bad_inputs() {
     let tmp = tempfile::tempdir().unwrap();
     assert!(matches!(
-        commits(tmp.path(), "main"),
+        GitRepo::open(tmp.path()),
         Err(IngestError::Open(..))
     ));
     fixture(tmp.path());
+    let repo = GitRepo::open(tmp.path()).unwrap();
     assert!(matches!(
-        commits(tmp.path(), "no-such-ref"),
+        repo.commits("no-such-ref"),
         Err(IngestError::Rev(..))
     ));
 }
