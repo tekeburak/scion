@@ -12,6 +12,7 @@ rust-version.workspace = true
 gix = { version = "0.89", default-features = false, features = ["sha1", "revision"] }
 bytes.workspace = true
 object_store = { version = "0.14.2", features = ["aws"] }
+scion-derived.workspace = true
 scion-server.workspace = true
 scion-store.workspace = true
 scion-types.workspace = true
@@ -21,7 +22,6 @@ tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 [dev-dependencies]
 async-trait.workspace = true
 scion-client.workspace = true
-scion-derived.workspace = true
 tempfile = "3"
 tokio = { workspace = true, features = ["net"] }
 

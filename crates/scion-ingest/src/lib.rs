@@ -17,14 +17,18 @@
 //!   commit's raw 20-byte sha goes into `extra["git-sha"]`, so the original
 //!   stays recoverable.
 //!
+//! [`verify`] checks an import against git, tree by tree.
+//!
 //! [`import`] writes the result to the stores through the same path as the
 //! `CreateChangeset` RPC, then points `main` at the imported tip.
 
 #![forbid(unsafe_code)]
 
 mod import;
+mod verify;
 
 pub use import::{Imported, MAIN_REF, import};
+pub use verify::{verify, verify_commit};
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
@@ -62,6 +66,14 @@ pub enum IngestError {
     Store(ObjectId, String),
     #[error("moving {MAIN_REF} to commit {0}: {1}")]
     Ref(ObjectId, String),
+    #[error("reading ingest checkpoints: {0}")]
+    Checkpoints(String),
+    #[error("commit {commit}: {path:?}: {what}")]
+    Mismatch {
+        commit: ObjectId,
+        path: String,
+        what: &'static str,
+    },
     #[error(
         "{MAIN_REF} is at {main}, which {rev:?} does not contain: the upstream history was \
          rewritten, nothing was imported"
@@ -306,6 +318,17 @@ impl GitRepo {
             }
         }
         Ok(out)
+    }
+
+    /// Every file of commit `id`'s tree: raw path → kind and git blob.
+    pub fn files(&self, id: ObjectId) -> Result<Vec<(Vec<u8>, File)>, IngestError> {
+        let tree = self.tree_of(id)?;
+        let mut changes = Vec::new();
+        self.diff(id, &[], None, Some(tree), &mut changes)?;
+        Ok(changes
+            .into_iter()
+            .filter_map(|(path, _, new)| new.map(|f| (path, f)))
+            .collect())
     }
 
     /// The contents of git blob `id`.
