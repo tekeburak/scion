@@ -7,6 +7,9 @@
 //!
 //! * file changes come from the tree diff against the **first** parent (the
 //!   empty tree for a root commit); other parents only appear in `parents`;
+//! * an added file renamed or copied from a file the same commit deletes or
+//!   modifies (same content, or at least half its lines shared) records it
+//!   as `copy_from`, at the first parent's changeset, so blame follows it;
 //! * modes map to [`FileType`]; submodules, paths that are not valid
 //!   [`RepoPath`]s and blobs over the per-blob limit are rejected;
 //! * author and committer keep their own dates and UTC offsets; names, emails
@@ -91,8 +94,16 @@ pub struct GitRepo {
 /// One entry of a git tree.
 type Entries = BTreeMap<Vec<u8>, (EntryMode, ObjectId)>;
 
-/// A changed file: its raw path, and its new kind and blob (`None` if deleted).
-type Change = (Vec<u8>, Option<(FileType, ObjectId)>);
+/// A file's kind and git blob.
+type File = (FileType, ObjectId);
+
+/// A changed file: its raw path, its old side (`None` if added) and its new
+/// side (`None` if deleted).
+type Change = (Vec<u8>, Option<File>, Option<File>);
+
+/// Most (added file, source file) pairs compared by content in one commit;
+/// past this only exact renames and copies are found, like git's rename limit.
+const MAX_INEXACT_PAIRS: usize = 10_000;
 
 impl GitRepo {
     /// Open the repository at `git_dir` (a work tree or a bare repository).
@@ -182,17 +193,30 @@ impl GitRepo {
         let mut changes = Vec::new();
         self.diff(id, &[], old_tree, Some(c.tree()), &mut changes)?;
 
+        let sources = match parents.first() {
+            Some(_) => self.copy_sources(&changes)?,
+            None => HashMap::new(),
+        };
+
         let mut file_changes = BTreeMap::new();
         let mut blobs = Vec::new();
-        for (raw, new) in changes {
-            let path = std::str::from_utf8(&raw)
-                .ok()
-                .and_then(|s| RepoPath::new(s).ok())
-                .ok_or_else(|| IngestError::Unsupported {
-                    commit: id,
-                    path: String::from_utf8_lossy(&raw).into_owned(),
-                    reason: "not a valid repository path (UTF-8, no empty, `.` or `..` component)",
-                })?;
+        for (raw, _, new) in &changes {
+            let new = *new;
+            let to_path = |raw: &[u8]| {
+                std::str::from_utf8(raw)
+                    .ok()
+                    .and_then(|s| RepoPath::new(s).ok())
+                    .ok_or_else(|| IngestError::Unsupported {
+                        commit: id,
+                        path: String::from_utf8_lossy(raw).into_owned(),
+                        reason: "not a valid repository path (UTF-8, no empty, `.` or `..` component)",
+                    })
+            };
+            let copy_from = match (sources.get(raw), parents.first()) {
+                (Some(from), Some(parent)) => Some((to_path(from)?, *parent)),
+                _ => None,
+            };
+            let path = to_path(raw)?;
             let change = match new {
                 None => FileChange::Deleted,
                 Some((kind, blob)) => {
@@ -210,7 +234,7 @@ impl GitRepo {
                         content,
                         kind,
                         size: data.len() as u64,
-                        copy_from: None,
+                        copy_from,
                     }
                 }
             };
@@ -231,6 +255,57 @@ impl GitRepo {
             extra: BTreeMap::from([(GIT_SHA.to_owned(), id.as_bytes().to_vec())]),
         };
         Ok(Mapped { changeset, blobs })
+    }
+
+    /// For each added file, the file it was renamed or copied from, if any:
+    /// a file deleted or modified by the same commit (its version in the
+    /// first parent) with the same content, or else the most similar one
+    /// sharing at least half its lines. Paths are raw bytes as in `changes`.
+    fn copy_sources(&self, changes: &[Change]) -> Result<HashMap<Vec<u8>, Vec<u8>>, IngestError> {
+        let sources: Vec<(&Vec<u8>, ObjectId)> = changes
+            .iter()
+            .filter_map(|(path, old, new)| match (old, new) {
+                (Some((_, old)), new) if new.is_none_or(|(_, n)| n != *old) => Some((path, *old)),
+                _ => None,
+            })
+            .collect();
+        let added: Vec<(&Vec<u8>, ObjectId)> = changes
+            .iter()
+            .filter_map(|(path, old, new)| match (old, new) {
+                (None, Some((_, new))) => Some((path, *new)),
+                _ => None,
+            })
+            .collect();
+        let mut out = HashMap::new();
+        if sources.is_empty() || added.is_empty() {
+            return Ok(out);
+        }
+        let compare = sources.len() * added.len() <= MAX_INEXACT_PAIRS;
+        let mut source_data: HashMap<ObjectId, Vec<u8>> = HashMap::new();
+        for (path, blob) in added {
+            if let Some((from, _)) = sources.iter().find(|(_, s)| *s == blob) {
+                out.insert(path.clone(), (*from).clone());
+                continue;
+            }
+            if !compare {
+                continue;
+            }
+            let data = self.blob(blob)?;
+            let mut best: Option<(u64, &Vec<u8>)> = None;
+            for (from, source) in &sources {
+                if !source_data.contains_key(source) {
+                    source_data.insert(*source, self.blob(*source)?);
+                }
+                let score = similarity(&source_data[source], &data);
+                if score >= 50 && best.is_none_or(|(b, _)| score > b) {
+                    best = Some((score, from));
+                }
+            }
+            if let Some((_, from)) = best {
+                out.insert(path.clone(), from.clone());
+            }
+        }
+        Ok(out)
     }
 
     /// The contents of git blob `id`.
@@ -268,8 +343,7 @@ impl GitRepo {
     }
 
     /// Append to `out` every file under `prefix` that differs between trees
-    /// `old` and `new` (`None` is the empty tree): its path and its new kind
-    /// and blob, or `None` if it was deleted.
+    /// `old` and `new` (`None` is the empty tree), with both sides.
     fn diff(
         &self,
         commit: ObjectId,
@@ -309,7 +383,7 @@ impl GitRepo {
                 self.diff(commit, &path, old_tree, new_tree, out)?;
             }
             if new_file.is_some() || old_file.is_some() {
-                out.push((path, new_file));
+                out.push((path, old_file, new_file));
             }
         }
         Ok(())
@@ -327,6 +401,29 @@ fn file_type(commit: ObjectId, path: &[u8], mode: EntryMode) -> Result<FileType,
             reason: "submodules are not supported",
         }),
     }
+}
+
+/// Percentage of lines two files share (each line counted as often as it
+/// occurs in both), relative to their average length. Empty files are never
+/// similar.
+fn similarity(a: &[u8], b: &[u8]) -> u64 {
+    let lines = |d: &[u8]| d.split_inclusive(|c| *c == b'\n').count() as u64;
+    let (la, lb) = (lines(a), lines(b));
+    if la == 0 || lb == 0 {
+        return 0;
+    }
+    let mut counts: HashMap<&[u8], u64> = HashMap::new();
+    for line in a.split_inclusive(|c| *c == b'\n') {
+        *counts.entry(line).or_default() += 1;
+    }
+    let mut shared = 0;
+    for line in b.split_inclusive(|c| *c == b'\n') {
+        if let Some(n) = counts.get_mut(line).filter(|n| **n > 0) {
+            *n -= 1;
+            shared += 1;
+        }
+    }
+    200 * shared / (la + lb)
 }
 
 fn identity(sig: gix::actor::SignatureRef<'_>) -> Identity {
