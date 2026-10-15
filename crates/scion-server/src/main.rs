@@ -22,12 +22,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let meta = PostgresStore::connect(&database_url).await?;
     meta.migrate().await?;
-    // TODO(Phase 3.3): hand `meta` to the ControlService.
-    drop(meta);
     let objects = ObjectStorage::new(Arc::new(AmazonS3Builder::from_env().build()?));
 
     let listener = TcpListener::bind(&listen).await?;
     eprintln!("scion-server listening on {}", listener.local_addr()?);
-    scion_server::serve(listener, Arc::new(objects)).await?;
+    scion_server::serve(listener, Arc::new(meta), Arc::new(objects)).await?;
     Ok(())
 }

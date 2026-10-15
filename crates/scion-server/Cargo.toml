@@ -11,6 +11,8 @@ rust-version.workspace = true
 scion-types.workspace = true
 scion-store.workspace = true
 scion-proto.workspace = true
+scion-derived.workspace = true
+scion-core.workspace = true
 bytes.workspace = true
 object_store = { version = "0.14.2", features = ["aws"] }
 tokio = { workspace = true, features = ["net"] }
@@ -20,6 +22,7 @@ tonic-health.workspace = true
 
 [dev-dependencies]
 scion-types.workspace = true
+scion-derived = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

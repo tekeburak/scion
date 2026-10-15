@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_proto::v1::{GetBlobRequest, GetTreeRequest, PutBlobRequest, PutTreeRequest};
-use scion_store::ObjectStorage;
+use scion_store::{MemoryStore, ObjectStorage};
 use scion_types::{BlobId, Decode, Encode, FileType, PathComponent, Tree, TreeEntry, TreeId};
 use tokio::net::TcpListener;
 use tonic::Code;
@@ -20,6 +20,7 @@ async fn start() -> Channel {
     let addr = listener.local_addr().unwrap();
     tokio::spawn(scion_server::serve(
         listener,
+        Arc::new(MemoryStore::new()),
         Arc::new(ObjectStorage::in_memory()),
     ));
     Channel::from_shared(format!("http://{addr}"))
@@ -111,7 +112,7 @@ async fn malformed_input_is_rejected() {
 #[tokio::test]
 async fn health_reports_serving() {
     let mut health = HealthClient::new(start().await);
-    for service in ["", "scion.v1.ObjectService"] {
+    for service in ["", "scion.v1.ObjectService", "scion.v1.ControlService"] {
         let status = health
             .check(HealthCheckRequest {
                 service: service.to_owned(),

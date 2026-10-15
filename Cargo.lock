@@ -2170,6 +2170,8 @@ version = "0.0.1"
 dependencies = [
  "bytes",
  "object_store",
+ "scion-core",
+ "scion-derived",
  "scion-proto",
  "scion-store",
  "scion-types",

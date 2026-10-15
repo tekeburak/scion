@@ -1,22 +1,28 @@
 //! `scion-server`: the authoritative tier. It serves the object plane
-//! (`ObjectService`) from the object store and, from Phase 3.3 on, the control
-//! plane from the metadata store. It holds no repository copy: every request
-//! is answered from Postgres and the object store.
+//! (`ObjectService`) from the object store and the control plane
+//! (`ControlService`) from the metadata store plus derived data. It holds no
+//! repository copy: every request is answered from Postgres and the object
+//! store.
 
 #![forbid(unsafe_code)]
 
+mod control;
 mod object;
 
 use std::sync::Arc;
 use std::time::Duration;
 
+use scion_proto::v1::control_service_server::ControlServiceServer;
 use scion_proto::v1::object_service_server::ObjectServiceServer;
-use scion_store::{ObjectStore, StoreError};
+use scion_store::{MetadataStore, ObjectStore, StoreError};
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::Status;
 
+use control::ControlServer;
 use object::ObjectServer;
+
+pub use control::MAX_LOG_LIMIT;
 
 /// Upper bound on every RPC. A client may ask for less with `grpc-timeout`;
 /// it cannot get more.
@@ -30,18 +36,26 @@ pub const MAX_MESSAGE_BYTES: usize = 64 << 20;
 /// transport fails.
 pub async fn serve(
     listener: TcpListener,
+    meta: Arc<dyn MetadataStore>,
     objects: Arc<dyn ObjectStore>,
 ) -> Result<(), tonic::transport::Error> {
     let (health, health_service) = tonic_health::server::health_reporter();
     health
         .set_serving::<ObjectServiceServer<ObjectServer>>()
         .await;
+    health
+        .set_serving::<ControlServiceServer<ControlServer>>()
+        .await;
+    let control_service = ControlServiceServer::new(ControlServer::new(meta, objects.clone()))
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES);
     let object_service = ObjectServiceServer::new(ObjectServer::new(objects))
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
     tonic::transport::Server::builder()
         .timeout(RPC_DEADLINE)
         .add_service(health_service)
+        .add_service(control_service)
         .add_service(object_service)
         .serve_with_incoming(TcpListenerStream::new(listener))
         .await
