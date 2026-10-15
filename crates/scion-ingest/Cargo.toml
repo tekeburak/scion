@@ -1,0 +1,19 @@
+[package]
+name = "scion-ingest"
+description = "git → Scion importer"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Pure Rust, no network features; only this crate builds it (docs/ARCHITECTURE.md).
+gix = { version = "0.89", default-features = false, features = ["sha1", "revision"] }
+thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true
