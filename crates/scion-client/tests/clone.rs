@@ -1,0 +1,165 @@
+//! Clone against an in-process `scion-server` backed by a memory store.
+
+use std::collections::BTreeMap;
+use std::os::unix::fs::PermissionsExt;
+use std::path::Path;
+use std::sync::Arc;
+
+use bytes::Bytes;
+use scion_client::{CheckoutError, RemoteError, SparseProfile, Workspace, clone};
+use scion_derived::test_util::{REPO, changeset};
+use scion_store::{MemoryStore, MetadataStore, ObjectStore};
+use scion_types::{BlobId, ChangesetId, FileChange, FileType, RepoPath};
+use tokio::net::TcpListener;
+
+const FILES: &[(&str, &[u8], FileType)] = &[
+    ("README", b"hello\n", FileType::Regular),
+    ("bin/run", b"#!/bin/sh\necho hi\n", FileType::Executable),
+    ("docs/link", b"../README", FileType::Symlink),
+    ("srv/api/main.rs", b"fn main() {}\n", FileType::Regular),
+    (
+        "srv/api/lib/util.rs",
+        b"pub fn util() {}\n",
+        FileType::Regular,
+    ),
+    ("srv/web/index.html", b"<html></html>\n", FileType::Regular),
+];
+
+/// A server whose `main` holds [`FILES`]; returns its address and `main`.
+async fn serve() -> (String, ChangesetId) {
+    let store = Arc::new(MemoryStore::new());
+    let mut changes = BTreeMap::new();
+    for (path, content, kind) in FILES {
+        store.put_blob(Bytes::from_static(content)).await.unwrap();
+        changes.insert(
+            RepoPath::new(*path).unwrap(),
+            FileChange::Tracked {
+                content: BlobId::hash(content),
+                kind: *kind,
+                size: content.len() as u64,
+                copy_from: None,
+            },
+        );
+    }
+    let id = store
+        .put_changeset(&changeset(vec![], changes, "root"))
+        .await
+        .unwrap();
+    store.create_ref(REPO, "main", id).await.unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(scion_server::serve(listener, store.clone(), store));
+    (format!("http://{addr}"), id)
+}
+
+/// Every file under `root` outside `.scn/`, relative and sorted.
+fn listing(root: &Path) -> Vec<String> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).unwrap() {
+            let entry = entry.unwrap();
+            let path = entry.path();
+            if entry.file_name() == ".scn" {
+                continue;
+            }
+            if entry.file_type().unwrap().is_dir() {
+                walk(root, &path, out);
+            } else {
+                let rel = path.strip_prefix(root).unwrap();
+                out.push(rel.to_str().unwrap().to_owned());
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, root, &mut out);
+    out.sort();
+    out
+}
+
+#[tokio::test]
+async fn full_clone_materializes_every_file() {
+    let (server, main) = serve().await;
+    let dir = tempfile::tempdir().unwrap();
+    let dest = dir.path().join("wc");
+    let ws = clone(&server, REPO, &dest, SparseProfile::full())
+        .await
+        .unwrap();
+
+    let mut expected: Vec<&str> = FILES.iter().map(|(p, ..)| *p).collect();
+    expected.sort_unstable();
+    assert_eq!(listing(&dest), expected);
+    assert_eq!(
+        std::fs::read(dest.join("srv/api/main.rs")).unwrap(),
+        b"fn main() {}\n"
+    );
+    let mode = std::fs::metadata(dest.join("bin/run"))
+        .unwrap()
+        .permissions()
+        .mode();
+    assert_eq!(mode & 0o111, 0o111, "executable bit set");
+    assert_eq!(
+        std::fs::read_link(dest.join("docs/link")).unwrap(),
+        Path::new("../README")
+    );
+
+    let state = ws.read_state().unwrap();
+    assert_eq!((state.current_head, state.base), (main, main));
+    let config = ws.read_config().unwrap();
+    assert_eq!(
+        (config.server.as_str(), config.repo.as_str()),
+        (server.as_str(), REPO)
+    );
+
+    let index = ws.read_index().unwrap();
+    assert_eq!(index.entries.len(), FILES.len());
+    for (path, content, kind) in FILES {
+        let e = &index.entries[&RepoPath::new(*path).unwrap()];
+        assert_eq!(
+            (e.id, e.kind, e.size),
+            (BlobId::hash(content), *kind, content.len() as u64)
+        );
+    }
+
+    // The working copy is found from any directory inside it.
+    let found = Workspace::find(&dest.join("srv/api")).unwrap();
+    assert_eq!(found.root(), dest);
+}
+
+#[tokio::test]
+async fn sparse_clone_materializes_only_the_profile() {
+    let (server, _) = serve().await;
+    let dir = tempfile::tempdir().unwrap();
+    let sparse = SparseProfile::new(vec![
+        RepoPath::new("srv/api").unwrap(),
+        RepoPath::new("README").unwrap(),
+    ]);
+    let ws = clone(&server, REPO, dir.path(), sparse.clone())
+        .await
+        .unwrap();
+    assert_eq!(
+        listing(dir.path()),
+        ["README", "srv/api/lib/util.rs", "srv/api/main.rs"]
+    );
+    assert_eq!(ws.read_sparse().unwrap(), sparse);
+    assert_eq!(ws.read_index().unwrap().entries.len(), 3);
+}
+
+#[tokio::test]
+async fn refuses_non_empty_destinations_and_unknown_repos() {
+    let (server, _) = serve().await;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("stray"), b"x").unwrap();
+    assert!(matches!(
+        clone(&server, REPO, dir.path(), SparseProfile::full()).await,
+        Err(CheckoutError::NotEmpty(_))
+    ));
+
+    let empty = tempfile::tempdir().unwrap();
+    match clone(&server, "no-such-repo", empty.path(), SparseProfile::full()).await {
+        Err(CheckoutError::Remote(RemoteError::Rpc(status))) => {
+            assert_eq!(status.code(), tonic::Code::NotFound);
+        }
+        other => panic!("expected NOT_FOUND, got {other:?}"),
+    }
+    assert!(!empty.path().join(".scn").exists(), "nothing written");
+}

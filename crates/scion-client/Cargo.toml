@@ -1,0 +1,29 @@
+[package]
+name = "scion-client"
+description = "Library behind `scn`: .scn/ layout, index, sparse profiles, object fetch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+scion-types.workspace = true
+scion-proto.workspace = true
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+serde.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["fs"] }
+toml = "0.9"
+tonic.workspace = true
+
+[dev-dependencies]
+bytes.workspace = true
+scion-derived = { workspace = true, features = ["test-util"] }
+scion-server.workspace = true
+scion-store.workspace = true
+tempfile = "3"
+tokio = { workspace = true, features = ["net"] }
+
+[lints]
+workspace = true
