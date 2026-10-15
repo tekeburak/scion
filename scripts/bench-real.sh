@@ -4,7 +4,7 @@
 #   docker compose -f deploy/docker-compose.yml up -d
 #   scripts/bench-real.sh                 # writes docs/bench/real.csv
 #
-# Needs git, git-filter-repo, cargo, protoc and the compose stack (Postgres + RustFS).
+# Linux (GNU date). Needs git, git-filter-repo, cargo, protoc and the compose stack.
 # The input is fixed: the last $DEPTH commits of rust-lang/rust ending at $RUST_SHA
 # (side branches included), reduced with `git filter-repo --subdirectory-filter` to the
 # history of $PREFIX, minus the paths that were ever submodules (Scion rejects them). Each workload runs $RUNS times on
@@ -17,7 +17,7 @@
 set -euo pipefail
 
 RUST_SHA=91e9c2688eb23af9a5b77f056156e756550c7c99
-DEPTH=300
+DEPTH=8
 PREFIX=library
 SPARSE_DIR=core
 RUNS=${RUNS:-5}
@@ -27,13 +27,12 @@ OUT=${OUT:-$ROOT/docs/bench/real.csv}
 LISTEN=127.0.0.1:7471
 SERVER=http://$LISTEN
 
-export DATABASE_URL=${DATABASE_URL:-postgres://scion:scion@localhost:5432/scion}
-export AWS_ENDPOINT=${AWS_ENDPOINT:-http://localhost:9000}
-export AWS_BUCKET=${AWS_BUCKET:-scion-objects}
-export AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID:-scion}
-export AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY:-scionscion}
-export AWS_REGION=${AWS_REGION:-us-east-1}
-export AWS_ALLOW_HTTP=${AWS_ALLOW_HTTP:-true}
+# The compose stack's credentials, set outright: a shell that already exports other
+# AWS_* values (CI, cloud sandboxes) must not leak them into the benchmark.
+export DATABASE_URL=postgres://scion:scion@localhost:5432/scion
+export AWS_ENDPOINT=http://localhost:9000 AWS_BUCKET=scion-objects AWS_REGION=us-east-1
+export AWS_ACCESS_KEY_ID=scion AWS_SECRET_ACCESS_KEY=scionscion AWS_ALLOW_HTTP=true
+unset AWS_SESSION_TOKEN AWS_PROFILE
 export SCN_AUTHOR="Bench <bench@example.com>"
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 export GIT_AUTHOR_NAME=Bench GIT_AUTHOR_EMAIL=bench@example.com
@@ -111,13 +110,14 @@ record() {
   printf '%-22s %-6s %10.1f ms   (runs: %s)\n' "$workload" "$tool" "$m" "$*" >&2
 }
 
-# time_ms <command...>: run once, print elapsed milliseconds.
-time_ms() {
+# timed <command...>: run once and set MS to the elapsed milliseconds. Runs in this
+# shell (not in `$(...)`), so a failing command stops the script.
+timed() {
   local t0 t1
   t0=$(now_ns)
   "$@" >/dev/null
   t1=$(now_ns)
-  awk -v d=$((t1 - t0)) 'BEGIN {printf "%.1f", d / 1e6}'
+  MS=$(awk -v d=$((t1 - t0)) 'BEGIN {printf "%.1f", d / 1e6}')
 }
 
 RUN_ID=bench-$(date +%s)
@@ -126,8 +126,10 @@ RUN_ID=bench-$(date +%s)
 git_import() { rm -rf "$WORK/g-import"; git clone -q --bare --no-local "$ORIGIN" "$WORK/g-import"; }
 g=(); s=()
 for i in $(seq 1 "$RUNS"); do
-  g+=("$(time_ms git_import)")
-  s+=("$(time_ms "$INGEST" import "$SUBSET" "$RUN_ID-$i" main)")
+  timed git_import
+  g+=("$MS")
+  timed "$INGEST" import "$SUBSET" "$RUN_ID-$i" main
+  s+=("$MS")
 done
 record "import history" git "${g[@]}"
 record "import history" scion "${s[@]}"
@@ -144,8 +146,10 @@ git_sparse() {
 scion_sparse() { rm -rf "$WORK/s-sparse"; "$SCN" clone "$SERVER" "$REPO" "$WORK/s-sparse" --sparse "$SPARSE_DIR"; }
 g=(); s=()
 for _ in $(seq 1 "$RUNS"); do
-  g+=("$(time_ms git_sparse)")
-  s+=("$(time_ms scion_sparse)")
+  timed git_sparse
+  g+=("$MS")
+  timed scion_sparse
+  s+=("$MS")
 done
 record "sparse clone" git "${g[@]}"
 record "sparse clone" scion "${s[@]}"
@@ -157,16 +161,20 @@ git clone -q --no-local "file://$ORIGIN" "$WORK/g-wc"
 
 g=(); s=()
 for _ in $(seq 1 "$RUNS"); do
-  g+=("$(time_ms git -C "$WORK/g-wc" log -n 100)")
-  s+=("$(time_ms sh -c "cd '$WORK/s-wc' && '$SCN' log -n 100")")
+  timed git -C "$WORK/g-wc" log -n 100
+  g+=("$MS")
+  timed sh -c "cd '$WORK/s-wc' && '$SCN' log -n 100"
+  s+=("$MS")
 done
 record "log (100)" git "${g[@]}"
 record "log (100)" scion "${s[@]}"
 
 g=(); s=()
 for _ in $(seq 1 "$RUNS"); do
-  g+=("$(time_ms git -C "$WORK/g-wc" blame -- "$BLAME_FILE")")
-  s+=("$(time_ms sh -c "cd '$WORK/s-wc' && '$SCN' blame '$BLAME_FILE'")")
+  timed git -C "$WORK/g-wc" blame -- "$BLAME_FILE"
+  g+=("$MS")
+  timed sh -c "cd '$WORK/s-wc' && '$SCN' blame '$BLAME_FILE'"
+  s+=("$MS")
 done
 record "blame" git "${g[@]}"
 record "blame" scion "${s[@]}"
@@ -183,8 +191,10 @@ scion_land() {
 }
 g=(); s=()
 for i in $(seq 1 "$RUNS"); do
-  g+=("$(time_ms git_land "$i")")
-  s+=("$(time_ms scion_land "$i")")
+  timed git_land "$i"
+  g+=("$MS")
+  timed scion_land "$i"
+  s+=("$MS")
 done
 record "land one file" git "${g[@]}"
 record "land one file" scion "${s[@]}"

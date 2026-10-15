@@ -1,0 +1,15 @@
+# rust-lang/rust@91e9c2688eb23af9a5b77f056156e756550c7c99 depth 8, subtree library: 50 commits, 2330 files
+# sparse dir core, blame std/tests/sync/oneshot.rs, 5 runs, median ms
+# Linux 6.18.44-fc-v114, 4 cpus, git version 2.43.0, rustc 1.99.0 (b940084d7 2026-09-28)
+# scion bc59a88
+workload,tool,median_ms
+import history,git,545.4
+import history,scion,153100.2
+sparse clone,git,307.2
+sparse clone,scion,439.9
+log (100),git,6.3
+log (100),scion,23.4
+blame,git,8.3
+blame,scion,75.6
+land one file,git,58.5
+land one file,scion,183.3
