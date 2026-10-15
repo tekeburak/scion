@@ -41,7 +41,7 @@ ROADMAP = [
     ("1", "Data model, Postgres + S3 stores", "done"),
     ("2", "Derived data, diff, merge, rebase", "done"),
     ("3", "scion-server + scn CLI (MVP)", "done"),
-    ("6", "git import into Scion", "planned"),
+    ("6", "git import into Scion", "active"),
     ("4", "Cache and daemon tiers", "planned"),
     ("5", "Change requests, land worker", "planned"),
     ("7", "IAM, fuzzing, simulation", "planned"),
@@ -50,7 +50,7 @@ ROADMAP = [
 # Phases run in the order listed: git import comes right after the MVP so real repositories
 # can be tested and benchmarked.
 STATUS_DONE = "MVP done: scion-server on Postgres + S3, scn clone --sparse, status, log, diff, blame, add, commit, land"
-STATUS_NEXT = "next: git import (Phase 6), then cache and daemon tiers (4), change requests (5), IAM (7), FUSE (8)"
+STATUS_NEXT = "in progress: Phase 6 git import (6.1-6.8 merged; benchmark 6.9-6.10 next), then tiers (4), change requests (5), IAM (7), FUSE (8)"
 
 
 def t(x, y, s, size=20, fill=TEXT, weight=400, anchor="start", mono=False, extra=""):
@@ -353,7 +353,7 @@ FIGURES = {
     "architecture.svg": architecture_svg,
     "changeset.svg": changeset_svg,
     "roadmap.svg": roadmap_svg,
-    "badge-status.svg": lambda: badge_svg("status", "MVP \u00b7 Phase 6 next", "#c27c0e"),
+    "badge-status.svg": lambda: badge_svg("status", "MVP \u00b7 Phase 6 in progress", "#c27c0e"),
     "badge-license.svg": lambda: badge_svg("license", "Apache-2.0", "#2b7bb9"),
 }
 

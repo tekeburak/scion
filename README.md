@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://github.com/tekeburak/scion/actions/workflows/ci.yml"><img src="https://github.com/tekeburak/scion/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="LICENSE"><img src="docs/assets/badge-license.svg" alt="license: Apache-2.0"></a>
-  <a href="#status"><img src="docs/assets/badge-status.svg" alt="status: MVP, Phase 6 next"></a>
+  <a href="#status"><img src="docs/assets/badge-status.svg" alt="status: MVP, Phase 6 in progress"></a>
 </p>
 
 <h1 align="center"><img src="docs/assets/logo.svg" width="96" alt=""><br>Scion</h1>
@@ -21,17 +21,21 @@ deliberate deviations from the reference design (trees in S3, canonical BLAKE3, 
 ## Status
 
 <p align="center">
-  <img src="docs/assets/roadmap.svg" width="800" alt="Phases 0 to 3 done; then Phase 6, 4, 5, 7 and 8 planned in that order">
+  <img src="docs/assets/roadmap.svg" width="800" alt="Phases 0 to 3 done; Phase 6 in progress; then Phases 4, 5, 7 and 8 planned in that order">
 </p>
 
-**MVP (Phase 3) done. Not production-ready: no auth, no cache tiers, no git import yet.**
+**MVP (Phase 3) done; git import (Phase 6) in progress. Not production-ready: no auth, no cache tiers.**
 
 - **Works today:** `scion-server` serves the object and control gRPC services over Postgres +
   S3 (`log`, `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`, `move_ref`), and the
   `scn` CLI can `clone --sparse`, `status`, `log`, `diff`, `blame`, `add`, `commit` (an anonymous
   head) and `land` (fast-forward `main`). CI runs that loop end to end on Postgres + S3.
-- **Next:** git import (Phase 6), so real repositories can be tested and benchmarked; then the
-  cache and daemon tiers (Phase 4), change requests and server-side rebase on land (Phase 5),
+- **Git import (Phase 6.1–6.8 merged):** `scion-ingest import <git-dir> <repo> [<rev>]` turns a
+  git history into changesets (first-parent file changes, renames and copies as `copy_from`,
+  the git sha kept in `extra`), resumes from checkpoints, syncs incrementally and refuses a
+  rewritten upstream; `scion-ingest verify` compares every imported tree with `git ls-tree`.
+- **Next:** a benchmark on a real repository and its results in this README (Phase 6.9–6.10),
+  then the cache and daemon tiers (Phase 4), change requests and server-side rebase on land (Phase 5),
   IAM (Phase 7) and virtualized checkouts (Phase 8).
 
 Scion is *not* a general replacement for git. Git's distributed, offline-first model is the right
@@ -142,7 +146,8 @@ Full details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
 - **Target:** one server serving many repositories, with Linux and macOS clients that are
   always online.
 - **Planned, not built:** the cache and daemon tiers (Phase 4), change
-  requests and the serial land worker (Phase 5), git import (Phase 6), and IAM (Phase 7).
+  requests and the serial land worker (Phase 5), and IAM (Phase 7). Git import (Phase 6) is
+  in progress: the importer works, the real-repository benchmark is not done yet.
 - **Out of scope for now:** git wire compatibility, offline operation, Windows, a review UI,
   garbage collection, large-file chunking (there is a per-blob size limit) and ignore files. See
   [`docs/FAQ.md`](docs/FAQ.md#what-is-scion-not-a-good-fit-for).
@@ -156,6 +161,7 @@ Full details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
 | Algorithms | `scion-derived` (root tree, path history, blame, skip list), `scion-core` (diff, log, merge-base, merge, rebase), `scion-diff3` |
 | Network | `scion-proto` (gRPC schema), `scion-server` (control plane and object origin) |
 | Client | `scion-client`: `.scn/` layout, index, sparse profile, clone, checkout and commit; `scn`: the CLI |
+| Import | `scion-ingest`: git → Scion importer (`import`, `verify`), checkpoints and incremental sync |
 
 ## Prior art
 
