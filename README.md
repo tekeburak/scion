@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://github.com/tekeburak/scion/actions/workflows/ci.yml"><img src="https://github.com/tekeburak/scion/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="LICENSE"><img src="docs/assets/badge-license.svg" alt="license: Apache-2.0"></a>
-  <a href="#status"><img src="docs/assets/badge-status.svg" alt="status: pre-MVP, Phase 3"></a>
+  <a href="#status"><img src="docs/assets/badge-status.svg" alt="status: MVP, Phase 6 next"></a>
 </p>
 
 <h1 align="center"><img src="docs/assets/logo.svg" width="96" alt=""><br>Scion</h1>
@@ -13,20 +13,26 @@
 <p align="center"><b>A server-authoritative source control system for one very large monorepo whose
 clients are always online and whose commits come mostly from coding agents.</b></p>
 
+**Why it is different** ([details](docs/ARCHITECTURE.md)): metadata in Postgres and every object in S3, with no
+packfiles and no materialized repository copy anywhere · trees, history, blame and ancestry are
+derived data, so a commit costs what it changes · strict daemon → cache → server tiering, and
+deliberate deviations from the reference design (trees in S3, canonical BLAKE3, only `main` and `release/*`).
+
 ## Status
 
 <p align="center">
-  <img src="docs/assets/roadmap.svg" width="800" alt="Phases 0 to 2 done, Phase 3 in progress, Phases 4 to 8 planned">
+  <img src="docs/assets/roadmap.svg" width="800" alt="Phases 0 to 3 done; then Phase 6, 4, 5, 7 and 8 planned in that order">
 </p>
 
-**Pre-MVP. Nothing here is usable by end users yet.**
+**MVP (Phase 3) done. Not production-ready: no auth, no cache tiers, no git import yet.**
 
-- **Works today (Phase 3.1–3.8):** `scion-server` serves the object and control gRPC services
-  over Postgres + S3 (`log`, `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`,
-  `move_ref`), and the `scn` CLI can `clone --sparse`, `status`, `log`, `diff`, `blame`, `add`,
-  `commit` (an anonymous head) and `land` (fast-forward `main`).
-- **Not yet:** server-side rebase on land and change requests (Phase 5); the cache and daemon
-  tiers (Phase 4), git import (Phase 6) and IAM (Phase 7) are planned.
+- **Works today:** `scion-server` serves the object and control gRPC services over Postgres +
+  S3 (`log`, `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`, `move_ref`), and the
+  `scn` CLI can `clone --sparse`, `status`, `log`, `diff`, `blame`, `add`, `commit` (an anonymous
+  head) and `land` (fast-forward `main`). CI runs that loop end to end on Postgres + S3.
+- **Next:** git import (Phase 6), so real repositories can be tested and benchmarked; then the
+  cache and daemon tiers (Phase 4), change requests and server-side rebase on land (Phase 5),
+  IAM (Phase 7) and virtualized checkouts (Phase 8).
 
 Scion is *not* a general replacement for git. Git's distributed, offline-first model is the right
 design for the overwhelming majority of repositories. Scion targets one specific situation: a
@@ -39,7 +45,7 @@ This is an independent open-source project inspired by the design described in A
 engineering post [*Redesigning source control at Anthropic*](https://www.anthropic.com/engineering/redesigning-source-control).
 It is not affiliated with or endorsed by Anthropic. The name may change before the first release.
 
-## Why it is different
+## Why it is different, in detail
 
 - **Postgres + S3, nothing else.** Metadata (changesets, refs, derived-data pointers) lives in
   Postgres; blobs, trees and snapshot manifests live in any S3-compatible object store. No
@@ -149,7 +155,7 @@ Full details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
 | Storage | `scion-store`: `MetadataStore` / `ObjectStore` traits; memory, Postgres and S3 implementations |
 | Algorithms | `scion-derived` (root tree, path history, blame, skip list), `scion-core` (diff, log, merge-base, merge, rebase), `scion-diff3` |
 | Network | `scion-proto` (gRPC schema), `scion-server` (control plane and object origin) |
-| Client | `scion-client`: `.scn/` layout, index, sparse profile, clone and checkout |
+| Client | `scion-client`: `.scn/` layout, index, sparse profile, clone, checkout and commit; `scn`: the CLI |
 
 ## Prior art
 
@@ -165,13 +171,17 @@ Full details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
 | 0 | Workspace, CI, local storage stack, docs | done |
 | 1 | Data model, canonical encoding, golden hashes, store traits + memory impl | done |
 | 1 | Postgres metadata store, S3-compatible object store | done |
-| 2 | Derived data (trees, path history, blame, skip lists), diff / merge-base / rebase / merge | planned |
-| 3 | `scion-server` (gRPC) + `scn` CLI — the MVP | planned |
+| 2 | Derived data (trees, path history, blame, skip lists), diff / merge-base / rebase / merge | done |
+| 3 | `scion-server` (gRPC) + `scn` CLI — the MVP | done |
+| 6 | git → Scion ingestion, benchmarks on a real repository | next |
 | 4 | `scion-cache` and `scion-daemon` tiers, manifest-based seeding | post-MVP |
 | 5 | Server-side rebase/merge UX, change requests, serial land worker | post-MVP |
-| 6 | git → Scion ingestion | post-MVP |
 | 7 | IAM (GitHub device-flow login, service principals, repo + directory ACLs), fuzzing, hermetic simulation | post-MVP |
 | 8 | Virtualized checkouts (FUSE / NFS) | post-MVP |
+
+Phases run in table order: git import comes right after the MVP because testing and
+benchmarking against real repositories needs it. From Phase 6 on, each phase's single-PR
+steps go into `docs/ROADMAP.md` when the phase starts.
 
 ## Development
 

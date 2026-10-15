@@ -40,15 +40,17 @@ ROADMAP = [
     ("0", "Workspace, CI, local stack", "done"),
     ("1", "Data model, Postgres + S3 stores", "done"),
     ("2", "Derived data, diff, merge, rebase", "done"),
-    ("3", "scion-server + scn CLI (MVP)", "active"),
+    ("3", "scion-server + scn CLI (MVP)", "done"),
+    ("6", "git import into Scion", "planned"),
     ("4", "Cache and daemon tiers", "planned"),
     ("5", "Change requests, land worker", "planned"),
-    ("6", "git import into Scion", "planned"),
     ("7", "IAM, fuzzing, simulation", "planned"),
     ("8", "Virtual checkouts (FUSE / NFS)", "planned"),
 ]
-PHASE3_DONE = "3.1\u20133.8 merged: gRPC server, read RPCs, create_changeset, move_ref, client, scn clone, status, log, diff, blame, add, commit, land"
-PHASE3_NEXT = "not yet: server-side rebase on land (Phase 5), cache and daemon tiers (Phase 4)"
+# Phases run in the order listed: git import comes right after the MVP so real repositories
+# can be tested and benchmarked.
+STATUS_DONE = "MVP done: scion-server on Postgres + S3, scn clone --sparse, status, log, diff, blame, add, commit, land"
+STATUS_NEXT = "next: git import (Phase 6), then cache and daemon tiers (4), change requests (5), IAM (7), FUSE (8)"
 
 
 def t(x, y, s, size=20, fill=TEXT, weight=400, anchor="start", mono=False, extra=""):
@@ -323,8 +325,8 @@ def roadmap_svg():
         lines.append(cur)
         for j, ln in enumerate(lines[:2]):
             b.append(t(round(x + 16, 1), 184 + j * 18, ln, 13, MUTED))
-    b.append(t(64, 248, PHASE3_DONE, 16, TEXT))
-    b.append(t(64, 274, PHASE3_NEXT, 16, AMBER, 600))
+    b.append(t(64, 248, STATUS_DONE, 16, TEXT))
+    b.append(t(64, 274, STATUS_NEXT, 16, AMBER, 600))
     return svg(h, "Scion roadmap status by phase", b)
 
 
@@ -351,7 +353,7 @@ FIGURES = {
     "architecture.svg": architecture_svg,
     "changeset.svg": changeset_svg,
     "roadmap.svg": roadmap_svg,
-    "badge-status.svg": lambda: badge_svg("status", "pre-MVP \u00b7 Phase 3", "#c27c0e"),
+    "badge-status.svg": lambda: badge_svg("status", "MVP \u00b7 Phase 6 next", "#c27c0e"),
     "badge-license.svg": lambda: badge_svg("license", "Apache-2.0", "#2b7bb9"),
 }
 

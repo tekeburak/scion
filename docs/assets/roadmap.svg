@@ -18,26 +18,26 @@
 <text x="409.8" y="160" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#4ade80" font-weight="600" text-anchor="start">done</text>
 <text x="409.8" y="184" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">Derived data, diff,</text>
 <text x="409.8" y="202" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">merge, rebase</text>
-<rect x="558.7" y="96" width="152.9" height="112" rx="12" fill="#33270f" stroke="#f5b545" stroke-width="2"/>
+<rect x="558.7" y="96" width="152.9" height="112" rx="12" fill="#16301f" stroke="#4ade80" stroke-width="2"/>
 <text x="574.7" y="134" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="700" text-anchor="start">Phase 3</text>
-<text x="574.7" y="160" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#f5b545" font-weight="600" text-anchor="start">in progress</text>
+<text x="574.7" y="160" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#4ade80" font-weight="600" text-anchor="start">done</text>
 <text x="574.7" y="184" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">scion-server + scn</text>
 <text x="574.7" y="202" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">CLI (MVP)</text>
 <rect x="723.6" y="96" width="152.9" height="112" rx="12" fill="#151d2e" stroke="#2a3650" stroke-width="2" stroke-dasharray="8 6"/>
-<text x="739.6" y="134" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="700" text-anchor="start">Phase 4</text>
+<text x="739.6" y="134" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="700" text-anchor="start">Phase 6</text>
 <text x="739.6" y="160" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="600" text-anchor="start">planned</text>
-<text x="739.6" y="184" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">Cache and daemon</text>
-<text x="739.6" y="202" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">tiers</text>
+<text x="739.6" y="184" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">git import into</text>
+<text x="739.6" y="202" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">Scion</text>
 <rect x="888.4" y="96" width="152.9" height="112" rx="12" fill="#151d2e" stroke="#2a3650" stroke-width="2" stroke-dasharray="8 6"/>
-<text x="904.4" y="134" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="700" text-anchor="start">Phase 5</text>
+<text x="904.4" y="134" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="700" text-anchor="start">Phase 4</text>
 <text x="904.4" y="160" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="600" text-anchor="start">planned</text>
-<text x="904.4" y="184" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">Change requests,</text>
-<text x="904.4" y="202" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">land worker</text>
+<text x="904.4" y="184" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">Cache and daemon</text>
+<text x="904.4" y="202" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">tiers</text>
 <rect x="1053.3" y="96" width="152.9" height="112" rx="12" fill="#151d2e" stroke="#2a3650" stroke-width="2" stroke-dasharray="8 6"/>
-<text x="1069.3" y="134" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="700" text-anchor="start">Phase 6</text>
+<text x="1069.3" y="134" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="700" text-anchor="start">Phase 5</text>
 <text x="1069.3" y="160" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="600" text-anchor="start">planned</text>
-<text x="1069.3" y="184" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">git import into</text>
-<text x="1069.3" y="202" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">Scion</text>
+<text x="1069.3" y="184" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">Change requests,</text>
+<text x="1069.3" y="202" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">land worker</text>
 <rect x="1218.2" y="96" width="152.9" height="112" rx="12" fill="#151d2e" stroke="#2a3650" stroke-width="2" stroke-dasharray="8 6"/>
 <text x="1234.2" y="134" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="700" text-anchor="start">Phase 7</text>
 <text x="1234.2" y="160" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="600" text-anchor="start">planned</text>
@@ -48,6 +48,6 @@
 <text x="1399.1" y="160" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="600" text-anchor="start">planned</text>
 <text x="1399.1" y="184" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">Virtual checkouts</text>
 <text x="1399.1" y="202" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">(FUSE / NFS)</text>
-<text x="64" y="248" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#e8edf5" font-weight="400" text-anchor="start">3.1–3.8 merged: gRPC server, read RPCs, create_changeset, move_ref, client, scn clone, status, log, diff, blame, add, commit, land</text>
-<text x="64" y="274" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#f5b545" font-weight="600" text-anchor="start">not yet: server-side rebase on land (Phase 5), cache and daemon tiers (Phase 4)</text>
+<text x="64" y="248" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#e8edf5" font-weight="400" text-anchor="start">MVP done: scion-server on Postgres + S3, scn clone --sparse, status, log, diff, blame, add, commit, land</text>
+<text x="64" y="274" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#f5b545" font-weight="600" text-anchor="start">next: git import (Phase 6), then cache and daemon tiers (4), change requests (5), IAM (7), FUSE (8)</text>
 </svg>
