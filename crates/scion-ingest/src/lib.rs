@@ -59,6 +59,11 @@ pub enum IngestError {
     Store(ObjectId, String),
     #[error("moving {MAIN_REF} to commit {0}: {1}")]
     Ref(ObjectId, String),
+    #[error(
+        "{MAIN_REF} is at {main}, which {rev:?} does not contain: the upstream history was \
+         rewritten, nothing was imported"
+    )]
+    Diverged { main: String, rev: String },
 }
 
 /// A commit and its parents, in git's order (first parent first).

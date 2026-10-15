@@ -6,7 +6,7 @@ use bytes::Bytes;
 use scion_store::{MetadataStore, ObjectStore};
 use scion_types::ChangesetId;
 
-use crate::{GitRepo, IngestError, ObjectId};
+use crate::{GIT_SHA, GitRepo, IngestError, ObjectId};
 
 /// The only ref an import creates or moves.
 pub const MAIN_REF: &str = "main";
@@ -26,7 +26,10 @@ pub struct Imported {
 ///
 /// Each created changeset is recorded in `ingest_checkpoints` right after it
 /// is stored, so an interrupted import resumes where it stopped: a run skips
-/// every commit already recorded and creates exactly the rest.
+/// every commit already recorded and creates exactly the rest. Re-running
+/// against an updated repository therefore imports only the new commits.
+/// If `main` already points at a commit that `rev` does not contain (the
+/// upstream history was rewritten), nothing is written.
 pub async fn import(
     git: &GitRepo,
     rev: &str,
@@ -41,6 +44,30 @@ pub async fn import(
         .id;
     let store_err =
         |id: ObjectId| move |e: scion_store::StoreError| IngestError::Store(id, e.to_string());
+
+    // Refuse a rewritten upstream before writing anything: `main` must be at
+    // a commit this revision still contains.
+    let current = meta
+        .get_ref(repo, MAIN_REF)
+        .await
+        .map_err(|e| IngestError::Ref(tip_commit, e.to_string()))?;
+    if let Some(cur) = &current {
+        let main_sha = meta
+            .get_changeset(repo, cur.target)
+            .await
+            .map_err(store_err(tip_commit))?
+            .and_then(|cs| cs.extra.get(GIT_SHA).cloned())
+            .and_then(|sha| ObjectId::try_from(sha.as_slice()).ok());
+        if !main_sha.is_some_and(|sha| commits.iter().any(|c| c.id == sha)) {
+            return Err(IngestError::Diverged {
+                main: main_sha.map_or_else(
+                    || format!("changeset {} (not imported from git)", cur.target),
+                    |sha| format!("git commit {sha}"),
+                ),
+                rev: rev.to_owned(),
+            });
+        }
+    }
 
     let mut imported: HashMap<ObjectId, ChangesetId> = HashMap::with_capacity(commits.len());
     for (sha, cs) in meta
@@ -77,10 +104,6 @@ pub async fn import(
     }
 
     let tip = imported[&tip_commit];
-    let current = meta
-        .get_ref(repo, MAIN_REF)
-        .await
-        .map_err(|e| IngestError::Ref(tip_commit, e.to_string()))?;
     if current.as_ref().is_none_or(|c| c.target != tip) {
         scion_server::move_ref(
             meta,
