@@ -386,4 +386,42 @@ impl MetadataStore for PostgresStore {
         .await?;
         Ok(row.map(|(p,)| p))
     }
+
+    async fn put_ingest_checkpoint(
+        &self,
+        repo: &str,
+        git_sha: &[u8],
+        cs: ChangesetId,
+    ) -> Result<()> {
+        let mut tx = self.pool.begin().await?;
+        let repo_id = Self::ensure_repo(&mut tx, repo).await?;
+        sqlx::query(
+            "INSERT INTO ingest_checkpoints (repo, git_sha, changeset_id) \
+             VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
+        )
+        .bind(repo_id)
+        .bind(git_sha)
+        .bind(cs.as_bytes().as_slice())
+        .execute(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    async fn ingest_checkpoints(&self, repo: &str) -> Result<Vec<(Vec<u8>, ChangesetId)>> {
+        let rows: Vec<(Vec<u8>, Vec<u8>)> = sqlx::query_as(
+            "SELECT c.git_sha, c.changeset_id FROM ingest_checkpoints c \
+             JOIN repos r ON r.id = c.repo WHERE r.name = $1 ORDER BY c.git_sha",
+        )
+        .bind(repo)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|(sha, cs)| {
+                let cs = ChangesetId::try_from_slice(&cs)
+                    .map_err(|e| StoreError::Corrupt(format!("checkpoint changeset id: {e}")))?;
+                Ok((sha, cs))
+            })
+            .collect()
+    }
 }

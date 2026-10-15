@@ -219,4 +219,18 @@ impl MetadataStore for CountingMeta<'_> {
         self.derived_reads.fetch_add(1, Ordering::Relaxed);
         self.inner.get_derived(repo, ty, version, cs).await
     }
+    async fn put_ingest_checkpoint(
+        &self,
+        repo: &str,
+        git_sha: &[u8],
+        cs: ChangesetId,
+    ) -> scion_store::Result<()> {
+        self.inner.put_ingest_checkpoint(repo, git_sha, cs).await
+    }
+    async fn ingest_checkpoints(
+        &self,
+        repo: &str,
+    ) -> scion_store::Result<Vec<(Vec<u8>, ChangesetId)>> {
+        self.inner.ingest_checkpoints(repo).await
+    }
 }

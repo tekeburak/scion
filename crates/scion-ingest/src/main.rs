@@ -5,7 +5,7 @@
 //! ```
 //!
 //! Imports every commit reachable from `<rev>` (default `HEAD`) and points
-//! `main` at it. Like `scion-server`, it works on the stores directly and is
+//! `main` at it. An interrupted import resumes where it stopped. Like `scion-server`, it works on the stores directly and is
 //! configured by the environment: `DATABASE_URL` for Postgres and the `AWS_*`
 //! variables read by `object_store`'s `AmazonS3Builder::from_env`.
 
@@ -31,8 +31,11 @@ async fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let objects = ObjectStorage::new(Arc::new(AmazonS3Builder::from_env().build()?));
 
     let git = GitRepo::open(Path::new(git_dir))?;
-    let tip = import(&git, rev, repo, &meta, &objects).await?;
-    println!("imported {rev} into {repo}: {MAIN_REF} is at {tip}");
+    let done = import(&git, rev, repo, &meta, &objects).await?;
+    println!(
+        "imported {rev} into {repo}: {} new changesets, {MAIN_REF} is at {}",
+        done.created, done.tip
+    );
     Ok(())
 }
 

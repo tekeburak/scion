@@ -14,6 +14,7 @@ struct Metadata {
     changesets: HashMap<(String, ChangesetId), (Changeset, u64)>,
     refs: HashMap<String, BTreeMap<String, RefState>>,
     derived: HashMap<(String, String, u32, ChangesetId), Vec<u8>>,
+    checkpoints: HashMap<String, BTreeMap<Vec<u8>, ChangesetId>>,
 }
 
 #[derive(Debug, Default)]
@@ -145,6 +146,29 @@ impl MetadataStore for MemoryStore {
         Ok(m.derived
             .get(&(repo.to_owned(), ty.to_owned(), version, cs))
             .cloned())
+    }
+
+    async fn put_ingest_checkpoint(
+        &self,
+        repo: &str,
+        git_sha: &[u8],
+        cs: ChangesetId,
+    ) -> Result<()> {
+        let mut m = self.meta.write().expect("poisoned");
+        m.checkpoints
+            .entry(repo.to_owned())
+            .or_default()
+            .entry(git_sha.to_vec())
+            .or_insert(cs);
+        Ok(())
+    }
+
+    async fn ingest_checkpoints(&self, repo: &str) -> Result<Vec<(Vec<u8>, ChangesetId)>> {
+        let m = self.meta.read().expect("poisoned");
+        Ok(m.checkpoints
+            .get(repo)
+            .map(|c| c.iter().map(|(k, v)| (k.clone(), *v)).collect())
+            .unwrap_or_default())
     }
 }
 

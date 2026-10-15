@@ -86,7 +86,8 @@ async fn checkouts_equal_git_trees() {
     let git_repo = GitRepo::open(&dir).unwrap();
     let tip = import(&git_repo, "main", REPO, &*store, &*store)
         .await
-        .unwrap();
+        .unwrap()
+        .tip;
     let main = store.get_ref(REPO, MAIN_REF).await.unwrap().unwrap();
     assert_eq!(main.target, tip);
 
@@ -144,7 +145,8 @@ async fn reimport_is_a_no_op_and_new_commits_fast_forward() {
     let again = import(&GitRepo::open(dir).unwrap(), "main", REPO, &store, &store)
         .await
         .unwrap();
-    assert_eq!(again, first);
+    assert_eq!(first.created, 5);
+    assert_eq!((again.tip, again.created), (first.tip, 0));
     assert_eq!(
         store.get_ref(REPO, MAIN_REF).await.unwrap().unwrap(),
         before
@@ -156,8 +158,8 @@ async fn reimport_is_a_no_op_and_new_commits_fast_forward() {
         .await
         .unwrap();
     let after = store.get_ref(REPO, MAIN_REF).await.unwrap().unwrap();
-    assert_eq!(after.target, later);
+    assert_eq!((after.target, later.created), (later.tip, 1));
     assert_eq!(after.version, before.version + 1);
-    let cs = store.get_changeset(REPO, later).await.unwrap().unwrap();
-    assert_eq!(cs.parents, vec![first]);
+    let cs = store.get_changeset(REPO, later.tip).await.unwrap().unwrap();
+    assert_eq!(cs.parents, vec![first.tip]);
 }

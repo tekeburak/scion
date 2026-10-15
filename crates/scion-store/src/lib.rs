@@ -106,6 +106,17 @@ pub trait MetadataStore: Send + Sync {
         version: u32,
         cs: ChangesetId,
     ) -> Result<Option<Vec<u8>>>;
+
+    /// Record that git commit `git_sha` was imported as `cs`. Idempotent.
+    async fn put_ingest_checkpoint(
+        &self,
+        repo: &str,
+        git_sha: &[u8],
+        cs: ChangesetId,
+    ) -> Result<()>;
+
+    /// Every git commit imported into `repo` so far, with its changeset.
+    async fn ingest_checkpoints(&self, repo: &str) -> Result<Vec<(Vec<u8>, ChangesetId)>>;
 }
 
 /// Immutable content-addressed objects.

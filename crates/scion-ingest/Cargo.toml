@@ -19,6 +19,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]
+async-trait.workspace = true
 scion-client.workspace = true
 scion-derived.workspace = true
 tempfile = "3"

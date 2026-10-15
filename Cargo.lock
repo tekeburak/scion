@@ -3212,6 +3212,7 @@ dependencies = [
 name = "scion-ingest"
 version = "0.0.1"
 dependencies = [
+ "async-trait",
  "bytes",
  "gix",
  "object_store",

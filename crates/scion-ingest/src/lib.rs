@@ -21,7 +21,7 @@
 
 mod import;
 
-pub use import::{MAIN_REF, import};
+pub use import::{Imported, MAIN_REF, import};
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
