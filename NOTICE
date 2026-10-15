@@ -1,0 +1,10 @@
+Scion
+Copyright 2026 The Scion authors
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Portions adapted from CarterT27/scion (https://github.com/CarterT27/scion),
+licensed under the Apache License, Version 2.0:
+
+- crates/scion-client/examples/benchmark.rs: workload set, fixture shape and
+  hermetic git invocation follow crates/scion-conformance/examples/benchmark.rs.
