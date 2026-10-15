@@ -13,8 +13,15 @@
 //!   and the message are taken as UTF-8 (invalid bytes become U+FFFD), and the
 //!   commit's raw 20-byte sha goes into `extra["git-sha"]`, so the original
 //!   stays recoverable.
+//!
+//! [`import`] writes the result to the stores through the same path as the
+//! `CreateChangeset` RPC, then points `main` at the imported tip.
 
 #![forbid(unsafe_code)]
+
+mod import;
+
+pub use import::{MAIN_REF, import};
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::Path;
@@ -48,6 +55,10 @@ pub enum IngestError {
     },
     #[error("commit {commit}: parent {parent} has not been imported")]
     MissingParent { commit: ObjectId, parent: ObjectId },
+    #[error("storing commit {0}: {1}")]
+    Store(ObjectId, String),
+    #[error("moving {MAIN_REF} to commit {0}: {1}")]
+    Ref(ObjectId, String),
 }
 
 /// A commit and its parents, in git's order (first parent first).
@@ -180,11 +191,7 @@ impl GitRepo {
             let change = match new {
                 None => FileChange::Deleted,
                 Some((kind, blob)) => {
-                    let data = self
-                        .repo
-                        .find_blob(blob)
-                        .map_err(|e| IngestError::Object(blob, e.to_string()))?
-                        .take_data();
+                    let data = self.blob(blob)?;
                     if data.len() > MAX_BLOB_BYTES {
                         return Err(IngestError::Unsupported {
                             commit: id,
@@ -219,6 +226,15 @@ impl GitRepo {
             extra: BTreeMap::from([(GIT_SHA.to_owned(), id.as_bytes().to_vec())]),
         };
         Ok(Mapped { changeset, blobs })
+    }
+
+    /// The contents of git blob `id`.
+    pub fn blob(&self, id: ObjectId) -> Result<Vec<u8>, IngestError> {
+        Ok(self
+            .repo
+            .find_blob(id)
+            .map_err(|e| IngestError::Object(id, e.to_string()))?
+            .take_data())
     }
 
     fn tree_of(&self, commit: ObjectId) -> Result<ObjectId, IngestError> {

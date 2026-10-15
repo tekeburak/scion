@@ -22,7 +22,7 @@ use tonic::Status;
 use control::ControlServer;
 use object::ObjectServer;
 
-pub use control::MAX_LOG_LIMIT;
+pub use control::{MAX_LOG_LIMIT, create_changeset, move_ref};
 
 /// Upper bound on every RPC. A client may ask for less with `grpc-timeout`;
 /// it cannot get more.

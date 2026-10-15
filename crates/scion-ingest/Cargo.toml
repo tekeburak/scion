@@ -10,12 +10,19 @@ rust-version.workspace = true
 [dependencies]
 # Pure Rust, no network features; only this crate builds it (docs/ARCHITECTURE.md).
 gix = { version = "0.89", default-features = false, features = ["sha1", "revision"] }
+bytes.workspace = true
+object_store = { version = "0.14.2", features = ["aws"] }
 scion-server.workspace = true
+scion-store.workspace = true
 scion-types.workspace = true
 thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]
+scion-client.workspace = true
+scion-derived.workspace = true
 tempfile = "3"
+tokio = { workspace = true, features = ["net"] }
 
 [lints]
 workspace = true

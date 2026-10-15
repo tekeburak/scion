@@ -14,7 +14,7 @@ use scion_proto::v1::{
     PathLogRequest,
 };
 use scion_store::{MetadataStore, ObjectStore, StoreError, is_allowed_ref_name};
-use scion_types::{BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, RepoPath};
+use scion_types::{BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, RepoPath, TreeId};
 use tonic::{Request, Response, Status};
 
 use crate::store_status;
@@ -131,6 +131,115 @@ fn diff_entry(e: scion_core::DiffEntry) -> DiffEntry {
     }
 }
 
+/// Store `cs` and derive what clone, log and diff need, as `CreateChangeset`
+/// does; returns its id and root tree. Shared with the git importer, which
+/// creates changesets on the stores directly.
+pub async fn create_changeset(
+    meta: &dyn MetadataStore,
+    objects: &dyn ObjectStore,
+    cs: &Changeset,
+) -> Result<(ChangesetId, TreeId), Status> {
+    if cs.repo.is_empty() {
+        return Err(Status::invalid_argument("changeset names no repository"));
+    }
+
+    // Every blob must be uploaded first, or blame and checkout would find
+    // a hole later.
+    let blobs: Vec<BlobId> = cs
+        .file_changes
+        .values()
+        .filter_map(|change| match change {
+            FileChange::Tracked { content, .. } => Some(*content),
+            FileChange::Deleted => None,
+        })
+        .collect();
+    let present = objects.has_blobs(&blobs).await.map_err(store_status)?;
+    let missing: Vec<String> = blobs
+        .iter()
+        .zip(present)
+        .filter(|(_, present)| !present)
+        .map(|(id, _)| id.to_hex())
+        .collect();
+    if !missing.is_empty() {
+        return Err(Status::failed_precondition(format!(
+            "blobs not uploaded: {}",
+            missing.join(", ")
+        )));
+    }
+
+    let id = meta.put_changeset(cs).await.map_err(|e| match e {
+        StoreError::UnknownParent(_, parent) => {
+            Status::failed_precondition(format!("unknown parent {parent}"))
+        }
+        e => store_status(e),
+    })?;
+
+    // Eager derivation: what clone, log and diff need right away. Each
+    // costs O(size of the change) given the parents' values. Blame stays
+    // lazy; it reads file contents and is only wanted for some paths.
+    let ctx = Deriver::new(&cs.repo, meta, objects);
+    let root = ctx.derive::<RootTree>(id).await.map_err(derive_status)?;
+    ctx.derive::<SkipList>(id).await.map_err(derive_status)?;
+    ctx.derive::<PathHistory>(id).await.map_err(derive_status)?;
+    Ok((id, root.0))
+}
+
+/// Create server ref `name` at `target` (`expected` absent) or move it there
+/// fast-forward only if it is still at version `expected`, as `MoveRef`
+/// does; returns the new version.
+pub async fn move_ref(
+    meta: &dyn MetadataStore,
+    objects: &dyn ObjectStore,
+    repo: &str,
+    name: &str,
+    target: ChangesetId,
+    expected: Option<u64>,
+) -> Result<u64, Status> {
+    if !is_allowed_ref_name(name) {
+        return Err(Status::invalid_argument(format!(
+            "ref name {name:?} is not allowed (only `main` and `release/*`)"
+        )));
+    }
+    let ctx = Deriver::new(repo, meta, objects);
+
+    let Some(expected) = expected else {
+        // Creation: the target must be a changeset of this repository.
+        ctx.derive::<SkipList>(target)
+            .await
+            .map_err(derive_status)?;
+        let state = meta
+            .create_ref(repo, name, target)
+            .await
+            .map_err(ref_status)?;
+        return Ok(state.version);
+    };
+
+    let current = meta
+        .get_ref(repo, name)
+        .await
+        .map_err(store_status)?
+        .ok_or_else(|| Status::not_found(format!("ref {name:?} in {repo:?}")))?;
+    if current.version != expected {
+        return Err(cas_mismatch(expected, current.version));
+    }
+    // The CAS below only succeeds if the ref is still at `expected`, i.e.
+    // still at `current.target`, so this check cannot go stale.
+    if !SkipList::is_ancestor(&ctx, current.target, target)
+        .await
+        .map_err(derive_status)?
+    {
+        return Err(Status::failed_precondition(format!(
+            "{target} does not descend from {} ({name}): not a fast-forward",
+            current.target
+        )));
+    }
+    let state = meta
+        .move_ref(repo, name, expected, target)
+        .await
+        .map_err(ref_status)?;
+    Ok(state.version)
+}
+
 #[tonic::async_trait]
 impl ControlService for ControlServer {
     async fn get_ref(
@@ -162,52 +271,10 @@ impl ControlService for ControlServer {
     ) -> Result<Response<CreateChangesetResponse>, Status> {
         let cs = Changeset::decode(&request.get_ref().changeset)
             .map_err(|e| Status::invalid_argument(format!("changeset: {e}")))?;
-        if cs.repo.is_empty() {
-            return Err(Status::invalid_argument("changeset names no repository"));
-        }
-
-        // Every blob must be uploaded first, or blame and checkout would find
-        // a hole later.
-        let blobs: Vec<BlobId> = cs
-            .file_changes
-            .values()
-            .filter_map(|change| match change {
-                FileChange::Tracked { content, .. } => Some(*content),
-                FileChange::Deleted => None,
-            })
-            .collect();
-        let present = self.objects.has_blobs(&blobs).await.map_err(store_status)?;
-        let missing: Vec<String> = blobs
-            .iter()
-            .zip(present)
-            .filter(|(_, present)| !present)
-            .map(|(id, _)| id.to_hex())
-            .collect();
-        if !missing.is_empty() {
-            return Err(Status::failed_precondition(format!(
-                "blobs not uploaded: {}",
-                missing.join(", ")
-            )));
-        }
-
-        let id = self.meta.put_changeset(&cs).await.map_err(|e| match e {
-            StoreError::UnknownParent(_, parent) => {
-                Status::failed_precondition(format!("unknown parent {parent}"))
-            }
-            e => store_status(e),
-        })?;
-
-        // Eager derivation: what clone, log and diff need right away. Each
-        // costs O(size of the change) given the parents' values. Blame stays
-        // lazy; it reads file contents and is only wanted for some paths.
-        let ctx = self.deriver(&cs.repo);
-        let root = ctx.derive::<RootTree>(id).await.map_err(derive_status)?;
-        ctx.derive::<SkipList>(id).await.map_err(derive_status)?;
-        ctx.derive::<PathHistory>(id).await.map_err(derive_status)?;
-
+        let (id, root) = create_changeset(&*self.meta, &*self.objects, &cs).await?;
         Ok(Response::new(CreateChangesetResponse {
             id: id.as_bytes().to_vec(),
-            root_tree: root.0.as_bytes().to_vec(),
+            root_tree: root.as_bytes().to_vec(),
         }))
     }
 
@@ -216,58 +283,17 @@ impl ControlService for ControlServer {
         request: Request<MoveRefRequest>,
     ) -> Result<Response<MoveRefResponse>, Status> {
         let req = request.into_inner();
-        if !is_allowed_ref_name(&req.name) {
-            return Err(Status::invalid_argument(format!(
-                "ref name {:?} is not allowed (only `main` and `release/*`)",
-                req.name
-            )));
-        }
         let target = changeset_id(&req.target, "target")?;
-        let ctx = self.deriver(&req.repo);
-
-        let Some(expected) = req.expected_version else {
-            // Creation: the target must be a changeset of this repository.
-            ctx.derive::<SkipList>(target)
-                .await
-                .map_err(derive_status)?;
-            let state = self
-                .meta
-                .create_ref(&req.repo, &req.name, target)
-                .await
-                .map_err(ref_status)?;
-            return Ok(Response::new(MoveRefResponse {
-                version: state.version,
-            }));
-        };
-
-        let current = self
-            .meta
-            .get_ref(&req.repo, &req.name)
-            .await
-            .map_err(store_status)?
-            .ok_or_else(|| Status::not_found(format!("ref {:?} in {:?}", req.name, req.repo)))?;
-        if current.version != expected {
-            return Err(cas_mismatch(expected, current.version));
-        }
-        // The CAS below only succeeds if the ref is still at `expected`, i.e.
-        // still at `current.target`, so this check cannot go stale.
-        if !SkipList::is_ancestor(&ctx, current.target, target)
-            .await
-            .map_err(derive_status)?
-        {
-            return Err(Status::failed_precondition(format!(
-                "{target} does not descend from {} ({}): not a fast-forward",
-                current.target, req.name
-            )));
-        }
-        let state = self
-            .meta
-            .move_ref(&req.repo, &req.name, expected, target)
-            .await
-            .map_err(ref_status)?;
-        Ok(Response::new(MoveRefResponse {
-            version: state.version,
-        }))
+        let version = move_ref(
+            &*self.meta,
+            &*self.objects,
+            &req.repo,
+            &req.name,
+            target,
+            req.expected_version,
+        )
+        .await?;
+        Ok(Response::new(MoveRefResponse { version }))
     }
 
     async fn diff(&self, request: Request<DiffRequest>) -> Result<Response<DiffResponse>, Status> {

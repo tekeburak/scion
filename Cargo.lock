@@ -3212,11 +3212,17 @@ dependencies = [
 name = "scion-ingest"
 version = "0.0.1"
 dependencies = [
+ "bytes",
  "gix",
+ "object_store",
+ "scion-client",
+ "scion-derived",
  "scion-server",
+ "scion-store",
  "scion-types",
  "tempfile",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]
