@@ -77,6 +77,48 @@ jobs:
       - name: test
         run: cargo test -p scion-store --features integration
 
+  server:
+    name: server end-to-end (scn + scion-server on postgres + s3)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: scion
+          POSTGRES_PASSWORD: scion
+          POSTGRES_DB: scion
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U scion -d scion"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      rustfs:
+        image: rustfs/rustfs:latest
+        env:
+          RUSTFS_ACCESS_KEY: scion
+          RUSTFS_SECRET_KEY: scionscion
+          RUSTFS_VOLUMES: /data
+          RUSTFS_ADDRESS: ":9000"
+        ports: ["9000:9000"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3  # scion-proto's build script runs protoc
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@v2
+      - name: create bucket
+        env:
+          AWS_ACCESS_KEY_ID: scion
+          AWS_SECRET_ACCESS_KEY: scionscion
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          for i in $(seq 1 30); do
+            aws --endpoint-url http://localhost:9000 s3 ls >/dev/null 2>&1 && break; sleep 1
+          done
+          aws --endpoint-url http://localhost:9000 s3 mb s3://scion-objects
+      - name: test
+        run: cargo test -p scn --features integration --test e2e_stack
+
   deny:
     name: cargo-deny
     runs-on: ubuntu-latest

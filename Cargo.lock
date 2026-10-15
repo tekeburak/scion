@@ -2342,6 +2342,7 @@ dependencies = [
  "bytes",
  "clap",
  "diffy",
+ "object_store",
  "scion-client",
  "scion-derived",
  "scion-server",

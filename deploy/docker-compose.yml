@@ -3,9 +3,10 @@
 # Usage:
 #   docker compose -f deploy/docker-compose.yml up -d
 #   cargo test -p scion-store --features integration
+#   cargo test -p scn --features integration --test e2e_stack
 #
-# scion-server / scion-cache services are added in Phase 3 / Phase 4 of the roadmap.
-# Until then this file only provides the storage backends used by integration tests.
+# The end-to-end test runs scion-server in-process against these backends and drives
+# the real `scn` binary. scion-cache / scion-daemon services arrive in Phase 4.
 
 services:
   postgres:

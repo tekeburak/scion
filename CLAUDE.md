@@ -9,6 +9,7 @@ either document, stop and ask.
 ```sh
 cargo test --workspace                                   # unit + property + golden tests
 cargo test -p scion-store --features integration         # needs the compose stack below
+cargo test -p scn --features integration --test e2e_stack  # end to end, same stack
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo fmt --all -- --check                               # fix with: cargo fmt --all
 cargo deny check bans licenses sources advisories

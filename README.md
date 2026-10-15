@@ -183,6 +183,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 # local storage backends (Postgres + an S3-compatible server) for integration tests
 docker compose -f deploy/docker-compose.yml up -d
 cargo test -p scion-store --features integration
+cargo test -p scn --features integration --test e2e_stack   # scn + scion-server end to end
 ```
 
 Golden-hash fixtures live in `crates/scion-types/tests/golden/`. They are the format

@@ -17,11 +17,18 @@ tonic.workspace = true
 
 [dev-dependencies]
 bytes.workspace = true
+object_store = { version = "0.14.2", features = ["aws"] }
 scion-derived = { workspace = true, features = ["test-util"] }
 scion-server.workspace = true
 scion-store.workspace = true
 tempfile = "3"
 tokio = { workspace = true, features = ["net"] }
+
+[features]
+default = []
+# Enables the end-to-end test against the compose stack (Postgres + an
+# S3-compatible server, see deploy/docker-compose.yml).
+integration = []
 
 [lints]
 workspace = true
