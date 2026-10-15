@@ -1,0 +1,72 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="780" viewBox="0 0 1600 780" role="img" aria-label="The shape of a Scion changeset, its file changes, blobs and derived data">
+<title>The shape of a Scion changeset, its file changes, blobs and derived data</title>
+<defs><marker id="a-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2dd4bf"/></marker><marker id="a-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f5b545"/></marker><marker id="a-violet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#a78bfa"/></marker><marker id="a-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#93a1b8"/></marker><linearGradient id="glow" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#16213a"/><stop offset="1" stop-color="#0d1321"/></linearGradient></defs>
+<rect x="0" y="0" width="1600" height="780" rx="24" fill="url(#glow)"/>
+<text x="64" y="72" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="34" fill="#e8edf5" font-weight="700" text-anchor="start">The shape of a changeset</text>
+<text x="64" y="108" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#93a1b8" font-weight="400" text-anchor="start">Only what changed against the first parent is hashed. Trees, history and blame are derived from it and stored beside it.</text>
+<rect x="64" y="150" width="560" height="496" rx="14" fill="#151d2e" stroke="#f5b545" stroke-width="3"/>
+<text x="92" y="198" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="26" fill="#e8edf5" font-weight="700" text-anchor="start">Changeset</text>
+<text x="596" y="198" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#f5b545" font-weight="600" text-anchor="end">SCCS v1</text>
+<text x="92" y="226" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">id = blake3(canonical(changeset))</text>
+<text x="92" y="272" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" fill="#e8edf5" font-weight="600" text-anchor="start">repo</text>
+<text x="596" y="272" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="end">str</text>
+<text x="92" y="316" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" fill="#e8edf5" font-weight="600" text-anchor="start">parents</text>
+<text x="596" y="316" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="end">seq(ChangesetId)  first = mainline</text>
+<text x="92" y="360" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" fill="#e8edf5" font-weight="600" text-anchor="start">author, author_date</text>
+<text x="596" y="360" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="end">str, str · i64, i32</text>
+<text x="92" y="404" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" fill="#e8edf5" font-weight="600" text-anchor="start">committer, committer_date</text>
+<text x="596" y="404" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="end">opt(…)</text>
+<text x="92" y="448" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" fill="#e8edf5" font-weight="600" text-anchor="start">message</text>
+<text x="596" y="448" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="end">str</text>
+<rect x="78" y="464" width="532" height="40" rx="8" fill="#1d2840"/>
+<text x="92" y="492" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" fill="#f5b545" font-weight="600" text-anchor="start">file_changes</text>
+<text x="596" y="492" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="end">map(path → file_change)</text>
+<text x="92" y="536" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" fill="#e8edf5" font-weight="600" text-anchor="start">extra</text>
+<text x="596" y="536" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="end">map(str → bytes)</text>
+<text x="92" y="584" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="17" fill="#93a1b8" font-weight="600" text-anchor="start">✗ no tree pointer   ✗ no signature   ✗ no ref</text>
+<text x="92" y="614" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">signatures are detached, computed over the id</text>
+<text x="700" y="172" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="20" fill="#f5b545" font-weight="700" text-anchor="start">file_changes</text>
+<rect x="700" y="198" width="420" height="66" rx="10" fill="#151d2e" stroke="#2a3650" stroke-width="2"/>
+<text x="718" y="226" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#e8edf5" font-weight="600" text-anchor="start">src/cache/tier.rs</text>
+<text x="718" y="250" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="start">Tracked  · regular, 18 KiB, copy_from</text>
+<line x1="1120" y1="231" x2="1226" y2="232" stroke="#2dd4bf" stroke-width="2.5" marker-end="url(#a-teal)"/>
+<rect x="700" y="282" width="420" height="66" rx="10" fill="#151d2e" stroke="#2a3650" stroke-width="2"/>
+<text x="718" y="310" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#e8edf5" font-weight="600" text-anchor="start">tools/run.sh</text>
+<text x="718" y="334" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="start">Tracked  · executable</text>
+<line x1="1120" y1="315" x2="1226" y2="302" stroke="#2dd4bf" stroke-width="2.5" marker-end="url(#a-teal)"/>
+<rect x="700" y="366" width="420" height="66" rx="10" fill="#151d2e" stroke="#2a3650" stroke-width="2"/>
+<text x="718" y="394" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#e8edf5" font-weight="600" text-anchor="start">docs/old.md</text>
+<text x="718" y="418" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="start">Deleted</text>
+<path d="M624,484 C664,484 650,231 694,231" fill="none" stroke="#f5b545" stroke-width="2.5" marker-end="url(#a-amber)"/>
+<text x="1232" y="172" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="20" fill="#2dd4bf" font-weight="700" text-anchor="start">blobs/{id}</text>
+<rect x="1232" y="202" width="300" height="56" rx="10" fill="#151d2e" stroke="#2dd4bf" stroke-width="2"/>
+<text x="1382" y="237" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="16" fill="#e8edf5" font-weight="500" text-anchor="middle">blake3(bytes)</text>
+<rect x="1232" y="272" width="300" height="56" rx="10" fill="#151d2e" stroke="#2dd4bf" stroke-width="2"/>
+<text x="1382" y="307" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="16" fill="#e8edf5" font-weight="500" text-anchor="middle">blake3(bytes)</text>
+<text x="1232" y="366" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">immutable, zstd, object store</text>
+<rect x="700" y="470" width="832" height="260" rx="14" fill="#151d2e" stroke="#a78bfa" stroke-width="2"/>
+<text x="728" y="514" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="24" fill="#e8edf5" font-weight="700" text-anchor="start">Derived data</text>
+<text x="728" y="542" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="16" fill="#93a1b8" font-weight="400" text-anchor="start">derive(changeset, value for each parent) → value</text>
+<line x1="820" y1="582" x2="760" y2="634" stroke="#a78bfa" stroke-width="2"/>
+<line x1="820" y1="582" x2="880" y2="634" stroke="#a78bfa" stroke-width="2"/>
+<line x1="880" y1="634" x2="840" y2="686" stroke="#a78bfa" stroke-width="2"/>
+<line x1="880" y1="634" x2="920" y2="686" stroke="#a78bfa" stroke-width="2"/>
+<circle cx="820" cy="582" r="13" fill="#a78bfa" stroke="#a78bfa" stroke-width="2.5"/>
+<circle cx="760" cy="634" r="13" fill="#151d2e" stroke="#a78bfa" stroke-width="2.5"/>
+<circle cx="880" cy="634" r="13" fill="#a78bfa" stroke="#a78bfa" stroke-width="2.5"/>
+<circle cx="840" cy="686" r="13" fill="#151d2e" stroke="#a78bfa" stroke-width="2.5"/>
+<circle cx="920" cy="686" r="13" fill="#a78bfa" stroke="#a78bfa" stroke-width="2.5"/>
+<text x="820" y="716" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">filled = rewritten</text>
+<text x="980" y="588" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" fill="#a78bfa" font-weight="700" text-anchor="start">RootTree</text>
+<text x="1130" y="588" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#93a1b8" font-weight="400" text-anchor="start">trees/{id}; pointer in derived table</text>
+<text x="980" y="622" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" fill="#a78bfa" font-weight="700" text-anchor="start">PathHistory</text>
+<text x="1130" y="622" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#93a1b8" font-weight="400" text-anchor="start">per-path last change</text>
+<text x="980" y="656" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" fill="#a78bfa" font-weight="700" text-anchor="start">Blame</text>
+<text x="1130" y="656" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#93a1b8" font-weight="400" text-anchor="start">line → changeset</text>
+<text x="980" y="690" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="18" fill="#a78bfa" font-weight="700" text-anchor="start">SkipList</text>
+<text x="1130" y="690" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#93a1b8" font-weight="400" text-anchor="start">bounded ancestry, merge-base</text>
+<path d="M624,586 C674,586 640,600 694,600" fill="none" stroke="#a78bfa" stroke-width="2.5" stroke-dasharray="10 7" marker-end="url(#a-violet)"/>
+<rect x="64" y="666" width="560" height="90" rx="12" fill="#151d2e" stroke="#4ade80" stroke-width="2"/>
+<text x="88" y="702" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="18" fill="#e8edf5" font-weight="600" text-anchor="start">One change in a 2,500-file tree rewrites 5 tree nodes:</text>
+<text x="88" y="730" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#93a1b8" font-weight="400" text-anchor="start">the directories on its path (test-asserted, scion-derived)</text>
+</svg>

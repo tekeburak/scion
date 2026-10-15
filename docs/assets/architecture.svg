@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="760" viewBox="0 0 1600 760" role="img" aria-label="Scion architecture: clients, daemon, cache, server, Postgres and object store">
+<title>Scion architecture: clients, daemon, cache, server, Postgres and object store</title>
+<defs><marker id="a-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2dd4bf"/></marker><marker id="a-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f5b545"/></marker><marker id="a-violet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#a78bfa"/></marker><marker id="a-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#93a1b8"/></marker><linearGradient id="glow" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#16213a"/><stop offset="1" stop-color="#0d1321"/></linearGradient></defs>
+<rect x="0" y="0" width="1600" height="760" rx="24" fill="url(#glow)"/>
+<text x="64" y="72" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="34" fill="#e8edf5" font-weight="700" text-anchor="start">Architecture</text>
+<text x="64" y="108" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#93a1b8" font-weight="400" text-anchor="start">Two planes. The control plane is served only by scion-server; the object plane is the same ObjectService at every tier, strictly daemon → cache → server.</text>
+<rect x="64" y="190" width="300" height="120" rx="14" fill="#151d2e" stroke="#2a3650" stroke-width="2"/>
+<text x="214" y="240" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="22" fill="#e8edf5" font-weight="600" text-anchor="middle">developer machines</text>
+<text x="214" y="272" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#93a1b8" font-weight="400" text-anchor="middle">scn · sparse working copy</text>
+<rect x="64" y="470" width="300" height="120" rx="14" fill="#151d2e" stroke="#2a3650" stroke-width="2"/>
+<text x="214" y="520" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="22" fill="#e8edf5" font-weight="600" text-anchor="middle">CI / cluster jobs</text>
+<text x="214" y="552" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="17" fill="#93a1b8" font-weight="400" text-anchor="middle">agents · research jobs</text>
+<rect x="470" y="470" width="250" height="120" rx="14" fill="#151d2e" stroke="#2dd4bf" stroke-width="2" stroke-dasharray="8 6"/>
+<text x="595" y="518" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="22" fill="#e8edf5" font-weight="700" text-anchor="middle">scion-daemon</text>
+<text x="595" y="548" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#93a1b8" font-weight="400" text-anchor="middle">per node · Phase 4</text>
+<text x="595" y="572" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="middle">seeds from snapshot manifest</text>
+<rect x="810" y="330" width="260" height="120" rx="14" fill="#151d2e" stroke="#2dd4bf" stroke-width="2" stroke-dasharray="8 6"/>
+<text x="940" y="378" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="22" fill="#e8edf5" font-weight="700" text-anchor="middle">scion-cache</text>
+<text x="940" y="408" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#93a1b8" font-weight="400" text-anchor="middle">regional · Phase 4</text>
+<text x="940" y="432" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="middle">memory + disk</text>
+<rect x="1150" y="190" width="380" height="260" rx="14" fill="#151d2e" stroke="#f5b545" stroke-width="3"/>
+<text x="1340" y="238" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="26" fill="#e8edf5" font-weight="700" text-anchor="middle">scion-server</text>
+<text x="1340" y="268" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="17" fill="#93a1b8" font-weight="400" text-anchor="middle">authoritative</text>
+<text x="1180" y="312" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="18" fill="#e8edf5" font-weight="400" text-anchor="start">• control-plane RPCs</text>
+<text x="1180" y="344" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="18" fill="#e8edf5" font-weight="400" text-anchor="start">• object origin</text>
+<text x="1180" y="376" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="18" fill="#e8edf5" font-weight="400" text-anchor="start">• derived-data computation</text>
+<text x="1180" y="408" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="18" fill="#e8edf5" font-weight="400" text-anchor="start">• serial land worker (Phase 5)</text>
+<rect x="1150" y="560" width="180" height="150" rx="14" fill="#151d2e" stroke="#f5b545" stroke-width="2"/>
+<text x="1240" y="600" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="22" fill="#e8edf5" font-weight="700" text-anchor="middle">Postgres</text>
+<text x="1240" y="630" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">changeset WAL</text>
+<text x="1240" y="651" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">file_changes</text>
+<text x="1240" y="672" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">refs (CAS)</text>
+<text x="1240" y="693" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">derived pointers</text>
+<rect x="1350" y="560" width="180" height="150" rx="14" fill="#151d2e" stroke="#2dd4bf" stroke-width="2"/>
+<text x="1440" y="600" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="22" fill="#e8edf5" font-weight="700" text-anchor="middle">object store</text>
+<text x="1440" y="630" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">blobs/{id}</text>
+<text x="1440" y="651" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">trees/{id}</text>
+<text x="1440" y="672" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">snapshots/…</text>
+<text x="1440" y="693" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">S3-compatible</text>
+<line x1="364" y1="228" x2="1144" y2="228" stroke="#f5b545" stroke-width="3" marker-end="url(#a-amber)"/>
+<text x="560" y="214" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="17" fill="#f5b545" font-weight="600" text-anchor="start">control plane: changesets, refs, log, diff, blame, land</text>
+<path d="M364,500 C420,500 420,420 520,420 L760,420 C800,420 800,290 1144,290" fill="none" stroke="#f5b545" stroke-width="2.5" marker-end="url(#a-amber)"/>
+<path d="M364,282 C560,282 640,390 804,390" fill="none" stroke="#2dd4bf" stroke-width="3" marker-end="url(#a-teal)"/>
+<line x1="364" y1="560" x2="464" y2="560" stroke="#2dd4bf" stroke-width="3" marker-end="url(#a-teal)"/>
+<path d="M720,530 C770,530 760,430 804,430" fill="none" stroke="#2dd4bf" stroke-width="3" marker-end="url(#a-teal)"/>
+<path d="M1070,390 L1144,390" fill="none" stroke="#2dd4bf" stroke-width="3" marker-end="url(#a-teal)"/>
+<text x="64" y="360" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="17" fill="#2dd4bf" font-weight="600" text-anchor="start">object plane: trees, blobs by id</text>
+<text x="64" y="384" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">immutable GETs, cacheable at any tier</text>
+<line x1="1240" y1="450" x2="1240" y2="554" stroke="#f5b545" stroke-width="3" marker-end="url(#a-amber)"/>
+<line x1="1440" y1="450" x2="1440" y2="554" stroke="#2dd4bf" stroke-width="3" marker-end="url(#a-teal)"/>
+<line x1="64" y1="668" x2="104" y2="668" stroke="#f5b545" stroke-width="3"/>
+<text x="116" y="674" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#93a1b8" font-weight="400" text-anchor="start">control plane</text>
+<line x1="264" y1="668" x2="304" y2="668" stroke="#2dd4bf" stroke-width="3"/>
+<text x="316" y="674" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#93a1b8" font-weight="400" text-anchor="start">object plane</text>
+<rect x="456" y="656" width="40" height="24" rx="6" fill="#151d2e" stroke="#2dd4bf" stroke-width="2" stroke-dasharray="8 6"/>
+<text x="508" y="674" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#93a1b8" font-weight="400" text-anchor="start">planned tier</text>
+<text x="64" y="714" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#93a1b8" font-weight="400" text-anchor="start">In the MVP (Phase 3) both planes go to scion-server directly; no tier holds a materialized copy of the repository.</text>
+</svg>
