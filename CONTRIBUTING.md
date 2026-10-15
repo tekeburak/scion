@@ -1,26 +1,59 @@
 # Contributing
 
-Thanks for your interest. The project is pre-MVP and moving fast; the roadmap in `README.md` is
-the source of truth for what is being worked on.
+Thanks for your interest. The MVP (Phase 3) is done and git import (Phase 6) is in progress.
+The roadmap table in `README.md` and the single-PR steps in `docs/ROADMAP.md` are the source
+of truth for what is being worked on. `CLAUDE.md` holds the working rules every change
+follows, for people and agents alike; read it, together with `docs/ARCHITECTURE.md` and
+`docs/DATA_MODEL.md`, before opening a PR.
 
 ## Ground rules
 
-- **Hash stability is sacred.** Anything that changes the bytes produced by
-  `scion_types::canonical` changes every id in every repository. Such a change requires a
-  `FORMAT_VERSION` bump, regenerated golden fixtures, and a section in `docs/DATA_MODEL.md`.
+- **The numbered invariants in `CLAUDE.md` are not changed in a PR.** A change that would bend
+  one starts as an issue, not as code.
+- **Hash stability is sacred.** Hashing goes only through `scion_types::canonical`. The golden
+  fixtures in `crates/scion-types/tests/golden/` are frozen: do not edit or regenerate them.
+  If the encoding must change, bump `FORMAT_VERSION`, keep the old decoder, and open an issue
+  first.
 - **No I/O in `scion-types` or `scion-core`.** Algorithms are written against the store traits
-  and tested with `MemoryStore`.
+  and tested with the in-memory store.
 - **Every store implementation passes the conformance suite** (`scion_store::conformance_tests!`).
-- **Server-side refs are only `main` and `release/*`.** Do not add branch-like features.
-- Everything merged to `main` passes `cargo fmt --check`, `cargo clippy -D warnings`,
-  `cargo test --workspace` and `cargo deny check`.
+- **Server-side refs are only `main` and `release/*`** (`is_allowed_ref_name`). Do not add
+  branch-like features.
+- **Keep it simple.** No defensive checks between our own services, no abstraction with a
+  single use, no configuration the roadmap does not call for. See "Simplicity rules" in
+  `CLAUDE.md`.
 
 ## Workflow
 
-1. Open an issue or RFC (`docs/rfcs/`) for anything that touches the data model, the wire
-   protocol or the cache tiering.
-2. Branch from `main`, keep PRs small, and describe *why* in the PR body.
-3. CI must be green. Reviews look at intent and invariants first, lines second.
+1. Open an issue for anything that touches the data model, the wire protocol or the cache
+   tiering, or that adds a crate, table, RPC, derived type or dependency with a build script.
+2. One PR is one roadmap step (`Phase N.M: …`) or one self-contained fix. Branch from `main`;
+   there are no direct pushes to `main`.
+3. The PR description starts with the two lines the PR template asks for:
+   `Invariant kept:` and `Could be simpler:`.
+4. Commit messages explain *why*; the diff shows *what*.
+5. CI must be green. Reviews look at intent and invariants first, lines second.
+
+Issues labelled `good first issue` are small, self-contained and need no design decision.
+
+## Checks
+
+Every command in the "Commands" section of `CLAUDE.md` must pass before a commit; CI runs the
+same set on ubuntu and macos. The short version:
+
+```sh
+cargo fmt --all -- --check
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+cargo test --workspace
+cargo deny check bans licenses sources advisories
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+```
+
+`scion-proto` needs `protoc` on `PATH`; `scion-ingest`'s tests need `git`. Integration tests
+need the compose stack in `deploy/docker-compose.yml`.
+
+Figures in `docs/assets/` are generated: edit `scripts/render-assets.py`, run it, and check
+with `python3 scripts/render-assets.py --check`.
 
 ## Code style
 
