@@ -70,6 +70,15 @@ rewrites only the directories on the changed paths: one changed file at depth fo
 `PathHistory` has the same bound). Ancestry and merge-base use generation numbers and the
 `SkipList` derived type instead of walking the changeset log.
 
+## Is it faster than git?
+
+Not measured on a real repository yet. The README's benchmark table is synthetic: generated
+files, an in-memory store and no cache tier. The real-repository comparison
+(`scripts/bench-real`) runs, but its results are not published until Phase 6.13. The targets
+are set in `docs/ROADMAP.md`: `log`, `blame` and `land` at least as fast as git (6.12), and
+import within ten times git's time (6.11). Import is not expected to match git, because Scion
+writes every blob and tree as its own object to a remote store while git writes local packfiles.
+
 ## Why Postgres and S3?
 
 They are the two pieces most teams already run and know how to operate. Postgres holds small,
