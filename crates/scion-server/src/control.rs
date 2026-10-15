@@ -13,7 +13,7 @@ use scion_proto::v1::{
     LogRequest, LogResponse, MergeBaseRequest, MergeBaseResponse, MoveRefRequest, MoveRefResponse,
     PathLogRequest,
 };
-use scion_store::{MetadataStore, ObjectStore, StoreError};
+use scion_store::{MetadataStore, ObjectStore, StoreError, is_allowed_ref_name};
 use scion_types::{BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, RepoPath};
 use tonic::{Request, Response, Status};
 
@@ -85,6 +85,23 @@ fn derive_status(e: DeriveError) -> Status {
         | DeriveError::MissingObject(_)
         | DeriveError::CorruptObject(_)
         | DeriveError::CorruptPointer { .. } => Status::data_loss(e.to_string()),
+    }
+}
+
+fn cas_mismatch(expected: u64, actual: u64) -> Status {
+    Status::failed_precondition(format!(
+        "ref moved: expected version {expected}, found {actual}"
+    ))
+}
+
+/// Map a failed ref write to a gRPC status.
+#[allow(clippy::needless_pass_by_value)] // used as `map_err(ref_status)`
+fn ref_status(e: StoreError) -> Status {
+    match e {
+        StoreError::RefExists(name) => Status::already_exists(format!("ref {name:?}")),
+        StoreError::RefNotFound(name) => Status::not_found(format!("ref {name:?}")),
+        StoreError::CasMismatch { expected, actual } => cas_mismatch(expected, actual),
+        e => store_status(e),
     }
 }
 
@@ -196,10 +213,61 @@ impl ControlService for ControlServer {
 
     async fn move_ref(
         &self,
-        _request: Request<MoveRefRequest>,
+        request: Request<MoveRefRequest>,
     ) -> Result<Response<MoveRefResponse>, Status> {
-        // TODO(Phase 3.5): fast-forward-only compare-and-swap.
-        Err(Status::unimplemented("MoveRef arrives in Phase 3.5"))
+        let req = request.into_inner();
+        if !is_allowed_ref_name(&req.name) {
+            return Err(Status::invalid_argument(format!(
+                "ref name {:?} is not allowed (only `main` and `release/*`)",
+                req.name
+            )));
+        }
+        let target = changeset_id(&req.target, "target")?;
+        let ctx = self.deriver(&req.repo);
+
+        let Some(expected) = req.expected_version else {
+            // Creation: the target must be a changeset of this repository.
+            ctx.derive::<SkipList>(target)
+                .await
+                .map_err(derive_status)?;
+            let state = self
+                .meta
+                .create_ref(&req.repo, &req.name, target)
+                .await
+                .map_err(ref_status)?;
+            return Ok(Response::new(MoveRefResponse {
+                version: state.version,
+            }));
+        };
+
+        let current = self
+            .meta
+            .get_ref(&req.repo, &req.name)
+            .await
+            .map_err(store_status)?
+            .ok_or_else(|| Status::not_found(format!("ref {:?} in {:?}", req.name, req.repo)))?;
+        if current.version != expected {
+            return Err(cas_mismatch(expected, current.version));
+        }
+        // The CAS below only succeeds if the ref is still at `expected`, i.e.
+        // still at `current.target`, so this check cannot go stale.
+        if !SkipList::is_ancestor(&ctx, current.target, target)
+            .await
+            .map_err(derive_status)?
+        {
+            return Err(Status::failed_precondition(format!(
+                "{target} does not descend from {} ({}): not a fast-forward",
+                current.target, req.name
+            )));
+        }
+        let state = self
+            .meta
+            .move_ref(&req.repo, &req.name, expected, target)
+            .await
+            .map_err(ref_status)?;
+        Ok(Response::new(MoveRefResponse {
+            version: state.version,
+        }))
     }
 
     async fn diff(&self, request: Request<DiffRequest>) -> Result<Response<DiffResponse>, Status> {

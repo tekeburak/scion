@@ -101,8 +101,9 @@ message CreateChangesetResponse {
 }
 
 // Fast-forward only. Without `expected_version` the ref is created and must
-// not exist yet; with it, the move succeeds only if the ref is still at that
-// version (FAILED_PRECONDITION otherwise).
+// not exist yet (ALREADY_EXISTS otherwise); with it, the move succeeds only if
+// the ref is still at that version and `target` descends from its current
+// target (FAILED_PRECONDITION otherwise).
 message MoveRefRequest {
   string repo = 1;
   string name = 2;
