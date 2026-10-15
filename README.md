@@ -8,7 +8,7 @@
   <a href="#status"><img src="docs/assets/badge-status.svg" alt="status: pre-MVP, Phase 3"></a>
 </p>
 
-<h1 align="center">Scion</h1>
+<h1 align="center"><img src="docs/assets/logo.svg" width="96" alt=""><br>Scion</h1>
 
 <p align="center"><b>A server-authoritative source control system for one very large monorepo whose
 clients are always online and whose commits come mostly from coding agents.</b></p>
