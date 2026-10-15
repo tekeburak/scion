@@ -23,6 +23,7 @@ pub mod conformance;
 mod memory;
 mod object;
 mod postgres;
+mod recent;
 mod refs;
 
 use async_trait::async_trait;

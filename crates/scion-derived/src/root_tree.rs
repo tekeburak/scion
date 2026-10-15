@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
+use futures_util::{StreamExt, TryStreamExt, stream};
 use scion_store::ObjectStore;
 use scion_types::{
     BlobId, Changeset, FileChange, FileType, PathComponent, Tree, TreeEntry, TreeId,
@@ -101,25 +102,49 @@ fn build_trie(changes: &BTreeMap<scion_types::RepoPath, FileChange>) -> Node {
     root
 }
 
+/// Most object writes a derivation keeps in flight at once.
+pub(crate) const WRITE_CONCURRENCY: usize = 16;
+
 /// Apply `changes` to the tree `base` (`None` = empty), returning the new root.
+///
+/// Tree ids are computed locally, so every rewritten directory is written in
+/// one concurrent batch at the end instead of one round trip per level.
+/// Nothing points at the new root until the caller records it, so a failed
+/// batch leaves no reachable hole.
 async fn apply_changes(
     objects: &dyn ObjectStore,
     base: Option<TreeId>,
     changes: &BTreeMap<scion_types::RepoPath, FileChange>,
 ) -> Result<TreeId> {
     let trie = build_trie(changes);
-    match apply_node(objects, base, &trie).await? {
-        Some(id) => Ok(id),
-        None => Ok(objects.put_tree(&Tree::empty()).await?),
-    }
+    let mut rewritten = Vec::new();
+    let root = if let Some(id) = apply_node(objects, base, &trie, &mut rewritten).await? {
+        id
+    } else {
+        let empty = Tree::empty();
+        let id = empty.id();
+        rewritten.push(empty);
+        id
+    };
+    let puts: Vec<_> = rewritten
+        .iter()
+        .map(|tree| objects.put_tree(tree))
+        .collect();
+    stream::iter(puts)
+        .buffer_unordered(WRITE_CONCURRENCY)
+        .try_for_each(|_| async { Ok(()) })
+        .await?;
+    Ok(root)
 }
 
-/// Rewrite one directory. Returns `None` when the directory ends up empty so
-/// the parent drops the entry (empty directories do not exist in trees).
+/// Rewrite one directory, appending every new tree to `rewritten`. Returns
+/// `None` when the directory ends up empty so the parent drops the entry
+/// (empty directories do not exist in trees).
 async fn apply_node(
     objects: &dyn ObjectStore,
     existing: Option<TreeId>,
     node: &Node,
+    rewritten: &mut Vec<Tree>,
 ) -> Result<Option<TreeId>> {
     let mut tree = match existing {
         Some(id) => objects
@@ -156,7 +181,7 @@ async fn apply_node(
                 Some(TreeEntry::Tree { id }) => Some(*id),
                 _ => None,
             };
-            match Box::pin(apply_node(objects, sub, child)).await? {
+            match Box::pin(apply_node(objects, sub, child, rewritten)).await? {
                 // A directory replaces whatever was there, file included.
                 Some(id) => {
                     tree.entries.insert(name.clone(), TreeEntry::Tree { id });
@@ -175,7 +200,9 @@ async fn apply_node(
     if tree.is_empty() {
         return Ok(None);
     }
-    Ok(Some(objects.put_tree(&tree).await?))
+    let id = tree.id();
+    rewritten.push(tree);
+    Ok(Some(id))
 }
 
 #[cfg(test)]

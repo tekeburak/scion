@@ -3193,6 +3193,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "diffy",
+ "futures-util",
  "proptest",
  "scion-store",
  "scion-types",
@@ -3225,6 +3226,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "tokio",
+ "tokio-stream",
 ]
 
 [[package]]

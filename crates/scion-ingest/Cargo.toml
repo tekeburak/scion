@@ -19,6 +19,7 @@ scion-store.workspace = true
 scion-types.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tokio-stream.workspace = true
 
 [dev-dependencies]
 async-trait.workspace = true

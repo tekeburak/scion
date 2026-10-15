@@ -11,9 +11,10 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use object_store::path::Path;
-use object_store::{ObjectStore as Backend, ObjectStoreExt as _, PutPayload};
+use object_store::{ObjectStore as Backend, ObjectStoreExt as _, PutMode, PutPayload};
 use scion_types::{BlobId, Decode, Encode, Tree, TreeId};
 
+use crate::recent::Recent;
 use crate::{ObjectStore, Result, StoreError};
 
 /// Default zstd compression level.
@@ -22,10 +23,29 @@ pub const ZSTD_LEVEL: i32 = 3;
 /// How many `HEAD` requests `has_blobs` issues concurrently.
 const HAS_CONCURRENCY: usize = 32;
 
+/// Bytes of recently read or written trees kept in memory.
+const TREE_MEMO_BYTES: usize = 64 << 20;
+/// Bytes of recently read or written small blobs kept in memory.
+const BLOB_MEMO_BYTES: usize = 64 << 20;
+/// Blobs at most this large are memoised: derived nodes and source files,
+/// not large assets.
+const SMALL_BLOB_BYTES: usize = 64 << 10;
+/// Bytes of blob ids known to be stored.
+const PRESENT_MEMO_BYTES: usize = 8 << 20;
+
 /// An [`ObjectStore`] backed by any `object_store` backend.
+///
+/// Objects are immutable, so recently read or written trees and small blobs,
+/// and the ids of blobs known to be stored, are memoised in a bounded amount
+/// of memory: deriving a changeset reads back the directories its parent
+/// just wrote, and `CreateChangeset` checks blobs its caller just uploaded.
+/// Clones share the memo.
 #[derive(Debug, Clone)]
 pub struct ObjectStorage {
     backend: Arc<dyn Backend>,
+    trees: Arc<Recent<TreeId, Tree>>,
+    blobs: Arc<Recent<BlobId, Bytes>>,
+    present: Arc<Recent<BlobId, ()>>,
 }
 
 impl From<object_store::Error> for StoreError {
@@ -54,7 +74,19 @@ impl ObjectStorage {
     /// Wrap a backend.
     #[must_use]
     pub fn new(backend: Arc<dyn Backend>) -> Self {
-        Self { backend }
+        Self {
+            backend,
+            trees: Arc::new(Recent::new(TREE_MEMO_BYTES)),
+            blobs: Arc::new(Recent::new(BLOB_MEMO_BYTES)),
+            present: Arc::new(Recent::new(PRESENT_MEMO_BYTES)),
+        }
+    }
+
+    fn remember_blob(&self, id: BlobId, bytes: &Bytes) {
+        self.present.insert(id, (), BlobId::LEN);
+        if bytes.len() <= SMALL_BLOB_BYTES {
+            self.blobs.insert(id, bytes.clone(), bytes.len());
+        }
     }
 
     /// An in-memory backend, for tests.
@@ -83,16 +115,19 @@ impl ObjectStorage {
         }
     }
 
-    /// Store `data` under `key` unless it is already present. Objects are
-    /// immutable and content-addressed, so a concurrent duplicate write is
-    /// harmless.
+    /// Store `data` under `key` unless it is already present, in one
+    /// conditional request: an object is never overwritten, and an existing
+    /// one costs no extra round trip to find out.
     async fn put_if_absent(&self, key: Path, data: &[u8]) -> Result<()> {
-        if self.exists(&key).await? {
-            return Ok(());
-        }
         let payload = PutPayload::from(compress(data)?);
-        self.backend.put(&key, payload).await?;
-        Ok(())
+        match self
+            .backend
+            .put_opts(&key, payload, PutMode::Create.into())
+            .await
+        {
+            Ok(_) | Err(object_store::Error::AlreadyExists { .. }) => Ok(()),
+            Err(e) => Err(e.into()),
+        }
     }
 
     async fn get_raw(&self, key: &Path) -> Result<Option<Vec<u8>>> {
@@ -108,11 +143,17 @@ impl ObjectStorage {
 impl ObjectStore for ObjectStorage {
     async fn put_blob(&self, bytes: Bytes) -> Result<BlobId> {
         let id = BlobId::hash(&bytes);
-        self.put_if_absent(blob_key(id), &bytes).await?;
+        if self.present.get(&id).await.is_none() {
+            self.put_if_absent(blob_key(id), &bytes).await?;
+        }
+        self.remember_blob(id, &bytes);
         Ok(id)
     }
 
     async fn get_blob(&self, id: BlobId) -> Result<Option<Bytes>> {
+        if let Some(bytes) = self.blobs.get(&id).await {
+            return Ok(Some(bytes));
+        }
         let Some(data) = self.get_raw(&blob_key(id)).await? else {
             return Ok(None);
         };
@@ -121,12 +162,23 @@ impl ObjectStore for ObjectStorage {
                 "blob {id} does not match its content"
             )));
         }
-        Ok(Some(Bytes::from(data)))
+        let bytes = Bytes::from(data);
+        self.remember_blob(id, &bytes);
+        Ok(Some(bytes))
     }
 
     async fn has_blobs(&self, ids: &[BlobId]) -> Result<Vec<bool>> {
         stream::iter(ids.iter().copied())
-            .map(|id| async move { self.exists(&blob_key(id)).await })
+            .map(|id| async move {
+                if self.present.get(&id).await.is_some() {
+                    return Ok(true);
+                }
+                let present = self.exists(&blob_key(id)).await?;
+                if present {
+                    self.present.insert(id, (), BlobId::LEN);
+                }
+                Ok(present)
+            })
             .buffered(HAS_CONCURRENCY)
             .try_collect()
             .await
@@ -134,12 +186,18 @@ impl ObjectStore for ObjectStorage {
 
     async fn put_tree(&self, tree: &Tree) -> Result<TreeId> {
         let id = tree.id();
-        self.put_if_absent(tree_key(id), &tree.encode_to_vec())
-            .await?;
+        if self.trees.get(&id).await.is_none() {
+            let encoded = tree.encode_to_vec();
+            self.put_if_absent(tree_key(id), &encoded).await?;
+            self.trees.insert(id, tree.clone(), encoded.len());
+        }
         Ok(id)
     }
 
     async fn get_tree(&self, id: TreeId) -> Result<Option<Tree>> {
+        if let Some(tree) = self.trees.get(&id).await {
+            return Ok(Some(tree));
+        }
         let Some(data) = self.get_raw(&tree_key(id)).await? else {
             return Ok(None);
         };
@@ -151,6 +209,7 @@ impl ObjectStore for ObjectStorage {
                 tree.id()
             )));
         }
+        self.trees.insert(id, tree.clone(), data.len());
         Ok(Some(tree))
     }
 }
@@ -178,8 +237,11 @@ mod tests {
             .put(&blob_key(id), PutPayload::from(compress(b"evil").unwrap()))
             .await
             .unwrap();
+        // A fresh store over the same backend: the memo only holds what was
+        // verified when it was read or written.
+        let reader = ObjectStorage::new(store.backend().clone());
         assert!(matches!(
-            store.get_blob(id).await,
+            reader.get_blob(id).await,
             Err(StoreError::Corrupt(_))
         ));
     }

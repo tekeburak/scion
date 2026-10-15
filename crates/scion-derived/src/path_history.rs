@@ -20,12 +20,14 @@ use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use futures_util::{StreamExt, TryStreamExt, stream};
 use scion_store::ObjectStore;
 use scion_types::canonical::{Reader, Writer};
 use scion_types::{
     BlobId, Changeset, ChangesetId, PathComponent, RepoPath, Tree, TreeEntry, TreeId,
 };
 
+use crate::root_tree::WRITE_CONCURRENCY;
 use crate::{Derivable, DeriveError, Deriver, Result, RootTree};
 
 /// The root history node of a changeset.
@@ -112,10 +114,6 @@ impl HistoryNode {
             .ok_or(DeriveError::MissingObject(id))?;
         Self::decode(&bytes).ok_or(DeriveError::CorruptObject(id))
     }
-
-    async fn store(&self, objects: &dyn ObjectStore) -> Result<BlobId> {
-        Ok(objects.put_blob(Bytes::from(self.encode())).await?)
-    }
 }
 
 #[async_trait]
@@ -133,7 +131,16 @@ impl Derivable for PathHistory {
             }
             _ => None,
         };
-        Ok(Self(rebuild(ctx.objects, new_root, old, cs_id).await?))
+        let mut rewritten = Vec::new();
+        let root = rebuild(ctx.objects, new_root, old, cs_id, &mut rewritten).await?;
+        // Node ids are content hashes, so every rewritten node is written in
+        // one concurrent batch; nothing points at them until the pointer is
+        // recorded.
+        stream::iter(rewritten.into_iter().map(|node| ctx.objects.put_blob(node)))
+            .buffer_unordered(WRITE_CONCURRENCY)
+            .try_for_each(|_| async { Ok(()) })
+            .await?;
+        Ok(Self(root))
     }
 
     fn to_pointer(&self) -> Vec<u8> {
@@ -146,12 +153,14 @@ impl Derivable for PathHistory {
 }
 
 /// Build the history node for `new_tree` given the parent's `(tree, history)`
-/// for the same directory, attributing every difference to `cs`.
+/// for the same directory, attributing every difference to `cs`. Every new
+/// node's encoding is appended to `rewritten` for the caller to store.
 async fn rebuild(
     objects: &dyn ObjectStore,
     new_tree: TreeId,
     old: Option<(TreeId, BlobId)>,
     cs: ChangesetId,
+    rewritten: &mut Vec<Bytes>,
 ) -> Result<BlobId> {
     if let Some((old_tree, old_history)) = old {
         if old_tree == new_tree {
@@ -187,7 +196,7 @@ async fn rebuild(
                     }
                     _ => None,
                 };
-                let sub = Box::pin(rebuild(objects, *id, old_sub, cs)).await?;
+                let sub = Box::pin(rebuild(objects, *id, old_sub, cs, rewritten)).await?;
                 HistoryEntry::Dir {
                     last_changed: cs,
                     node: sub,
@@ -196,7 +205,10 @@ async fn rebuild(
         };
         node.entries.insert(name.clone(), history);
     }
-    node.store(objects).await
+    let bytes = Bytes::from(node.encode());
+    let id = BlobId::hash(&bytes);
+    rewritten.push(bytes);
+    Ok(id)
 }
 
 async fn load_tree(objects: &dyn ObjectStore, id: TreeId) -> Result<Tree> {

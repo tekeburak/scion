@@ -128,6 +128,11 @@ impl GitRepo {
         Ok(Self { repo })
     }
 
+    /// The repository's git directory.
+    pub(crate) fn git_dir(&self) -> &Path {
+        self.repo.git_dir()
+    }
+
     /// Every commit reachable from `rev`, each after all of its parents.
     /// Ties are broken by the order of the parent lists, so the result is the
     /// same on every run.

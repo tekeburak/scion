@@ -7,21 +7,39 @@
 //! exist for querying.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use scion_types::{Changeset, ChangesetId, Decode, Encode, FileChange};
 use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
-use sqlx::{Executor, Postgres, Transaction};
+use sqlx::{Executor, Postgres};
 
+use crate::recent::Recent;
 use crate::{MetadataStore, RefState, Result, StoreError, is_allowed_ref_name};
 
 /// Embedded migrations from the repository's `migrations/` directory.
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
 
+/// Bytes of recently read or written changesets kept in memory.
+const CHANGESET_MEMO_BYTES: usize = 32 << 20;
+/// Bytes of recently read or written derived pointers kept in memory.
+const DERIVED_MEMO_BYTES: usize = 16 << 20;
+/// Bytes of repository ids kept in memory.
+const REPO_MEMO_BYTES: usize = 1 << 20;
+
+type DerivedKey = (String, String, u32, ChangesetId);
+
 /// A [`MetadataStore`] backed by Postgres.
+///
+/// Changesets, derived pointers and repository ids are write-once, so the
+/// recently read or written ones are memoised in a bounded amount of memory;
+/// refs are always read from the database. Clones share the memo.
 #[derive(Debug, Clone)]
 pub struct PostgresStore {
     pool: PgPool,
+    repo_ids: Arc<Recent<String, i64>>,
+    changesets: Arc<Recent<(String, ChangesetId), Changeset>>,
+    derived: Arc<Recent<DerivedKey, Vec<u8>>>,
 }
 
 impl From<sqlx::Error> for StoreError {
@@ -57,13 +75,18 @@ impl PostgresStore {
             .max_connections(16)
             .connect_with(opts)
             .await?;
-        Ok(Self { pool })
+        Ok(Self::from_pool(pool))
     }
 
     /// Wrap an existing pool.
     #[must_use]
     pub fn from_pool(pool: PgPool) -> Self {
-        Self { pool }
+        Self {
+            pool,
+            repo_ids: Arc::new(Recent::new(REPO_MEMO_BYTES)),
+            changesets: Arc::new(Recent::new(CHANGESET_MEMO_BYTES)),
+            derived: Arc::new(Recent::new(DERIVED_MEMO_BYTES)),
+        }
     }
 
     /// Apply pending migrations.
@@ -90,16 +113,89 @@ impl PostgresStore {
         Ok(id.map(|(id,)| id))
     }
 
-    /// Look up a repository id, creating the repository if needed.
-    async fn ensure_repo(tx: &mut Transaction<'_, Postgres>, name: &str) -> Result<i64> {
+    /// Look up a repository id, creating the repository if needed. A
+    /// repository row is never deleted, so its id is memoised.
+    async fn ensure_repo(&self, name: &str) -> Result<i64> {
+        if let Some(id) = self.repo_ids.get(&name.to_owned()).await {
+            return Ok(id);
+        }
         sqlx::query("INSERT INTO repos (name) VALUES ($1) ON CONFLICT (name) DO NOTHING")
             .bind(name)
-            .execute(&mut **tx)
+            .execute(&self.pool)
             .await?;
-        Self::repo_id(&mut **tx, name)
+        let id = Self::repo_id(&self.pool, name)
             .await?
-            .ok_or_else(|| StoreError::Corrupt(format!("repo {name:?} vanished after insert")))
+            .ok_or_else(|| StoreError::Corrupt(format!("repo {name:?} vanished after insert")))?;
+        self.repo_ids.insert(name.to_owned(), id, name.len() + 8);
+        Ok(id)
     }
+}
+
+/// Insert every file change of `cs` (stored as `id` in repository `repo`).
+async fn insert_file_changes(
+    tx: &mut sqlx::Transaction<'_, Postgres>,
+    repo: i64,
+    id: ChangesetId,
+    cs: &Changeset,
+) -> Result<()> {
+    // One statement for every file change: an imported root commit
+    // touches thousands of paths, and a round trip each would dominate.
+    let n = cs.file_changes.len();
+    let (mut paths, mut kinds, mut blobs, mut ftypes, mut sizes, mut cf_paths, mut cf_css) = (
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+        Vec::with_capacity(n),
+    );
+    for (path, change) in &cs.file_changes {
+        paths.push(path.as_str());
+        match change {
+            FileChange::Deleted => {
+                kinds.push(0i16);
+                blobs.push(None);
+                ftypes.push(None);
+                sizes.push(None);
+                cf_paths.push(None);
+                cf_css.push(None);
+            }
+            FileChange::Tracked {
+                content,
+                kind,
+                size,
+                copy_from,
+            } => {
+                kinds.push(1i16);
+                blobs.push(Some(content.as_bytes().to_vec()));
+                ftypes.push(Some(i16::from(kind.tag())));
+                sizes.push(Some(to_i64(*size)?));
+                cf_paths.push(copy_from.as_ref().map(|(p, _)| p.as_str()));
+                cf_css.push(copy_from.as_ref().map(|(_, c)| c.as_bytes().to_vec()));
+            }
+        }
+    }
+    if n > 0 {
+        sqlx::query(
+            "INSERT INTO file_changes (repo, changeset_id, path, change_kind, blob_id, file_type, \
+             size, copy_from_path, copy_from_cs) \
+             SELECT $1, $2, * FROM UNNEST($3::text[], $4::smallint[], $5::bytea[], \
+             $6::smallint[], $7::bigint[], $8::text[], $9::bytea[])",
+        )
+        .bind(repo)
+        .bind(id.as_bytes().as_slice())
+        .bind(&paths)
+        .bind(&kinds)
+        .bind(&blobs)
+        .bind(&ftypes)
+        .bind(&sizes)
+        .bind(&cf_paths)
+        .bind(&cf_css)
+        .execute(&mut **tx)
+        .await?;
+    }
+    Ok(())
 }
 
 #[async_trait]
@@ -107,8 +203,8 @@ impl MetadataStore for PostgresStore {
     async fn put_changeset(&self, cs: &Changeset) -> Result<ChangesetId> {
         let id = cs.id();
         let canonical = cs.encode_to_vec();
+        let repo = self.ensure_repo(&cs.repo).await?;
         let mut tx = self.pool.begin().await?;
-        let repo = Self::ensure_repo(&mut tx, &cs.repo).await?;
 
         let exists: Option<(i32,)> =
             sqlx::query_as("SELECT 1 FROM changesets WHERE repo = $1 AND id = $2")
@@ -163,46 +259,18 @@ impl MetadataStore for PostgresStore {
         .execute(&mut *tx)
         .await?;
 
-        // TODO(perf): batch with UNNEST once changesets routinely touch many files.
-        for (path, change) in &cs.file_changes {
-            let (kind, blob, ftype, size, cf_path, cf_cs) = match change {
-                FileChange::Deleted => (0i16, None, None, None, None, None),
-                FileChange::Tracked {
-                    content,
-                    kind,
-                    size,
-                    copy_from,
-                } => (
-                    1i16,
-                    Some(content.as_bytes().to_vec()),
-                    Some(i16::from(kind.tag())),
-                    Some(to_i64(*size)?),
-                    copy_from.as_ref().map(|(p, _)| p.as_str().to_owned()),
-                    copy_from.as_ref().map(|(_, c)| c.as_bytes().to_vec()),
-                ),
-            };
-            sqlx::query(
-                "INSERT INTO file_changes (repo, changeset_id, path, change_kind, blob_id, file_type, \
-                 size, copy_from_path, copy_from_cs) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
-            )
-            .bind(repo)
-            .bind(id.as_bytes().as_slice())
-            .bind(path.as_str())
-            .bind(kind)
-            .bind(blob)
-            .bind(ftype)
-            .bind(size)
-            .bind(cf_path)
-            .bind(cf_cs)
-            .execute(&mut *tx)
-            .await?;
-        }
-
+        insert_file_changes(&mut tx, repo, id, cs).await?;
         tx.commit().await?;
+        self.changesets
+            .insert((cs.repo.clone(), id), cs.clone(), canonical.len());
         Ok(id)
     }
 
     async fn get_changeset(&self, repo: &str, id: ChangesetId) -> Result<Option<Changeset>> {
+        let key = (repo.to_owned(), id);
+        if let Some(cs) = self.changesets.get(&key).await {
+            return Ok(Some(cs));
+        }
         let row: Option<(Vec<u8>,)> = sqlx::query_as(
             "SELECT c.canonical FROM changesets c JOIN repos r ON r.id = c.repo \
              WHERE r.name = $1 AND c.id = $2",
@@ -222,6 +290,7 @@ impl MetadataStore for PostgresStore {
                 cs.id()
             )));
         }
+        self.changesets.insert(key, cs.clone(), canonical.len());
         Ok(Some(cs))
     }
 
@@ -241,8 +310,7 @@ impl MetadataStore for PostgresStore {
         if !is_allowed_ref_name(name) {
             return Err(StoreError::RefNameNotAllowed(name.to_owned()));
         }
-        let mut tx = self.pool.begin().await?;
-        let repo_id = Self::ensure_repo(&mut tx, repo).await?;
+        let repo_id = self.ensure_repo(repo).await?;
         let inserted = sqlx::query(
             "INSERT INTO refs (repo, name, target, version) VALUES ($1, $2, $3, 0) \
              ON CONFLICT (repo, name) DO NOTHING",
@@ -250,13 +318,11 @@ impl MetadataStore for PostgresStore {
         .bind(repo_id)
         .bind(name)
         .bind(target.as_bytes().as_slice())
-        .execute(&mut *tx)
+        .execute(&self.pool)
         .await?;
         if inserted.rows_affected() == 0 {
-            tx.rollback().await?;
             return Err(StoreError::RefExists(name.to_owned()));
         }
-        tx.commit().await?;
         Ok(RefState { target, version: 0 })
     }
 
@@ -344,8 +410,7 @@ impl MetadataStore for PostgresStore {
         cs: ChangesetId,
         pointer: Vec<u8>,
     ) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
-        let repo_id = Self::ensure_repo(&mut tx, repo).await?;
+        let repo_id = self.ensure_repo(repo).await?;
         sqlx::query(
             "INSERT INTO derived (repo, type, version, changeset_id, pointer) \
              VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
@@ -357,10 +422,17 @@ impl MetadataStore for PostgresStore {
                 .map_err(|_| StoreError::Corrupt("derived version overflow".into()))?,
         )
         .bind(cs.as_bytes().as_slice())
-        .bind(pointer)
-        .execute(&mut *tx)
+        .bind(&pointer)
+        .execute(&self.pool)
         .await?;
-        tx.commit().await?;
+        // A conflicting insert kept the first pointer; both are the same
+        // value of a deterministic derivation, so either may be memoised.
+        let weight = pointer.len() + ty.len() + repo.len() + 40;
+        self.derived.insert(
+            (repo.to_owned(), ty.to_owned(), version, cs),
+            pointer,
+            weight,
+        );
         Ok(())
     }
 
@@ -371,6 +443,10 @@ impl MetadataStore for PostgresStore {
         version: u32,
         cs: ChangesetId,
     ) -> Result<Option<Vec<u8>>> {
+        let key = (repo.to_owned(), ty.to_owned(), version, cs);
+        if let Some(pointer) = self.derived.get(&key).await {
+            return Ok(Some(pointer));
+        }
         let row: Option<(Vec<u8>,)> = sqlx::query_as(
             "SELECT d.pointer FROM derived d JOIN repos r ON r.id = d.repo \
              WHERE r.name = $1 AND d.type = $2 AND d.version = $3 AND d.changeset_id = $4",
@@ -384,6 +460,10 @@ impl MetadataStore for PostgresStore {
         .bind(cs.as_bytes().as_slice())
         .fetch_optional(&self.pool)
         .await?;
+        if let Some((pointer,)) = &row {
+            let weight = pointer.len() + ty.len() + repo.len() + 40;
+            self.derived.insert(key, pointer.clone(), weight);
+        }
         Ok(row.map(|(p,)| p))
     }
 
@@ -393,8 +473,7 @@ impl MetadataStore for PostgresStore {
         git_sha: &[u8],
         cs: ChangesetId,
     ) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
-        let repo_id = Self::ensure_repo(&mut tx, repo).await?;
+        let repo_id = self.ensure_repo(repo).await?;
         sqlx::query(
             "INSERT INTO ingest_checkpoints (repo, git_sha, changeset_id) \
              VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
@@ -402,9 +481,8 @@ impl MetadataStore for PostgresStore {
         .bind(repo_id)
         .bind(git_sha)
         .bind(cs.as_bytes().as_slice())
-        .execute(&mut *tx)
+        .execute(&self.pool)
         .await?;
-        tx.commit().await?;
         Ok(())
     }
 
