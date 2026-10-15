@@ -6,6 +6,7 @@ members = [
     "crates/scion-derived",
     "crates/scion-core",
     "crates/scion-diff3",
+    "crates/scion-proto",
 ]
 
 [workspace.package]
@@ -22,6 +23,7 @@ scion-store = { path = "crates/scion-store", version = "0.0.1" }
 scion-derived = { path = "crates/scion-derived", version = "0.0.1" }
 scion-core = { path = "crates/scion-core", version = "0.0.1" }
 scion-diff3 = { path = "crates/scion-diff3", version = "0.0.1" }
+scion-proto = { path = "crates/scion-proto", version = "0.0.1" }
 
 # Diff / merge
 diffy = "0.5.2"
@@ -31,9 +33,16 @@ blake3 = "1.5"
 hex = "0.4"
 bytes = "1"
 
+# RPC
+prost = "0.14"
+tonic = "0.14"
+tonic-prost = "0.14"
+tonic-prost-build = "0.14"
+
 # Async
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync"] }
 async-trait = "0.1"
+tokio-stream = { version = "0.1", features = ["net"] }
 
 # Errors / serde
 thiserror = "2"

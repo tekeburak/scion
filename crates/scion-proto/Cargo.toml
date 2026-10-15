@@ -1,0 +1,23 @@
+[package]
+name = "scion-proto"
+description = "gRPC wire protocol for Scion: ObjectService and ControlService"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+prost.workspace = true
+tonic.workspace = true
+tonic-prost.workspace = true
+
+[build-dependencies]
+tonic-prost-build.workspace = true
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["net"] }
+tokio-stream.workspace = true
+
+[lints]
+workspace = true

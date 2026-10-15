@@ -55,7 +55,7 @@ Full details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
 ## Development
 
 ```sh
-# toolchain is pinned by rust-toolchain.toml
+# toolchain is pinned by rust-toolchain.toml; scion-proto also needs `protoc` on PATH
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 

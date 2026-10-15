@@ -1,0 +1,199 @@
+// The Scion wire protocol, version 1.
+//
+// Protobuf is the transport only. No id is ever computed over a protobuf
+// encoding: trees and changesets travel as their canonical encoding
+// (docs/DATA_MODEL.md), and the receiver recomputes the id from those bytes.
+//
+// Every id field holds the 32 raw BLAKE3 digest bytes, not hex.
+
+syntax = "proto3";
+
+package scion.v1;
+
+// ---------------------------------------------------------------------------
+// Object plane: immutable trees and blobs by id. Implemented by scion-server,
+// scion-cache and scion-daemon, so a client need not know the topology.
+// A missing object is NOT_FOUND.
+// ---------------------------------------------------------------------------
+
+service ObjectService {
+  rpc GetTree(GetTreeRequest) returns (GetTreeResponse);
+  rpc GetBlob(GetBlobRequest) returns (GetBlobResponse);
+  rpc PutBlob(PutBlobRequest) returns (PutBlobResponse);
+  rpc PutTree(PutTreeRequest) returns (PutTreeResponse);
+}
+
+message GetTreeRequest {
+  bytes id = 1;
+}
+
+message GetTreeResponse {
+  // Canonical encoding (`SCTR`); blake3 of these bytes is the requested id.
+  bytes tree = 1;
+}
+
+message GetBlobRequest {
+  bytes id = 1;
+}
+
+message GetBlobResponse {
+  // Raw file bytes; blake3 of these bytes is the requested id.
+  bytes data = 1;
+}
+
+message PutBlobRequest {
+  bytes data = 1;
+}
+
+message PutBlobResponse {
+  bytes id = 1;
+}
+
+message PutTreeRequest {
+  // Canonical encoding (`SCTR`).
+  bytes tree = 1;
+}
+
+message PutTreeResponse {
+  bytes id = 1;
+}
+
+// ---------------------------------------------------------------------------
+// Control plane: served only by scion-server. Every request names its
+// repository; one server serves many.
+// ---------------------------------------------------------------------------
+
+service ControlService {
+  rpc GetRef(GetRefRequest) returns (GetRefResponse);
+  rpc CreateChangeset(CreateChangesetRequest) returns (CreateChangesetResponse);
+  rpc MoveRef(MoveRefRequest) returns (MoveRefResponse);
+  rpc Diff(DiffRequest) returns (DiffResponse);
+  rpc Log(LogRequest) returns (LogResponse);
+  rpc PathLog(PathLogRequest) returns (LogResponse);
+  rpc MergeBase(MergeBaseRequest) returns (MergeBaseResponse);
+  rpc Blame(BlameRequest) returns (BlameResponse);
+}
+
+// Server refs are only `main` and `release/*`. An unknown ref is NOT_FOUND.
+message GetRefRequest {
+  string repo = 1;
+  string name = 2;
+}
+
+message GetRefResponse {
+  bytes target = 1;
+  // Compare-and-swap version; present it to MoveRef.
+  uint64 version = 2;
+  // Root tree of `target`, so a clone can start fetching objects at once.
+  bytes root_tree = 3;
+}
+
+// The changeset's blobs (and any trees) must already be in the object store.
+// The repository is the changeset's own `repo` field.
+message CreateChangesetRequest {
+  // Canonical encoding (`SCCS`).
+  bytes changeset = 1;
+}
+
+message CreateChangesetResponse {
+  bytes id = 1;
+  bytes root_tree = 2;
+}
+
+// Fast-forward only. Without `expected_version` the ref is created and must
+// not exist yet; with it, the move succeeds only if the ref is still at that
+// version (FAILED_PRECONDITION otherwise).
+message MoveRefRequest {
+  string repo = 1;
+  string name = 2;
+  bytes target = 3;
+  optional uint64 expected_version = 4;
+}
+
+message MoveRefResponse {
+  // The new version.
+  uint64 version = 1;
+}
+
+// File-level diff between two changesets; without `old`, against the empty tree.
+message DiffRequest {
+  string repo = 1;
+  optional bytes old = 2;
+  bytes new = 3;
+}
+
+message DiffResponse {
+  // Sorted by path, byte order.
+  repeated DiffEntry entries = 1;
+}
+
+message DiffEntry {
+  string path = 1;
+  // Absent for an added file.
+  optional FileEntry old = 2;
+  // Absent for a deleted file.
+  optional FileEntry new = 3;
+}
+
+message FileEntry {
+  bytes id = 1;
+  FileType kind = 2;
+  uint64 size = 3;
+}
+
+// Values match the canonical encoding's file-type byte.
+enum FileType {
+  FILE_TYPE_REGULAR = 0;
+  FILE_TYPE_EXECUTABLE = 1;
+  FILE_TYPE_SYMLINK = 2;
+}
+
+// First-parent history of `head`, newest first.
+message LogRequest {
+  string repo = 1;
+  bytes head = 2;
+  uint32 limit = 3;
+}
+
+// First-parent history of `head` restricted to changesets that touched
+// `path` (a file, or anything beneath a directory), newest first.
+message PathLogRequest {
+  string repo = 1;
+  bytes head = 2;
+  string path = 3;
+  uint32 limit = 4;
+}
+
+message LogResponse {
+  // Canonical encodings (`SCCS`), newest first.
+  repeated bytes changesets = 1;
+}
+
+message MergeBaseRequest {
+  string repo = 1;
+  bytes a = 2;
+  bytes b = 3;
+}
+
+message MergeBaseResponse {
+  // Absent if `a` and `b` share no ancestor.
+  optional bytes base = 1;
+}
+
+// Line attribution of the file at `path` in `changeset`. A path that is not a
+// file there is NOT_FOUND.
+message BlameRequest {
+  string repo = 1;
+  bytes changeset = 2;
+  string path = 3;
+}
+
+message BlameResponse {
+  // Consecutive runs of lines, in file order.
+  repeated BlameRun runs = 1;
+}
+
+message BlameRun {
+  bytes changeset = 1;
+  uint64 lines = 2;
+}
