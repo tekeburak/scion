@@ -8,7 +8,8 @@ bytes, so a diff in docs/assets/ always means the figure changed on purpose.
     python3 scripts/render-assets.py --check    # exits 1 if any file is out of date
 
 Every figure is a schematic of what docs/ARCHITECTURE.md and docs/DATA_MODEL.md describe.
-The only number drawn is the one a test asserts (see `changeset_svg`). Update ROADMAP below
+The only numbers drawn come from the fixture a test asserts on (see `changeset_svg` and
+`commit_cost_svg`). Update ROADMAP below
 when a phase changes status; nothing else here should need touching for that.
 """
 
@@ -50,7 +51,7 @@ ROADMAP = [
 # Phases run in the order listed: git import comes right after the MVP so real repositories
 # can be tested and benchmarked.
 STATUS_DONE = "MVP done: scion-server on Postgres + S3, scn clone --sparse, status, log, diff, blame, add, commit, land"
-STATUS_NEXT = "in progress: Phase 6 git import (6.1-6.10 merged; 6.11-6.14 next: match git on the real-repo slice, publish results), then 4, 5, 7, 8"
+STATUS_NEXT = "in progress: Phase 6 git import (6.1-6.10 merged; next: import within 10x of git, log/blame/land as fast as git, publish results), then 4, 5, 7, 8"
 
 
 def t(x, y, s, size=20, fill=TEXT, weight=400, anchor="start", mono=False, extra=""):
@@ -300,6 +301,81 @@ def changeset_svg():
     return svg(h, "The shape of a Scion changeset, its file changes, blobs and derived data", b)
 
 
+def commit_cost_svg():
+    # The fixture of crates/scion-derived/src/root_tree.rs::
+    # rewritten_nodes_bounded_by_depth_not_file_count: 50 x 50 files at d0_i/d1_j/d2/d3/f_i_j.txt,
+    # then one changeset that edits d0_7/d1_9/d2/d3/f_7_9.txt. The test asserts DEPTH + 1 = 5
+    # tree puts; the other counts follow from the fixture's shape.
+    width, depth = 50, 4
+    files = width * width
+    trees = 1 + width + width * width * (depth - 1)
+    rewritten = depth + 1
+    h = 700
+    b = []
+    b.append(t(64, 72, "A commit costs what it changes", 34, TEXT, 700))
+    b.append(t(64, 108, "Editing one file derives a new tree for each directory on its path; every other "
+                        "subtree keeps its id and is shared with the parent.", 19, MUTED))
+
+    bw, bh, gap = 200, 42, 56
+    top, hl = 150, 3
+    hy = top + hl * gap
+    cols = [
+        (64, ["/"]),
+        (304, ["d0_0/", "d0_1/", "⋮", "d0_7/", "⋮", "d0_49/"]),
+        (544, ["d1_0/", "d1_1/", "⋮", "d1_9/", "⋮", "d1_49/"]),
+        (784, ["d2/"]),
+        (1024, ["d3/"]),
+    ]
+
+    def slot_y(labels, i):
+        return hy if len(labels) == 1 else top + i * gap
+
+    # edges first, so boxes sit on top
+    for (x, labels), (nx, nlabels) in zip(cols, cols[1:]):
+        for j, lab in enumerate(nlabels):
+            if lab == "⋮":
+                continue
+            on_path = len(nlabels) == 1 or j == hl
+            y2 = slot_y(nlabels, j) + bh / 2
+            b.append(f'<path d="M{x + bw},{hy + bh / 2} C{x + bw + 24},{hy + bh / 2} {nx - 24},{y2} {nx},{y2}" '
+                     f'fill="none" stroke="{VIOLET if on_path else LINE}" stroke-width="{3 if on_path else 2}"/>')
+    for x, labels in cols:
+        for i, lab in enumerate(labels):
+            y = slot_y(labels, i)
+            if lab == "⋮":
+                b.append(t(x + bw / 2, y + 30, lab, 22, MUTED, 700, "middle"))
+                continue
+            on_path = len(labels) == 1 or i == hl
+            b.append(box(x, y, bw, bh, stroke=VIOLET if on_path else LINE,
+                         fill="#2a2148" if on_path else PANEL, r=10, sw=2.5 if on_path else 2))
+            b.append(t(x + 18, y + 28, lab, 17, TEXT if on_path else MUTED, 600 if on_path else 400, mono=True))
+            if on_path:
+                b.append(t(x + bw - 16, y + 28, "new", 14, VIOLET, 700, "end"))
+            elif x != 64:
+                b.append(t(x + bw - 16, y + 28, "shared", 14, MUTED, 400, "end"))
+    fx = 1264
+    b.append(arrow(1024 + bw, hy + bh / 2, fx - 4, hy + bh / 2, TEAL, width=3))
+    b.append(box(fx, hy, 272, bh, stroke=TEAL, fill="#11302d", r=10, sw=2.5))
+    b.append(t(fx + 18, hy + 28, "f_7_9.txt", 17, TEXT, 600, mono=True))
+    b.append(t(fx + 254, hy + 28, "edited", 14, TEAL, 700, "end"))
+    b.append(t(fx, hy + 76, "the changeset records only this path", 15, MUTED))
+
+    tiles = [
+        (f"{files:,} files", f"{trees:,} tree nodes before the edit", MUTED),
+        (f"{rewritten} trees rewritten", "the directories on the edited path", VIOLET),
+        (f"{trees - rewritten:,} trees reused", "same ids as in the parent, nothing written", GREEN),
+    ]
+    tw = (W - 128 - 2 * 24) / 3
+    for i, (big, small, c) in enumerate(tiles):
+        x = round(64 + i * (tw + 24), 1)
+        b.append(box(x, 500, round(tw, 1), 112, stroke=c, r=12))
+        b.append(t(round(x + 24, 1), 548, big, 30, TEXT, 700))
+        b.append(t(round(x + 24, 1), 582, small, 17, MUTED))
+    b.append(t(64, 656, "Asserted by scion-derived's rewritten_nodes_bounded_by_depth_not_file_count test: "
+                        "the work grows with path depth, not with the number of files.", 16, MUTED))
+    return svg(h, f"One edited file in a {files:,}-file tree rewrites {rewritten} of {trees:,} tree nodes", b)
+
+
 def roadmap_svg():
     h = 312
     b = []
@@ -354,6 +430,7 @@ FIGURES = {
     "banner.svg": banner_svg,
     "architecture.svg": architecture_svg,
     "changeset.svg": changeset_svg,
+    "commit-cost.svg": commit_cost_svg,
     "roadmap.svg": roadmap_svg,
     "badge-status.svg": lambda: badge_svg("status", "MVP \u00b7 Phase 6 in progress", "#c27c0e"),
     "badge-license.svg": lambda: badge_svg("license", "Apache-2.0", "#2b7bb9"),
