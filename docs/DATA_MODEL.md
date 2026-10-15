@@ -63,6 +63,12 @@ each value has exactly one valid encoding.
 
 ### Changeset (`SCCS`, version 1)
 
+<p align="center">
+  <img src="assets/changeset.svg" width="800" alt="A changeset's fields, its file changes pointing at blobs, and the derived data computed from it">
+</p>
+
+The figure is illustrative (the example paths are made up); the layout below is normative.
+
 ```
 magic           4 bytes   "SCCS"
 version         u16       1

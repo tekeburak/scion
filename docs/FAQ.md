@@ -39,8 +39,28 @@ changing any id or any client.
 
 ## Can I use it today?
 
-No. Phase 3 (the MVP: `scion-server` plus the `scn` CLI) is in progress. The server and the
-client library exist; the `scn` command does not yet. The README status line tracks this.
+Not for real work. Phase 3 (the MVP) is in progress. `scion-server` serves the object and
+control gRPC services over Postgres + S3, and `scn` can `clone --sparse`, `status`, `log`,
+`diff`, `blame`, `add`, `commit` (an anonymous head) and `land` (fast-forward `main` only;
+server-side rebase is Phase 5). The cache and daemon tiers are Phase 4. The README status
+section tracks this.
+
+## Does a commit get slower as the repository grows?
+
+It should not, and the tests hold the derivation to that. Deriving a changeset's root tree
+rewrites only the directories on the changed paths: one changed file at depth four in a
+2,500-file tree rewrites exactly 5 tree nodes
+(`rewritten_nodes_bounded_by_depth_not_file_count` in `crates/scion-derived/src/root_tree.rs`;
+`PathHistory` has the same bound). Ancestry and merge-base use generation numbers and the
+`SkipList` derived type instead of walking the changeset log.
+
+## Why Postgres and S3?
+
+They are the two pieces most teams already run and know how to operate. Postgres holds small,
+mutable-by-CAS metadata (changesets, refs, derived-data pointers); the object store holds the
+bulk immutable bytes (blobs, trees, snapshot manifests). Neither needs repository maintenance,
+and both have managed, horizontally scalable equivalents (CockroachDB is a drop-in target for
+the metadata store; any S3-compatible service works for objects).
 
 ## What is Scion not a good fit for?
 
