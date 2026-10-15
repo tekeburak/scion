@@ -2,10 +2,8 @@
 
 Public open-source projects inspired by Anthropic's
 [*Redesigning source control at Anthropic*](https://www.anthropic.com/engineering/redesigning-source-control).
-We study how they present themselves. Code may be adapted only from Apache-2.0
-[CarterT27/scion](https://github.com/CarterT27/scion), under the rules in
-[`ARCHITECTURE.md`](ARCHITECTURE.md#reuse-from-cartert27scion); nothing is taken from
-GPL-licensed repositories.
+We study how they present themselves and how fast they are. Our code is written on our own
+types and invariants; nothing is taken from GPL-licensed repositories.
 
 ## 2026-10-15
 

@@ -116,28 +116,16 @@ forward them and never decide access themselves. Authorization is repo- and dire
 
 ### Performance bar
 
-Every phase-6+ benchmark runs the same workloads against git **and** against
-[CarterT27/scion](https://github.com/CarterT27/scion), the closest independent
-implementation of the same reference design. Scion is expected to be at least as fast on each
-workload; a regression against either is a bug, and the table in `README.md` shows all three.
-The workloads include CarterT27/scion's own four (directory import, one-file commit, full and
-one-directory checkout) in addition to ours, so the comparison is on their terms too.
+Every phase-6+ benchmark runs the same workloads against git and against public
+implementations of the same reference design, on the same machine. Scion is expected to be at
+least as fast on each workload; a regression against any of them is a bug. The workloads cover
+import, full and sparse checkout, status, one-file commit, land, log and blame; the table in
+`README.md` shows the results and the measurement script stays in the repository.
 
-### Reuse from CarterT27/scion
+### Ingestion dependency
 
-CarterT27/scion is Apache-2.0. Code from it may be adapted, with attribution in `NOTICE` and
-in the PR, under these rules:
-
-- our invariants win: its changeset carries a root-tree pointer and its encoding uses 34-byte
-  typed ids and varints, so nothing that encodes, hashes or stores objects is taken;
-- worth adapting: the stat-cache status walk and `openat`-based filesystem access, the git
-  test corpus and bundle tooling, the importer structure, the benchmark runner, the
-  linearizability checker, the verified disk cache, and the GitHub device-flow login;
-- `scion-ingest` (phase 6) reads git repositories with `gix` (pure Rust, `zlib-rs`, no
-  network features); the dependency stays in that crate so no other crate builds it;
-- never taken: ignore files, redaction purge (objects are append-only), branch-like refs
-  (`green/*`, arbitrary `CreateRef`), a daemon that bypasses the cache tier, and retry
-  layers on land or transactions.
+`scion-ingest` (phase 6) reads git repositories with `gix` (pure Rust, `zlib-rs`, no network
+features); the dependency stays in that crate so no other crate builds it.
 
 ## Non-goals (first 12 months)
 
