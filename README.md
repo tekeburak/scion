@@ -2,7 +2,12 @@
 
 **Client-server source control for agent-scale monorepos.**
 
-> Status: **pre-MVP**. Nothing here is usable yet; see the [roadmap](#roadmap).
+> **Status: pre-MVP, Phase 3 (the MVP) in progress.** Phases 0–2 are merged: data model and
+> canonical encoding, Postgres + S3 stores, derived data, diff / merge-base / merge / rebase.
+> Phase 3.1–3.6 are merged: `scion-server` serves the object and control gRPC services
+> (`log`, `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`, `move_ref`), and the
+> `scion-client` library can clone and sparse-checkout a working copy. There is **no `scn` CLI
+> yet**, and the cache/daemon tiers (Phase 4) do not exist. Nothing here is usable by end users.
 
 Scion is *not* a general replacement for git. Git's distributed, offline-first model is the right
 design for the overwhelming majority of repositories. Scion targets one specific situation: a
@@ -14,6 +19,45 @@ centralized, server-authoritative design with thin clients and tiered object cac
 This is an independent open-source project inspired by the design described in Anthropic's
 engineering post [*Redesigning source control at Anthropic*](https://www.anthropic.com/engineering/redesigning-source-control).
 It is not affiliated with or endorsed by Anthropic. The name may change before the first release.
+
+## Why it is different
+
+- **Postgres + S3, nothing else.** Metadata (changesets, refs, derived-data pointers) lives in
+  Postgres; blobs, trees and snapshot manifests live in any S3-compatible object store. No
+  packfiles, no repository maintenance, no materialized repository copy on any server.
+- **Derived data instead of a richer commit.** A changeset records only what changed against its
+  first parent. Trees, path history, blame and the ancestry skip list are computed from it and
+  can be replaced without a client change.
+- **Strict tiering** *(planned, Phase 4)*: daemon → regional cache → server, every request an
+  immutable-id GET, no tier skipping a level even as a fallback.
+- **Deliberate deviations from the reference design:** trees live in the object store rather
+  than the metadata database ([why](docs/DATA_MODEL.md#deviation-trees-in-the-object-store));
+  hashing uses our own canonical BLAKE3 encoding, never protobuf; the only server refs are
+  `main` and `release/*`.
+
+Target architecture (in the MVP, clients talk to `scion-server` directly):
+
+```mermaid
+flowchart LR
+    subgraph clients
+        dev[developer machines]
+        ci[CI / cluster jobs]
+    end
+    daemon["scion-daemon<br/>(per node, Phase 4)"]
+    cache["scion-cache<br/>(regional, Phase 4)"]
+    server[scion-server]
+    pg[("Postgres<br/>metadata")]
+    s3[("object store<br/>blobs, trees, snapshots")]
+
+    dev -- control plane: changesets, refs, diffs, land --> server
+    ci -- control plane --> server
+    dev -- object plane: trees, blobs --> cache
+    ci -- object plane --> daemon
+    daemon --> cache
+    cache --> server
+    server --> pg
+    server --> s3
+```
 
 ## Design in one paragraph
 
