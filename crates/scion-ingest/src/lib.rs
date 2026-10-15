@@ -25,12 +25,14 @@
 #![forbid(unsafe_code)]
 
 mod import;
+mod stores;
 mod verify;
 
 pub use import::{Imported, MAIN_REF, import};
 pub use verify::{verify, verify_commit};
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::hash::BuildHasherDefault;
 use std::path::Path;
 
 use bytes::Bytes;
@@ -68,6 +70,8 @@ pub enum IngestError {
     Store(ObjectId, String),
     #[error("moving {MAIN_REF} to commit {0}: {1}")]
     Ref(ObjectId, String),
+    #[error("writing to the stores: {0}")]
+    Write(String),
     #[error("reading ingest checkpoints: {0}")]
     Checkpoints(String),
     #[error("commit {commit}: {path:?}: {what}")]
@@ -98,6 +102,48 @@ pub struct Mapped {
     /// changeset is created. Held for one commit at a time, so the importer's
     /// memory follows the largest commit, not the history.
     pub blobs: BTreeMap<BlobId, Bytes>,
+}
+
+/// A commit read by [`GitRepo::read`], waiting for its parents' changesets.
+#[derive(Debug)]
+pub struct Unresolved {
+    id: ObjectId,
+    parents: Vec<ObjectId>,
+    mapped: Mapped,
+}
+
+/// Placeholder for a parent's changeset id in an [`Unresolved`] commit.
+const UNRESOLVED: ChangesetId = ChangesetId::from_bytes([0; 32]);
+
+impl Unresolved {
+    /// The changeset, given the changeset of every parent in `imported`.
+    pub fn resolve(
+        mut self,
+        imported: &HashMap<ObjectId, ChangesetId>,
+    ) -> Result<Mapped, IngestError> {
+        let parents = self
+            .parents
+            .iter()
+            .map(|p| {
+                imported.get(p).copied().ok_or(IngestError::MissingParent {
+                    commit: self.id,
+                    parent: *p,
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        // Copies and renames always come from the first parent.
+        for change in self.mapped.changeset.file_changes.values_mut() {
+            if let FileChange::Tracked {
+                copy_from: Some((_, from)),
+                ..
+            } = change
+            {
+                *from = parents[0];
+            }
+        }
+        self.mapped.changeset.parents = parents;
+        Ok(self.mapped)
+    }
 }
 
 /// A git repository opened for import.
@@ -186,20 +232,19 @@ impl GitRepo {
         repo: &str,
         imported: &HashMap<ObjectId, ChangesetId>,
     ) -> Result<Mapped, IngestError> {
+        self.read(id, repo)?.resolve(imported)
+    }
+
+    /// Read commit `id`: everything its changeset needs except its parents'
+    /// changeset ids, so commits can be read ahead, in parallel, before
+    /// their parents are imported.
+    pub fn read(&self, id: ObjectId, repo: &str) -> Result<Unresolved, IngestError> {
         let obj_err = |e: &dyn std::fmt::Display| IngestError::Object(id, e.to_string());
         let commit = self.repo.find_commit(id).map_err(|e| obj_err(&e))?;
         let parent_ids: Vec<ObjectId> = commit.parent_ids().map(gix::Id::detach).collect();
         let c = commit.decode().map_err(|e| obj_err(&e))?;
-
-        let parents = parent_ids
-            .iter()
-            .map(|p| {
-                imported.get(p).copied().ok_or(IngestError::MissingParent {
-                    commit: id,
-                    parent: *p,
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+        // Placeholders until `resolve`.
+        let parents: Vec<ChangesetId> = parent_ids.iter().map(|_| UNRESOLVED).collect();
 
         let old_tree = match parent_ids.first() {
             Some(p) => Some(self.tree_of(*p)?),
@@ -270,7 +315,11 @@ impl GitRepo {
             file_changes,
             extra: BTreeMap::from([(GIT_SHA.to_owned(), id.as_bytes().to_vec())]),
         };
-        Ok(Mapped { changeset, blobs })
+        Ok(Unresolved {
+            id,
+            parents: parent_ids,
+            mapped: Mapped { changeset, blobs },
+        })
     }
 
     /// For each added file, the file it was renamed or copied from, if any:
@@ -297,7 +346,8 @@ impl GitRepo {
             return Ok(out);
         }
         let compare = sources.len() * added.len() <= MAX_INEXACT_PAIRS;
-        let mut source_data: HashMap<ObjectId, Vec<u8>> = HashMap::new();
+        // Each file is read and split into lines once, not once per pair.
+        let mut source_lines: HashMap<ObjectId, Lines> = HashMap::new();
         for (path, blob) in added {
             if let Some((from, _)) = sources.iter().find(|(_, s)| *s == blob) {
                 out.insert(path.clone(), (*from).clone());
@@ -306,13 +356,13 @@ impl GitRepo {
             if !compare {
                 continue;
             }
-            let data = self.blob(blob)?;
+            let lines = Lines::new(&self.blob(blob)?);
             let mut best: Option<(u64, &Vec<u8>)> = None;
             for (from, source) in &sources {
-                if !source_data.contains_key(source) {
-                    source_data.insert(*source, self.blob(*source)?);
+                if !source_lines.contains_key(source) {
+                    source_lines.insert(*source, Lines::new(&self.blob(*source)?));
                 }
-                let score = similarity(&source_data[source], &data);
+                let score = source_lines[source].similarity(&lines);
                 if score >= 50 && best.is_none_or(|(b, _)| score > b) {
                     best = Some((score, from));
                 }
@@ -430,27 +480,72 @@ fn file_type(commit: ObjectId, path: &[u8], mode: EntryMode) -> Result<FileType,
     }
 }
 
-/// Percentage of lines two files share (each line counted as often as it
-/// occurs in both), relative to their average length. Empty files are never
-/// similar.
-fn similarity(a: &[u8], b: &[u8]) -> u64 {
-    let lines = |d: &[u8]| d.split_inclusive(|c| *c == b'\n').count() as u64;
-    let (la, lb) = (lines(a), lines(b));
-    if la == 0 || lb == 0 {
-        return 0;
-    }
-    let mut counts: HashMap<&[u8], u64> = HashMap::new();
-    for line in a.split_inclusive(|c| *c == b'\n') {
-        *counts.entry(line).or_default() += 1;
-    }
-    let mut shared = 0;
-    for line in b.split_inclusive(|c| *c == b'\n') {
-        if let Some(n) = counts.get_mut(line).filter(|n| **n > 0) {
-            *n -= 1;
-            shared += 1;
+/// A file as a multiset of lines, each line by its hash.
+struct Lines {
+    total: u64,
+    counts: HashMap<u64, u64, BuildHasherDefault<LineHash>>,
+}
+
+/// FNV-1a over a line's bytes; the line maps key on the result as is.
+#[derive(Default)]
+struct LineHash(u64);
+
+impl std::hash::Hasher for LineHash {
+    fn write(&mut self, bytes: &[u8]) {
+        let mut h = 0xcbf2_9ce4_8422_2325_u64;
+        for b in bytes {
+            h = (h ^ u64::from(*b)).wrapping_mul(0x0100_0000_01b3);
         }
+        self.0 = h;
     }
-    200 * shared / (la + lb)
+
+    fn write_u64(&mut self, n: u64) {
+        self.0 = n;
+    }
+
+    fn finish(&self) -> u64 {
+        self.0
+    }
+}
+
+impl Lines {
+    fn new(data: &[u8]) -> Self {
+        let mut counts = HashMap::default();
+        let mut total = 0;
+        for line in data.split_inclusive(|c| *c == b'\n') {
+            let mut h = LineHash::default();
+            std::hash::Hasher::write(&mut h, line);
+            *counts.entry(std::hash::Hasher::finish(&h)).or_default() += 1;
+            total += 1;
+        }
+        Self { total, counts }
+    }
+
+    /// Percentage of lines two files share (each line counted as often as
+    /// it occurs in both), relative to their average length. Empty files
+    /// are never similar.
+    fn similarity(&self, other: &Self) -> u64 {
+        let (la, lb) = (self.total, other.total);
+        if la == 0 || lb == 0 {
+            return 0;
+        }
+        // At most the shorter file is shared; skip pairs that cannot reach
+        // the 50% threshold without counting.
+        if 200 * la.min(lb) / (la + lb) < 50 {
+            return 0;
+        }
+        let (small, large) = if self.counts.len() <= other.counts.len() {
+            (self, other)
+        } else {
+            (other, self)
+        };
+        let shared: u64 = small
+            .counts
+            .iter()
+            .map(|(line, n)| (*n).min(large.counts.get(line).copied().unwrap_or(0)))
+            .sum();
+        200 * shared / (la + lb)
+    }
 }
 
 fn identity(sig: gix::actor::SignatureRef<'_>) -> Identity {

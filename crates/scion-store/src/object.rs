@@ -5,13 +5,14 @@
 //! zstd-compressed. Every read is verified against its id, so a corrupt or
 //! tampered object is reported rather than returned.
 
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use object_store::path::Path;
-use object_store::{ObjectStore as Backend, ObjectStoreExt as _, PutPayload};
+use object_store::{ObjectStore as Backend, ObjectStoreExt as _, PutMode, PutOptions, PutPayload};
 use scion_types::{BlobId, Decode, Encode, Tree, TreeId};
 
 use crate::{ObjectStore, Result, StoreError};
@@ -43,7 +44,21 @@ fn tree_key(id: TreeId) -> Path {
 }
 
 fn compress(data: &[u8]) -> Result<Vec<u8>> {
-    zstd::encode_all(data, ZSTD_LEVEL).map_err(|e| StoreError::Backend(Box::new(e)))
+    // Setting up a compression context costs more than compressing a small
+    // tree, so each thread keeps one.
+    thread_local! {
+        static COMPRESSOR: RefCell<Option<zstd::bulk::Compressor<'static>>> =
+            const { RefCell::new(None) };
+    }
+    COMPRESSOR
+        .with_borrow_mut(|c| {
+            let c = match c {
+                Some(c) => c,
+                None => c.insert(zstd::bulk::Compressor::new(ZSTD_LEVEL)?),
+            };
+            c.compress(data)
+        })
+        .map_err(|e| StoreError::Backend(Box::new(e)))
 }
 
 fn decompress(data: &[u8]) -> Result<Vec<u8>> {
@@ -83,16 +98,17 @@ impl ObjectStorage {
         }
     }
 
-    /// Store `data` under `key` unless it is already present. Objects are
-    /// immutable and content-addressed, so a concurrent duplicate write is
-    /// harmless.
+    /// Store `data` under `key` unless it is already present, in one
+    /// conditional request (`If-None-Match: *` on S3): an existing object is
+    /// never overwritten, and a write costs one round trip, not a check and
+    /// a write.
     async fn put_if_absent(&self, key: Path, data: &[u8]) -> Result<()> {
-        if self.exists(&key).await? {
-            return Ok(());
-        }
         let payload = PutPayload::from(compress(data)?);
-        self.backend.put(&key, payload).await?;
-        Ok(())
+        let create = PutOptions::from(PutMode::Create);
+        match self.backend.put_opts(&key, payload, create).await {
+            Ok(_) | Err(object_store::Error::AlreadyExists { .. }) => Ok(()),
+            Err(e) => Err(e.into()),
+        }
     }
 
     async fn get_raw(&self, key: &Path) -> Result<Option<Vec<u8>>> {

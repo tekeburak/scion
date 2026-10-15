@@ -6,12 +6,13 @@
 //! reproduce the exact object that was hashed, and the structured columns
 //! exist for querying.
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 
 use async_trait::async_trait;
 use scion_types::{Changeset, ChangesetId, Decode, Encode, FileChange};
-use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
-use sqlx::{Executor, Postgres, Transaction};
+use sqlx::postgres::{PgArguments, PgConnectOptions, PgPool, PgPoolOptions};
+use sqlx::query::Query;
+use sqlx::{Executor, PgConnection, Postgres};
 
 use crate::{MetadataStore, RefState, Result, StoreError, is_allowed_ref_name};
 
@@ -90,15 +91,96 @@ impl PostgresStore {
         Ok(id.map(|(id,)| id))
     }
 
-    /// Look up a repository id, creating the repository if needed.
-    async fn ensure_repo(tx: &mut Transaction<'_, Postgres>, name: &str) -> Result<i64> {
+    /// Look up a repository id, creating the repository if needed. The
+    /// repository almost always exists, so that case is one round trip.
+    async fn ensure_repo(conn: &mut PgConnection, name: &str) -> Result<i64> {
+        if let Some(id) = Self::repo_id(&mut *conn, name).await? {
+            return Ok(id);
+        }
         sqlx::query("INSERT INTO repos (name) VALUES ($1) ON CONFLICT (name) DO NOTHING")
             .bind(name)
-            .execute(&mut **tx)
+            .execute(&mut *conn)
             .await?;
-        Self::repo_id(&mut **tx, name)
+        Self::repo_id(&mut *conn, name)
             .await?
             .ok_or_else(|| StoreError::Corrupt(format!("repo {name:?} vanished after insert")))
+    }
+
+    /// Run `insert`, an `INSERT … SELECT … FROM repos WHERE name = $1`, in
+    /// one round trip when the repository exists; otherwise create it and
+    /// run `insert` again.
+    async fn insert_into_repo<'q>(
+        &self,
+        repo: &str,
+        insert: impl Fn() -> Query<'q, Postgres, PgArguments>,
+    ) -> Result<()> {
+        if insert().execute(&self.pool).await?.rows_affected() == 0
+            && Self::repo_id(&self.pool, repo).await?.is_none()
+        {
+            Self::ensure_repo(&mut *self.pool.acquire().await?, repo).await?;
+            insert().execute(&self.pool).await?;
+        }
+        Ok(())
+    }
+}
+
+/// `file_changes` rows of one changeset as columns, for one `UNNEST` insert.
+struct FileChangeColumns<'a> {
+    paths: Vec<&'a str>,
+    kinds: Vec<i16>,
+    blobs: Vec<Option<Vec<u8>>>,
+    ftypes: Vec<Option<i16>>,
+    sizes: Vec<Option<i64>>,
+    cf_paths: Vec<Option<&'a str>>,
+    cf_css: Vec<Option<Vec<u8>>>,
+}
+
+impl<'a> FileChangeColumns<'a> {
+    fn new(cs: &'a Changeset) -> Result<Self> {
+        let n = cs.file_changes.len();
+        let mut paths = Vec::with_capacity(n);
+        let mut kinds = Vec::with_capacity(n);
+        let mut blobs = Vec::with_capacity(n);
+        let mut ftypes = Vec::with_capacity(n);
+        let mut sizes = Vec::with_capacity(n);
+        let mut cf_paths = Vec::with_capacity(n);
+        let mut cf_css = Vec::with_capacity(n);
+        for (path, change) in &cs.file_changes {
+            paths.push(path.as_str());
+            match change {
+                FileChange::Deleted => {
+                    kinds.push(0i16);
+                    blobs.push(None);
+                    ftypes.push(None);
+                    sizes.push(None);
+                    cf_paths.push(None);
+                    cf_css.push(None);
+                }
+                FileChange::Tracked {
+                    content,
+                    kind,
+                    size,
+                    copy_from,
+                } => {
+                    kinds.push(1i16);
+                    blobs.push(Some(content.as_bytes().to_vec()));
+                    ftypes.push(Some(i16::from(kind.tag())));
+                    sizes.push(Some(to_i64(*size)?));
+                    cf_paths.push(copy_from.as_ref().map(|(p, _)| p.as_str()));
+                    cf_css.push(copy_from.as_ref().map(|(_, c)| c.as_bytes().to_vec()));
+                }
+            }
+        }
+
+        Ok(Self {
+            paths,
+            kinds,
+            blobs,
+            ftypes,
+            sizes,
+            cf_paths,
+            cf_css,
+        })
     }
 }
 
@@ -107,98 +189,85 @@ impl MetadataStore for PostgresStore {
     async fn put_changeset(&self, cs: &Changeset) -> Result<ChangesetId> {
         let id = cs.id();
         let canonical = cs.encode_to_vec();
-        let mut tx = self.pool.begin().await?;
-        let repo = Self::ensure_repo(&mut tx, &cs.repo).await?;
+        let parents: Vec<Vec<u8>> = cs.parents.iter().map(|p| p.as_bytes().to_vec()).collect();
+        let distinct_parents = cs.parents.iter().collect::<HashSet<_>>().len();
+        let distinct_parents = i64::try_from(distinct_parents).expect("parent count fits");
 
-        let exists: Option<(i32,)> =
-            sqlx::query_as("SELECT 1 FROM changesets WHERE repo = $1 AND id = $2")
-                .bind(repo)
-                .bind(id.as_bytes().as_slice())
-                .fetch_optional(&mut *tx)
-                .await?;
-        if exists.is_some() {
-            tx.rollback().await?;
-            return Ok(id);
-        }
+        let fc = FileChangeColumns::new(cs)?;
 
-        // Generation = max(parent generation) + 1; every parent must exist.
-        let parent_bytes: Vec<Vec<u8>> = cs.parents.iter().map(|p| p.as_bytes().to_vec()).collect();
-        let rows: Vec<(Vec<u8>, i64)> = sqlx::query_as(
-            "SELECT id, generation FROM changesets WHERE repo = $1 AND id = ANY($2)",
-        )
-        .bind(repo)
-        .bind(&parent_bytes)
-        .fetch_all(&mut *tx)
-        .await?;
-        let gens: HashMap<Vec<u8>, i64> = rows.into_iter().collect();
-        let mut generation = 0i64;
-        for p in &cs.parents {
-            match gens.get(p.as_bytes().as_slice()) {
-                Some(g) => generation = generation.max(g + 1),
-                None => return Err(StoreError::UnknownParent(id, *p)),
-            }
-        }
-
-        sqlx::query(
-            "INSERT INTO changesets (repo, id, parents, first_parent, author_name, author_email, \
-             author_date, author_tz, committer_name, committer_email, committer_date, committer_tz, \
-             message, generation, canonical) \
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)",
-        )
-        .bind(repo)
-        .bind(id.as_bytes().as_slice())
-        .bind(&parent_bytes)
-        .bind(cs.first_parent().map(|p| p.as_bytes().to_vec()))
-        .bind(&cs.author.name)
-        .bind(&cs.author.email)
-        .bind(cs.author_date.unix_secs)
-        .bind(cs.author_date.tz_offset_minutes)
-        .bind(cs.committer.as_ref().map(|c| &c.name))
-        .bind(cs.committer.as_ref().map(|c| &c.email))
-        .bind(cs.committer_date.map(|t| t.unix_secs))
-        .bind(cs.committer_date.map(|t| t.tz_offset_minutes))
-        .bind(&cs.message)
-        .bind(generation)
-        .bind(&canonical)
-        .execute(&mut *tx)
-        .await?;
-
-        // TODO(perf): batch with UNNEST once changesets routinely touch many files.
-        for (path, change) in &cs.file_changes {
-            let (kind, blob, ftype, size, cf_path, cf_cs) = match change {
-                FileChange::Deleted => (0i16, None, None, None, None, None),
-                FileChange::Tracked {
-                    content,
-                    kind,
-                    size,
-                    copy_from,
-                } => (
-                    1i16,
-                    Some(content.as_bytes().to_vec()),
-                    Some(i16::from(kind.tag())),
-                    Some(to_i64(*size)?),
-                    copy_from.as_ref().map(|(p, _)| p.as_str().to_owned()),
-                    copy_from.as_ref().map(|(_, c)| c.as_bytes().to_vec()),
-                ),
-            };
-            sqlx::query(
-                "INSERT INTO file_changes (repo, changeset_id, path, change_kind, blob_id, file_type, \
-                 size, copy_from_path, copy_from_cs) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)",
+        // One statement, so one round trip: the changeset row (generation =
+        // max(parent generation) + 1, inserted only if every parent exists)
+        // and its file changes. It reports whether the repository and all
+        // parents were found and whether the row is new.
+        let insert = || {
+            sqlx::query_as::<_, (i64, i64, i64)>(
+                "WITH r AS (SELECT id FROM repos WHERE name = $1), \
+                 par AS (SELECT c.generation FROM changesets c JOIN r ON c.repo = r.id \
+                         WHERE c.id = ANY($3)), \
+                 ins AS (INSERT INTO changesets (repo, id, parents, first_parent, author_name, \
+                         author_email, author_date, author_tz, committer_name, committer_email, \
+                         committer_date, committer_tz, message, generation, canonical) \
+                         SELECT r.id, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, \
+                         COALESCE((SELECT max(generation) + 1 FROM par), 0), $14 FROM r \
+                         WHERE (SELECT count(*) FROM par) = $15 \
+                         ON CONFLICT (repo, id) DO NOTHING RETURNING repo), \
+                 fc AS (INSERT INTO file_changes (repo, changeset_id, path, change_kind, blob_id, \
+                        file_type, size, copy_from_path, copy_from_cs) \
+                        SELECT ins.repo, $2, u.* FROM ins, UNNEST($16::text[], $17::int2[], \
+                        $18::bytea[], $19::int2[], $20::int8[], $21::text[], $22::bytea[]) AS u) \
+                 SELECT (SELECT count(*) FROM r), (SELECT count(*) FROM par), \
+                        (SELECT count(*) FROM ins)",
             )
-            .bind(repo)
+            .bind(&cs.repo)
             .bind(id.as_bytes().as_slice())
-            .bind(path.as_str())
-            .bind(kind)
-            .bind(blob)
-            .bind(ftype)
-            .bind(size)
-            .bind(cf_path)
-            .bind(cf_cs)
-            .execute(&mut *tx)
-            .await?;
-        }
+            .bind(&parents)
+            .bind(cs.first_parent().map(|p| p.as_bytes().to_vec()))
+            .bind(&cs.author.name)
+            .bind(&cs.author.email)
+            .bind(cs.author_date.unix_secs)
+            .bind(cs.author_date.tz_offset_minutes)
+            .bind(cs.committer.as_ref().map(|c| &c.name))
+            .bind(cs.committer.as_ref().map(|c| &c.email))
+            .bind(cs.committer_date.map(|t| t.unix_secs))
+            .bind(cs.committer_date.map(|t| t.tz_offset_minutes))
+            .bind(&cs.message)
+            .bind(&canonical)
+            .bind(distinct_parents)
+            .bind(&fc.paths)
+            .bind(&fc.kinds)
+            .bind(&fc.blobs)
+            .bind(&fc.ftypes)
+            .bind(&fc.sizes)
+            .bind(&fc.cf_paths)
+            .bind(&fc.cf_css)
+        };
 
-        tx.commit().await?;
+        let mut found = insert().fetch_one(&self.pool).await?;
+        if found.0 == 0 {
+            // First changeset of a new repository.
+            Self::ensure_repo(&mut *self.pool.acquire().await?, &cs.repo).await?;
+            found = insert().fetch_one(&self.pool).await?;
+        }
+        let (_, parents_found, _) = found;
+        if parents_found < distinct_parents {
+            let present: Vec<(Vec<u8>,)> = sqlx::query_as(
+                "SELECT c.id FROM changesets c JOIN repos r ON r.id = c.repo \
+                 WHERE r.name = $1 AND c.id = ANY($2)",
+            )
+            .bind(&cs.repo)
+            .bind(&parents)
+            .fetch_all(&self.pool)
+            .await?;
+            let present: HashSet<Vec<u8>> = present.into_iter().map(|(p,)| p).collect();
+            let missing = cs
+                .parents
+                .iter()
+                .find(|p| !present.contains(p.as_bytes().as_slice()))
+                .copied()
+                .unwrap_or(cs.parents[0]);
+            return Err(StoreError::UnknownParent(id, missing));
+        }
+        // Inserted, or already stored: either way the changeset is there.
         Ok(id)
     }
 
@@ -344,24 +413,20 @@ impl MetadataStore for PostgresStore {
         cs: ChangesetId,
         pointer: Vec<u8>,
     ) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
-        let repo_id = Self::ensure_repo(&mut tx, repo).await?;
-        sqlx::query(
-            "INSERT INTO derived (repo, type, version, changeset_id, pointer) \
-             VALUES ($1, $2, $3, $4, $5) ON CONFLICT DO NOTHING",
-        )
-        .bind(repo_id)
-        .bind(ty)
-        .bind(
-            i32::try_from(version)
-                .map_err(|_| StoreError::Corrupt("derived version overflow".into()))?,
-        )
-        .bind(cs.as_bytes().as_slice())
-        .bind(pointer)
-        .execute(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        Ok(())
+        let version = i32::try_from(version)
+            .map_err(|_| StoreError::Corrupt("derived version overflow".into()))?;
+        self.insert_into_repo(repo, || {
+            sqlx::query(
+                "INSERT INTO derived (repo, type, version, changeset_id, pointer) \
+                 SELECT id, $2, $3, $4, $5 FROM repos WHERE name = $1 ON CONFLICT DO NOTHING",
+            )
+            .bind(repo)
+            .bind(ty)
+            .bind(version)
+            .bind(cs.as_bytes().as_slice())
+            .bind(pointer.as_slice())
+        })
+        .await
     }
 
     async fn get_derived(
@@ -393,19 +458,16 @@ impl MetadataStore for PostgresStore {
         git_sha: &[u8],
         cs: ChangesetId,
     ) -> Result<()> {
-        let mut tx = self.pool.begin().await?;
-        let repo_id = Self::ensure_repo(&mut tx, repo).await?;
-        sqlx::query(
-            "INSERT INTO ingest_checkpoints (repo, git_sha, changeset_id) \
-             VALUES ($1, $2, $3) ON CONFLICT DO NOTHING",
-        )
-        .bind(repo_id)
-        .bind(git_sha)
-        .bind(cs.as_bytes().as_slice())
-        .execute(&mut *tx)
-        .await?;
-        tx.commit().await?;
-        Ok(())
+        self.insert_into_repo(repo, || {
+            sqlx::query(
+                "INSERT INTO ingest_checkpoints (repo, git_sha, changeset_id) \
+                 SELECT id, $2, $3 FROM repos WHERE name = $1 ON CONFLICT DO NOTHING",
+            )
+            .bind(repo)
+            .bind(git_sha)
+            .bind(cs.as_bytes().as_slice())
+        })
+        .await
     }
 
     async fn ingest_checkpoints(&self, repo: &str) -> Result<Vec<(Vec<u8>, ChangesetId)>> {
