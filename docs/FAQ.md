@@ -1,0 +1,54 @@
+# FAQ
+
+Short answers; the normative detail is in [`ARCHITECTURE.md`](ARCHITECTURE.md) and
+[`DATA_MODEL.md`](DATA_MODEL.md).
+
+## How is Scion different from git?
+
+Git is distributed: every clone holds the full history and can work offline. Scion is
+client-server: the server is authoritative, holds history, and answers questions about it (log,
+diff, merge-base, blame) over RPC. A client holds only the objects it has fetched and a sparse
+working copy. A commit is created on the server directly, so there is no push, no packfile and
+no repository maintenance. Hashes are BLAKE3 over Scion's own canonical encoding, so ids are not
+git SHAs. Git → Scion import is planned for Phase 6; git wire compatibility is a non-goal.
+
+## Why are there no branches?
+
+Server refs are only `main` and `release/*`. Everything else is an **anonymous head**: a
+changeset id the client remembers, optionally under a local label that never leaves the machine.
+At agent scale, thousands of short-lived per-user or per-feature refs would be shared mutable
+state on the server; an id is immutable and needs no coordination.
+Because objects are append-only, an anonymous head cannot be lost, and sharing work means
+sharing an id (or, from Phase 5, a change request). See
+[Refs and anonymous heads](DATA_MODEL.md#refs-and-anonymous-heads).
+
+## Why do trees live in the object store?
+
+A tree is immutable and content-addressed like a blob, so it travels the same cache path with no
+special case, and the metadata database stays small. The reference design keeps trees in its
+metadata database; Scion deliberately does not. The cost is one extra object fetch the first
+time a changeset's root tree is resolved. See
+[Deviation: trees in the object store](DATA_MODEL.md#deviation-trees-in-the-object-store).
+
+## Why is a changeset so minimal?
+
+A changeset records only the files that differ from its first parent. Trees, path history,
+blame and the ancestry skip list are **derived data**, computed from the changeset and its
+parents. Keeping them out of the hashed object means they can be recomputed or replaced without
+changing any id or any client.
+
+## Can I use it today?
+
+No. Phase 3 (the MVP: `scion-server` plus the `scn` CLI) is in progress. The server and the
+client library exist; the `scn` command does not yet. The README status line tracks this.
+
+## What is Scion not a good fit for?
+
+- Most repositories. Git's model is the right one unless you have one very large monorepo with
+  always-online clients and an agent-driven commit rate.
+- Offline work: clients are assumed to be online (non-goal).
+- Windows clients (non-goal for now).
+- Large binary files: there is a per-blob size limit and no chunking (non-goal).
+- Workflows built on many long-lived branches or forks: there are no server branches.
+- Reclaiming storage: objects are append-only and garbage collection is a non-goal.
+- Code review: there is no review UI (non-goal).
