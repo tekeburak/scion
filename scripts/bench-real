@@ -1,0 +1,229 @@
+#!/usr/bin/env bash
+# Scion against git on a pinned slice of a real repository.
+#
+#   scripts/bench-real [runs=3] [out=target/bench-real/results.csv]
+#
+# Needs git, protoc, Docker (with compose) and the Rust toolchain pinned by
+# rust-toolchain.toml. It starts deploy/docker-compose.yml, builds the release
+# binaries, runs scion-server on loopback over Postgres + S3, and leaves the
+# stack running (reset it with `docker compose -f deploy/docker-compose.yml down -v`).
+#
+# The slice is the `library/` directory of rust-lang/rust over its first-parent
+# history from SINCE to TIP: every first-parent commit that touched it becomes
+# one linear commit whose tree is that directory, with author, committer, dates
+# and message kept and submodule entries dropped. It is built once and cached
+# under target/bench-real/. Git and Scion then start from that same repository.
+#
+# Each run uses a fresh bare git repository and a fresh Scion repository name,
+# so every Scion run is cold (derived data included). Workloads:
+#
+#   import       git: push the history into an empty bare repository;
+#                scn: scion-ingest import
+#   clone        git clone --no-local; scn clone
+#   sparse clone git clone --filter=blob:none --sparse + sparse-checkout set;
+#                scn clone --sparse
+#   status       clean working copy: git status; scn status
+#   log          first-parent history of one directory: git log; scn log
+#   blame        one file at the tip: git blame; scn blame
+#   land         edit one file, commit it and publish it: git commit -a + push;
+#                scn commit + land
+#
+# git runs its history workloads (status, log, blame, land) in the full clone,
+# its best case; scn runs them in the sparse clone, its normal case. Checkouts
+# are compared byte for byte outside the timers. Each sample is one CSV row
+# (`workload,tool,run,ms,result`, result `ok` or `failed`); the `#` lines at
+# the top record the repository, commit range and machine.
+
+set -euo pipefail
+
+UPSTREAM=https://github.com/rust-lang/rust.git
+TIP=91e9c2688eb23af9a5b77f056156e756550c7c99
+SINCE=2026-01-01
+SUBDIR=library
+SPARSE=core
+LOG_PATH=core/src
+BLAME_FILE=alloc/src/vec/mod.rs
+EDIT_FILE=core/src/lib.rs
+
+RUNS=${1:-3}
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+WORK=$ROOT/target/bench-real
+OUT=${2:-$WORK/results.csv}
+SUBSET=$WORK/subset-${TIP:0:12}.git
+BIN=$ROOT/target/release
+COMPOSE=(docker compose -f "$ROOT/deploy/docker-compose.yml")
+
+export DATABASE_URL=postgres://scion:scion@127.0.0.1:5432/scion
+export AWS_ENDPOINT=http://127.0.0.1:9000 AWS_ALLOW_HTTP=true AWS_BUCKET=scion-objects
+export AWS_ACCESS_KEY_ID=scion AWS_SECRET_ACCESS_KEY=scionscion AWS_REGION=us-east-1
+export SCN_AUTHOR="Bench <bench@example.com>"
+# Hermetic git: no user or system config, fixed identity.
+export GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null
+export GIT_AUTHOR_NAME=Bench GIT_AUTHOR_EMAIL=bench@example.com
+export GIT_COMMITTER_NAME=Bench GIT_COMMITTER_EMAIL=bench@example.com
+export GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=gc.auto GIT_CONFIG_VALUE_0=0
+export GIT_CONFIG_KEY_1=init.defaultBranch GIT_CONFIG_VALUE_1=main
+
+say() { echo "bench-real: $*" >&2; }
+
+# Builds $SUBSET: fetch the range without blobs, rewrite it, then fetch only
+# the blobs the rewritten history needs.
+build_subset() {
+    local up=$WORK/upstream.git
+    rm -rf "$up" "$SUBSET.tmp"
+    git init -q --bare "$up"
+    git -C "$up" remote add origin "$UPSTREAM"
+    say "fetching $UPSTREAM $TIP since $SINCE (no blobs)"
+    git -C "$up" fetch -q --filter=blob:none --shallow-since="$SINCE" --no-tags origin "$TIP"
+
+    say "rewriting the first-parent history of $SUBDIR/"
+    local index=$WORK/subset.index parent="" commit tree n=0
+    # A field separator that cannot appear in names, emails or dates.
+    local fmt=$'%H\x1f%an\x1f%ae\x1f%ad\x1f%cn\x1f%ce\x1f%cd'
+    while IFS=$'\x1f' read -r commit an ae ad cn ce cd; do
+        rm -f "$index"
+        GIT_INDEX_FILE=$index git -C "$up" read-tree "$commit:$SUBDIR"
+        GIT_INDEX_FILE=$index git -C "$up" ls-files -s |
+            awk -F'\t' '$1 ~ /^160000 / { print "0 0000000000000000000000000000000000000000\t" $2 }' |
+            GIT_INDEX_FILE=$index git -C "$up" update-index --index-info
+        tree=$(GIT_INDEX_FILE=$index git -C "$up" write-tree)
+        parent=$(git -C "$up" log -1 --format=%B "$commit" |
+            GIT_AUTHOR_NAME=$an GIT_AUTHOR_EMAIL=$ae GIT_AUTHOR_DATE=$ad \
+            GIT_COMMITTER_NAME=$cn GIT_COMMITTER_EMAIL=$ce GIT_COMMITTER_DATE=$cd \
+            git -C "$up" commit-tree "$tree" ${parent:+-p "$parent"})
+        n=$((n + 1))
+    done < <(git -C "$up" log --first-parent --reverse --date=raw --format="$fmt" "$TIP" -- "$SUBDIR")
+    rm -f "$index"
+
+    say "fetching the blobs of $n commits"
+    git -C "$up" rev-list --objects --missing=print "$parent" | sed -n 's/^?//p' |
+        git -C "$up" -c fetch.negotiationAlgorithm=noop fetch -q --no-tags \
+            --no-write-fetch-head --filter=blob:none --stdin origin
+
+    git init -q --bare "$SUBSET.tmp"
+    git -C "$up" push -q "$SUBSET.tmp" "$parent:refs/heads/main"
+    mv "$SUBSET.tmp" "$SUBSET"
+    rm -rf "$up"
+}
+
+# Milliseconds `"$@"` takes, appended to the CSV as one sample. A workload
+# that fails is recorded as failed and the run goes on, so one slow RPC does
+# not hide the other numbers.
+time_it() {
+    local workload=$1 tool=$2 run=$3 start end result=ok
+    shift 3
+    start=$(now_ms)
+    if ! "$@" >/dev/null 2>"$WORK/stderr"; then
+        result=failed
+        say "$workload ($tool) failed: $(tail -1 "$WORK/stderr")"
+    fi
+    end=$(now_ms)
+    echo "$workload,$tool,$run,$((end - start)),$result" >>"$OUT"
+}
+
+# BSD date has no %N; perl ships with macOS.
+if [ "$(date +%N)" = N ]; then
+    now_ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'; }
+else
+    now_ms() { echo $(($(date +%s%N) / 1000000)); }
+fi
+
+# Fails unless the two checkouts hold the same paths, contents and modes.
+same_checkout() {
+    diff -r -x .git -x .scn "$1" "$2" >/dev/null ||
+        { say "checkouts differ: $1 $2"; return 1; }
+    [ "$(cd "$1" && find . -path ./.git -prune -o -type f -perm -u+x -print | sort)" = \
+      "$(cd "$2" && find . -path ./.scn -prune -o -type f -perm -u+x -print | sort)" ] ||
+        { say "file modes differ: $1 $2"; return 1; }
+}
+
+machine() {
+    local cpu mem
+    if [ "$(uname -s)" = Darwin ]; then
+        cpu=$(sysctl -n machdep.cpu.brand_string)
+        mem=$(($(sysctl -n hw.memsize) / 1073741824))
+    else
+        cpu=$(sed -n 's/^model name[[:space:]]*: //p' /proc/cpuinfo | head -1)
+        mem=$(($(sed -n 's/^MemTotal: *\([0-9]*\).*/\1/p' /proc/meminfo) / 1048576))
+    fi
+    echo "$(uname -srm); ${cpu:-unknown cpu}; $(getconf _NPROCESSORS_ONLN 2>/dev/null || sysctl -n hw.ncpu) cpus; ${mem} GiB"
+}
+
+mkdir -p "$WORK" "$(dirname "$OUT")"
+[ -d "$SUBSET" ] || build_subset
+
+say "starting Postgres and S3"
+"${COMPOSE[@]}" up -d --wait >"$WORK/compose.log" 2>&1 || { cat "$WORK/compose.log" >&2; exit 1; }
+say "building release binaries"
+(cd "$ROOT" && cargo build -q --release -p scion-server -p scion-ingest -p scn)
+
+port=$(( (RANDOM % 20000) + 30000 ))
+SCION_LISTEN=127.0.0.1:$port "$BIN/scion-server" 2>"$WORK/server.log" &
+server_pid=$!
+trap 'kill $server_pid 2>/dev/null || true' EXIT
+SERVER=http://127.0.0.1:$port
+for _ in $(seq 1 50); do
+    grep -q listening "$WORK/server.log" && break
+    kill -0 $server_pid || { cat "$WORK/server.log" >&2; exit 1; }
+    sleep 0.2
+done
+
+commits=$(git -C "$SUBSET" rev-list --count main)
+files=$(git -C "$SUBSET" ls-tree -r main | wc -l | tr -d ' ')
+{
+    echo "# repository: $UPSTREAM $SUBDIR/, first-parent commits since $SINCE up to $TIP ($commits commits, $files files at the tip)"
+    echo "# machine: $(machine)"
+    echo "# tools: $(git --version); scion $(git -C "$ROOT" rev-parse --short HEAD); $RUNS runs; $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "workload,tool,run,ms,result"
+} >"$OUT"
+
+stamp=$(date +%s)
+for run in $(seq 1 "$RUNS"); do
+    say "run $run of $RUNS"
+    dir=$WORK/run-$run
+    repo=bench-$stamp-$run
+    rm -rf "$dir"
+    mkdir -p "$dir"
+    git init -q --bare "$dir/origin.git"
+    git -C "$dir/origin.git" config uploadpack.allowFilter true
+
+    time_it import git "$run" git -C "$SUBSET" push -q "$dir/origin.git" main
+    time_it import scion "$run" "$BIN/scion-ingest" import "$SUBSET" "$repo" main
+
+    time_it clone git "$run" git clone -q --no-local "$dir/origin.git" "$dir/git-full"
+    time_it clone scion "$run" "$BIN/scn" clone "$SERVER" "$repo" "$dir/scn-full"
+    same_checkout "$dir/git-full" "$dir/scn-full"
+
+    time_it "sparse clone" git "$run" sh -c "git clone -q --no-local --filter=blob:none --sparse \
+        'file://$dir/origin.git' '$dir/git-sparse' && git -C '$dir/git-sparse' sparse-checkout set '$SPARSE'"
+    time_it "sparse clone" scion "$run" "$BIN/scn" clone --sparse "$SPARSE" "$SERVER" "$repo" "$dir/scn-sparse"
+    same_checkout "$dir/git-sparse/$SPARSE" "$dir/scn-sparse/$SPARSE"
+
+    time_it status git "$run" git -C "$dir/git-full" status --porcelain
+    time_it status scion "$run" sh -c "cd '$dir/scn-sparse' && '$BIN/scn' status"
+
+    time_it log git "$run" git -C "$dir/git-full" log --first-parent -n 1000 -- "$LOG_PATH"
+    time_it log scion "$run" sh -c "cd '$dir/scn-sparse' && '$BIN/scn' log -n 1000 '$LOG_PATH'"
+
+    time_it blame git "$run" git -C "$dir/git-full" blame -- "$BLAME_FILE"
+    time_it blame scion "$run" sh -c "cd '$dir/scn-sparse' && '$BIN/scn' blame '$BLAME_FILE'"
+
+    echo "// bench-real run $run" >>"$dir/git-full/$EDIT_FILE"
+    echo "// bench-real run $run" >>"$dir/scn-sparse/$EDIT_FILE"
+    time_it land git "$run" sh -c "git -C '$dir/git-full' commit -q -a -m 'bench edit' &&
+        git -C '$dir/git-full' push -q origin HEAD:main"
+    time_it land scion "$run" sh -c "cd '$dir/scn-sparse' && '$BIN/scn' commit -m 'bench edit' && '$BIN/scn' land"
+
+    rm -rf "$dir"
+done
+
+say "wrote $OUT"
+# Median per workload and tool, for a quick look; the CSV keeps every sample.
+grep -v '^#' "$OUT" | tail -n +2 | sort -t, -k1,1 -k2,2 -k4,4n |
+    awk -F, '$5 == "ok" { k = $1 "," $2; v[k, ++n[k]] = $4 }
+             $5 != "ok" { failed[$1 "," $2]++ }
+             END {
+                 for (k in n) print k "," v[k, int((n[k] + 1) / 2)] " ms"
+                 for (k in failed) print k "," failed[k] " failed"
+             }' |
+    sort | awk -F, '{ printf "%-14s %-6s %12s\n", $1, $2, $3 }' >&2

@@ -201,6 +201,10 @@ cargo clippy --workspace --all-targets -- -D warnings
 docker compose -f deploy/docker-compose.yml up -d
 cargo test -p scion-store --features integration
 cargo test -p scn --features integration --test e2e_stack   # scn + scion-server end to end
+
+# Scion against git on a pinned slice of rust-lang/rust (needs network, git and Docker);
+# writes target/bench-real/results.csv
+scripts/bench-real 3
 ```
 
 Golden-hash fixtures live in `crates/scion-types/tests/golden/`. They are the format

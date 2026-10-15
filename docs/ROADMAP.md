@@ -54,15 +54,26 @@ commit, `file_changes` relative to the first parent only (invariant 8), the comm
   peak-RSS bound asserted by the test, and per-commit time does not grow with history length.
 - **6.9 Real-repository benchmark script.** `scripts/bench-real` imports a pinned subset of a
   real open-source repository (a path-limited first-parent range of `rust-lang/rust`), then
-  measures import, sparse clone, `log`, `blame` and `land` side by side with git and with
-  the public implementations of the reference design (see "Performance bar" in
-  `docs/ARCHITECTURE.md`), writing a CSV. *Accepted
-  when* it runs end to end from a clean checkout with only `git`, `protoc` and Docker
-  installed, and records the repository, commit range and machine in its output.
-- **6.10 Benchmark results in the README.** The CSV from 6.9 is rendered as a table and an SVG
+  measures import, clone, sparse clone, `status`, `log`, `blame` and `land` side by side with
+  git, writing a CSV. *Accepted when* it runs end to end from a clean checkout with only `git`,
+  `protoc`, Docker and the pinned Rust toolchain installed, and records the repository, commit
+  range and machine in its output.
+- **6.10 Other implementations in the benchmark.** `scripts/bench-real` also runs the same
+  workloads, on the same slice and machine, against the public implementations of the
+  reference design (see "Performance bar" in `docs/ARCHITECTURE.md`), each pinned to a commit.
+  *Accepted when* the CSV has a row per workload for each of them, or the script prints which
+  workload one of them cannot express.
+- **6.11 Import at least as fast as git.** On the 6.9 slice, `scion-ingest import` takes no
+  longer than git takes to receive the same history, still creating changesets one by one
+  through the shared create path. *Accepted when* the 6.9 median is at or below git's on the
+  same machine, and an ingest test bounds object-store and Postgres round trips per commit.
+- **6.12 `log`, `blame` and `land` at least as fast as git.** Path log, cold blame of a large
+  frequently edited file, and commit + land on the 6.9 slice. *Accepted when* the 6.9 medians
+  are at or below git's on the same machine and cold blame stays well inside the RPC deadline.
+- **6.13 Benchmark results in the README.** The CSV from 6.9 is rendered as a table and an SVG
   chart by `scripts/render-assets.py`. *Accepted when* the README shows both, states the
   repository, range and machine, and `scripts/render-assets.py --check` passes.
-- **6.11 Docs.** `docs/ARCHITECTURE.md` gets an ingestion section (mapping, what is rejected,
+- **6.14 Docs.** `docs/ARCHITECTURE.md` gets an ingestion section (mapping, what is rejected,
   resume and incremental behaviour) and the README a "Import a git repository" how-to.
   *Accepted when* following the how-to on the compose stack imports the fixture repository and
   `scn clone` of it works.
