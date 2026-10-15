@@ -148,7 +148,7 @@ not a patch.
 | Root tree of a changeset | metadata DB (`derived`, type `root_tree`) | `(repo, "root_tree", v, changeset)` → `TreeId` |
 | Other derived data | object store, pointer in `derived` | per type |
 | Refs | metadata DB (`refs`) | `(repo, name)` |
-| Snapshot manifests | object store | `snapshots/{repo}/{changeset}.manifest` |
+| Snapshot manifests (Phase 4, planned) | object store | `snapshots/{repo}/{changeset}.manifest` |
 
 Everything in the object store is immutable, zstd-compressed and addressed by hash. The object
 store is append-only; garbage collection is a non-goal for now.
@@ -170,7 +170,8 @@ it is absorbed by the cache tiers.
 ## Refs and anonymous heads
 
 Only two kinds of ref exist on the server: `main` and `release/<name>`. Creating or moving them
-requires admin rights. A ref is a single row `(repo, name, target, version)`; moving it is
+will require admin rights once IAM lands (Phase 7); until then the server has no
+authentication. A ref is a single row `(repo, name, target, version)`; moving it is
 `UPDATE … WHERE version = $observed`, a compare-and-swap. There is no other global mutable
 state.
 
@@ -187,11 +188,12 @@ base          = "d41c…"          # last known merge-base with main (a cache)
 
 - `scn commit` creates the changeset on the server (it is immediately addressable by anyone who
   knows the id) and advances `current_head`. No server ref moves.
-- `scn heads` lists local labels; `scn checkout <id|label>` switches the working copy. Labels
-  never leave the machine.
+- Labels never leave the machine. `scn log`, `diff` and `blame` accept a label wherever they
+  take a changeset; `scn heads` (list labels) and `scn checkout <id|label>` (switch the working
+  copy) are planned and not built yet, so no command creates a label today.
 - Because the object store is append-only and there is no GC, an anonymous head cannot be lost
   by forgetting it; it can always be re-attached by id.
-- Sharing work means sharing an id, or submitting a change request.
+- Sharing work means sharing an id, or (Phase 5, planned) submitting a change request.
 
 ## Generation numbers
 

@@ -57,7 +57,7 @@ It is not affiliated with or endorsed by Anthropic. The name may change before t
 ## Why it is different, in detail
 
 - **Postgres + S3, nothing else.** Metadata (changesets, refs, derived-data pointers) lives in
-  Postgres; blobs, trees and snapshot manifests live in any S3-compatible object store. No
+  Postgres; blobs and trees (and, from Phase 4, snapshot manifests) live in any S3-compatible object store. No
   packfiles, no repository maintenance, no materialized repository copy on any server.
 - **Derived data instead of a richer commit.** A changeset records only what changed against its
   first parent. Trees, path history, blame and the ancestry skip list are computed from it and
