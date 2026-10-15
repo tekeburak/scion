@@ -39,7 +39,7 @@
 <text x="1440" y="693" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">S3-compatible</text>
 <line x1="364" y1="228" x2="1144" y2="228" stroke="#f5b545" stroke-width="3" marker-end="url(#a-amber)"/>
 <text x="560" y="214" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="17" fill="#f5b545" font-weight="600" text-anchor="start">control plane: changesets, refs, log, diff, blame, land</text>
-<path d="M364,500 C420,500 420,420 520,420 L760,420 C800,420 800,290 1144,290" fill="none" stroke="#f5b545" stroke-width="2.5" marker-end="url(#a-amber)"/>
+<path d="M364,580 C410,580 400,630 450,630 L1080,630 C1110,630 1110,610 1110,580 L1110,460 C1110,435 1120,425 1144,425" fill="none" stroke="#f5b545" stroke-width="2.5" marker-end="url(#a-amber)"/>
 <path d="M364,282 C560,282 640,390 804,390" fill="none" stroke="#2dd4bf" stroke-width="3" marker-end="url(#a-teal)"/>
 <line x1="364" y1="560" x2="464" y2="560" stroke="#2dd4bf" stroke-width="3" marker-end="url(#a-teal)"/>
 <path d="M720,530 C770,530 760,430 804,430" fill="none" stroke="#2dd4bf" stroke-width="3" marker-end="url(#a-teal)"/>

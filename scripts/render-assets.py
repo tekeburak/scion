@@ -181,7 +181,9 @@ def architecture_svg():
     # control plane: both clients -> server
     b.append(arrow(364, 228, 1144, 228, AMBER))
     b.append(t(560, 214, "control plane: changesets, refs, log, diff, blame, land", 17, AMBER, 600))
-    b.append(path_arrow("M364,500 C420,500 420,420 520,420 L760,420 C800,420 800,290 1144,290", AMBER, width=2.5))
+    # routed below the tiers so it never crosses a cache box: control RPCs skip every tier
+    b.append(path_arrow("M364,580 C410,580 400,630 450,630 L1080,630 C1110,630 1110,610 1110,580 "
+                        "L1110,460 C1110,435 1120,425 1144,425", AMBER, width=2.5))
 
     # object plane
     b.append(path_arrow("M364,282 C560,282 640,390 804,390", TEAL))
@@ -299,7 +301,7 @@ def changeset_svg():
 
 
 def roadmap_svg():
-    h = 300
+    h = 312
     b = []
     b.append(t(64, 66, "Status", 30, TEXT, 700))
     colors = {"done": GREEN, "active": AMBER, "planned": LINE}
@@ -311,7 +313,7 @@ def roadmap_svg():
         x = 64 + i * (cw + gap)
         c = colors[status]
         fill = "#16301f" if status == "done" else ("#33270f" if status == "active" else PANEL)
-        b.append(box(round(x, 1), 96, round(cw, 1), 112, stroke=c, fill=fill, r=12,
+        b.append(box(round(x, 1), 96, round(cw, 1), 124, stroke=c, fill=fill, r=12,
                      dashed=status == "planned"))
         b.append(t(round(x + 16, 1), 134, f"Phase {num}", 19, TEXT, 700))
         b.append(t(round(x + 16, 1), 160, labels[status], 15, c if status != "planned" else MUTED, 600))
@@ -325,8 +327,8 @@ def roadmap_svg():
         lines.append(cur)
         for j, ln in enumerate(lines[:2]):
             b.append(t(round(x + 16, 1), 184 + j * 18, ln, 13, MUTED))
-    b.append(t(64, 248, STATUS_DONE, 16, TEXT))
-    b.append(t(64, 274, STATUS_NEXT, 16, AMBER, 600))
+    b.append(t(64, 260, STATUS_DONE, 16, TEXT))
+    b.append(t(64, 286, STATUS_NEXT, 16, AMBER, 600))
     return svg(h, "Scion roadmap status by phase", b)
 
 
