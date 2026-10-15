@@ -59,14 +59,20 @@ commit, `file_changes` relative to the first parent only (invariant 8), the comm
   `protoc`, Docker and the pinned Rust toolchain installed, and records the repository, commit
   range and machine in its output.
 - **6.10 Other implementations in the benchmark.** `scripts/bench-real` also runs the same
-  workloads, on the same slice and machine, against the public implementations of the
-  reference design (see "Performance bar" in `docs/ARCHITECTURE.md`), each pinned to a commit.
-  *Accepted when* the CSV has a row per workload for each of them, or the script prints which
-  workload one of them cannot express.
-- **6.11 Import at least as fast as git.** On the 6.9 slice, `scion-ingest import` takes no
-  longer than git takes to receive the same history, still creating changesets one by one
-  through the shared create path. *Accepted when* the 6.9 median is at or below git's on the
-  same machine, and an ingest test bounds object-store and Postgres round trips per commit.
+  workloads, on the same slice and machine, against public implementations of the reference
+  design (see "Performance bar" in `docs/ARCHITECTURE.md`). The script contains no repository
+  URL or project name: it reads their checkouts from `BENCH_PEERS=<dir>[:<dir>...]`, keys each
+  adapter by a neutral label, starts each peer's own stack from its checkout, and records
+  "not measured" when the variable is unset. *Accepted when* the CSV has a row per workload for
+  each supplied peer (or the workload it cannot express), and a run without `BENCH_PEERS` still
+  completes against git alone.
+- **6.11 Import within 10× of git.** Parity with git on import is not a goal: git writes local
+  packfiles, Scion writes one immutable object per blob and tree to a remote object store. On
+  the 6.9 slice, `scion-ingest import` takes at most ten times what git takes to receive the
+  same history, with bounded memory, by creating changesets in batches through the shared
+  create path and uploading objects concurrently. *Accepted when* the 6.9 median is at or below
+  10× git's on the same machine, the 6.8 peak-RSS bound still holds, and an ingest test bounds
+  object-store and Postgres round trips per commit.
 - **6.12 `log`, `blame` and `land` at least as fast as git.** Path log, cold blame of a large
   frequently edited file, and commit + land on the 6.9 slice. *Accepted when* the 6.9 medians
   are at or below git's on the same machine and cold blame stays well inside the RPC deadline.
