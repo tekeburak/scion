@@ -45,7 +45,9 @@ The MVP (Phase 3) is done: `scion-server` serves the object and control gRPC ser
 Postgres + S3, and `scn` can `clone --sparse`, `status`, `log`, `diff`, `blame`, `add`,
 `commit` (an anonymous head) and `land` (fast-forward `main` only; server-side rebase is
 Phase 5). Git import (Phase 6) works and a benchmark script runs it against git on a real
-repository; its results are not published yet.
+repository; its results are not published yet. `blame` is not usable on long histories yet: a
+cold blame of a frequently edited file exceeds the 30 s RPC deadline (Phase 6.12,
+[#63](https://github.com/tekeburak/scion/issues/63)).
 The README status section tracks this.
 
 ## Can I bring an existing git repository?
@@ -79,6 +81,12 @@ files, an in-memory store and no cache tier. The real-repository comparison
 are set in `docs/ROADMAP.md`: `log`, `blame` and `land` at least as fast as git (6.12), and
 import within ten times git's time (6.11). Import is not expected to match git, because Scion
 writes every blob and tree as its own object to a remote store while git writes local packfiles.
+
+The measurements so far, on the 600-commit slice `scripts/bench-real` imports (4 vCPU, the
+compose Postgres + RustFS stack): import takes about 6× git's push when the objects are already
+in the bucket and about 19× into an empty one, where the object store's write rate is the bound.
+A cold path `log` takes about 2 s against git's 28 ms, and a cold `blame` of a file with 44
+versions does not finish within the RPC deadline. Closing those gaps is Phase 6.12.
 
 ## Why Postgres and S3?
 

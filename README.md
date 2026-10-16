@@ -36,11 +36,14 @@ deliberate deviations from the reference design (trees in S3, canonical BLAKE3, 
   git history into changesets (first-parent file changes, renames and copies as `copy_from`,
   the git sha kept in `extra`), resumes from checkpoints, syncs incrementally and refuses a
   rewritten upstream; `scion-ingest verify` compares every imported tree with `git ls-tree`.
-  Changesets are created in batches, so importing the benchmark slice takes about 6× git's push.
+  Changesets are created in batches, so importing the benchmark's 600-commit slice takes about
+  6× git's push when its objects are already in the bucket and about 19× into an empty bucket.
 - **Real-repository benchmark (Phase 6.9–6.10 merged):** `scripts/bench-real` rebuilds a
   pinned slice of a real repository's history and times import, clone, sparse clone, `status`,
   `log`, `blame` and `land` against git on Postgres + S3, writing a CSV. Results are not
-  published yet.
+  published yet. Known limit: a cold path `log` takes seconds and a cold `blame` of a
+  frequently edited file exceeds the 30 s RPC deadline, so a full run stops early
+  ([#63](https://github.com/tekeburak/scion/issues/63), Phase 6.12).
 - **Next:** `log`, `blame` and `land` at least as fast as git on that slice
   (Phase 6.12), the results as a table and chart in this README (6.13) and an import
   how-to (6.14); then the cache and daemon tiers (Phase 4), change requests and server-side rebase on land (Phase 5),
