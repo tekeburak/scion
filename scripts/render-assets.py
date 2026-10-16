@@ -52,7 +52,7 @@ ROADMAP = [
 # Phases run in the order listed: git import comes right after the MVP so real repositories
 # can be tested and benchmarked.
 STATUS_DONE = "MVP done: scion-server on Postgres + S3, scn clone --sparse, status, log, diff, blame, add, commit, land"
-STATUS_NEXT = "in progress: Phase 6 git import (6.1-6.11 merged; next: log/blame/land as fast as git, publish results), then 4, 5, 7, 8"
+STATUS_NEXT = "in progress: Phase 6 git import (6.1-6.11 merged; next: log/blame/land as fast as git, publish results), then 5, 7, 9, 4, 8"
 
 
 def t(x, y, s, size=20, fill=TEXT, weight=400, anchor="start", mono=False, extra=""):

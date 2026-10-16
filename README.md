@@ -42,7 +42,7 @@ deliberate deviations from the reference design (trees in S3, canonical BLAKE3, 
   pinned slice of a real repository's history and times import, clone, sparse clone, `status`,
   `log`, `blame` and `land` against git on Postgres + S3, writing a CSV, with `log` and `blame`
   measured cold (first call) and warm. Results are not published yet. Warm `log` and `blame`
-  are at git's time; cold they are still about 30× and 8× git's (Phase 6.12).
+  are at git's time; cold they are still about 34× and 8× git's (Phase 6.12).
 - **Next:** bounded cold `log` and `blame` (Phase 6.12), the results as a table and chart in
   this README (6.13), an import how-to (6.14), then the steps that make the MVP usable by a
   team on one machine: bounded derivation with `backfill` (6.15), `scn init` (6.16),
