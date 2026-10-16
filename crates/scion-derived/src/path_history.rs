@@ -100,11 +100,7 @@ impl HistoryEntry {
         let Some(at) = self.replaced() else {
             return Ok(None);
         };
-        Ok(HistoryNode::load(objects, at)
-            .await?
-            .entries
-            .get(name)
-            .copied())
+        HistoryNode::entry(objects, at, name).await
     }
 }
 
@@ -178,15 +174,23 @@ fn encode_page(nodes: &[PageNode]) -> Vec<u8> {
     w.into_vec()
 }
 
-/// Node `index` of the page `page` whose bytes are `bytes`; `None` if the
-/// page is malformed up to that node or has no such node.
-fn decode_node(bytes: &[u8], page: BlobId, index: u32) -> Option<HistoryNode> {
+/// Calls `f` with the name and entry of each entry of node `index` of the
+/// page `page` whose bytes are `bytes`, until `f` returns `true`; `None` if
+/// the page is malformed up to there or has no such node. Nodes before the
+/// wanted one are skipped without allocating, since a lookup reads only one
+/// entry of a node late in its page.
+fn walk_node(
+    bytes: &[u8],
+    page: BlobId,
+    index: u32,
+    mut f: impl FnMut(&[u8], HistoryEntry) -> bool,
+) -> Option<()> {
     let mut r = Reader::new(bytes);
     let n = r.seq_len().ok()?;
     for i in 0..n {
-        let mut node = HistoryNode::default();
+        let wanted = i == u64::from(index);
         for _ in 0..r.seq_len().ok()? {
-            let name = PathComponent::new(r.str().ok()?).ok()?;
+            let name = r.bytes().ok()?;
             let tag = r.u8().ok()?;
             let last_changed = ChangesetId::from_bytes(r.id().ok()?);
             let replaced = match r.u8().ok()? {
@@ -218,23 +222,67 @@ fn decode_node(bytes: &[u8], page: BlobId, index: u32) -> Option<HistoryNode> {
                 }
                 _ => return None,
             };
-            node.entries.insert(name, entry);
+            if wanted && f(name, entry) {
+                return Some(());
+            }
         }
         // The page's bytes were checked against its id when read, so the
         // nodes after the wanted one need not be parsed.
-        if i == u64::from(index) {
-            return Some(node);
+        if wanted {
+            return Some(());
         }
     }
     None
 }
 
+/// Node `index` of the page `page` whose bytes are `bytes`; `None` if the
+/// page is malformed up to that node or has no such node.
+fn decode_node(bytes: &[u8], page: BlobId, index: u32) -> Option<HistoryNode> {
+    let mut node = HistoryNode::default();
+    let mut valid = true;
+    walk_node(bytes, page, index, |name, entry| {
+        let Some(name) = std::str::from_utf8(name)
+            .ok()
+            .and_then(|n| PathComponent::new(n).ok())
+        else {
+            valid = false;
+            return true;
+        };
+        node.entries.insert(name, entry);
+        false
+    })?;
+    valid.then_some(node)
+}
+
 impl HistoryNode {
-    async fn load(objects: &dyn ObjectStore, at: NodeAt) -> Result<Self> {
-        let bytes = objects
+    async fn page(objects: &dyn ObjectStore, at: NodeAt) -> Result<Bytes> {
+        objects
             .get_blob(at.page)
             .await?
-            .ok_or(DeriveError::MissingObject(at.page))?;
+            .ok_or(DeriveError::MissingObject(at.page))
+    }
+
+    /// The entry `name` of the node at `at`, without decoding the rest.
+    async fn entry(
+        objects: &dyn ObjectStore,
+        at: NodeAt,
+        name: &PathComponent,
+    ) -> Result<Option<HistoryEntry>> {
+        let bytes = Self::page(objects, at).await?;
+        let mut found = None;
+        walk_node(&bytes, at.page, at.index, |n, entry| {
+            let hit = n == name.as_str().as_bytes();
+            if hit {
+                found = Some(entry);
+            }
+            hit
+        })
+        .ok_or(DeriveError::CorruptObject(at.page))?;
+        Ok(found)
+    }
+
+    async fn load(objects: &dyn ObjectStore, at: NodeAt) -> Result<Self> {
+        let bytes = Self::page(objects, at).await?;
         decode_node(&bytes, at.page, at.index).ok_or(DeriveError::CorruptObject(at.page))
     }
 }
@@ -459,18 +507,17 @@ impl PathHistory {
         objects: &dyn ObjectStore,
         path: &RepoPath,
     ) -> Result<Option<HistoryEntry>> {
-        let mut node = HistoryNode::load(objects, self.0).await?;
-        let components: Vec<PathComponent> = path.components().collect();
-        let (last, dirs) = components.split_last().expect("paths are non-empty");
-        for component in dirs {
-            match node.entries.get(component) {
-                Some(HistoryEntry::Dir { node: at, .. }) => {
-                    node = HistoryNode::load(objects, *at).await?;
-                }
-                _ => return Ok(None),
+        let mut at = self.0;
+        let mut components = path.components().peekable();
+        while let Some(component) = components.next() {
+            let entry = HistoryNode::entry(objects, at, &component).await?;
+            match entry {
+                Some(HistoryEntry::Dir { node, .. }) if components.peek().is_some() => at = node,
+                _ if components.peek().is_some() => return Ok(None),
+                entry => return Ok(entry),
             }
         }
-        Ok(node.entries.get(last).copied())
+        unreachable!("paths are non-empty")
     }
 }
 

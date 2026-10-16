@@ -190,27 +190,43 @@ pub async fn create_changesets(
         )));
     }
 
-    meta.put_changesets(batch).await.map_err(|e| match e {
+    // Eager derivation: what clone, log and diff need right away. Each
+    // costs O(size of the change) given the parents' values. Blame stays
+    // lazy; it reads file contents and is only wanted for some paths. The
+    // batch's rows are inserted, the objects of its trees and path history
+    // written, and its skip lists (pointers only, one metadata read per
+    // level) derived all at once; the pointers are recorded once all three
+    // are done.
+    let staged = Staged::new(repo, meta, objects, batch);
+    let ctx = Deriver::new(repo, &staged, &staged);
+    let trees = async {
+        let mut created = Vec::with_capacity(batch.len());
+        for cs in batch {
+            let id = cs.id();
+            let root = ctx.derive::<RootTree>(id).await.map_err(derive_status)?;
+            ctx.derive::<PathHistory>(id).await.map_err(derive_status)?;
+            created.push((id, root.0));
+        }
+        staged.store_objects().await.map_err(store_status)?;
+        Ok::<_, Status>(created)
+    };
+    let skip_lists = async {
+        for cs in batch {
+            ctx.derive::<SkipList>(cs.id()).await?;
+        }
+        Ok(())
+    };
+    let (inserted, created, skipped) = tokio::join!(meta.put_changesets(batch), trees, skip_lists);
+    // An unknown parent also fails the derivation; the insert names it.
+    inserted.map_err(|e| match e {
         StoreError::UnknownParent(_, parent) => {
             Status::failed_precondition(format!("unknown parent {parent}"))
         }
         e => store_status(e),
     })?;
-
-    // Eager derivation: what clone, log and diff need right away. Each
-    // costs O(size of the change) given the parents' values. Blame stays
-    // lazy; it reads file contents and is only wanted for some paths.
-    let staged = Staged::new(repo, meta, objects);
-    let ctx = Deriver::new(repo, &staged, &staged);
-    let mut created = Vec::with_capacity(batch.len());
-    for cs in batch {
-        let id = cs.id();
-        let root = ctx.derive::<RootTree>(id).await.map_err(derive_status)?;
-        ctx.derive::<SkipList>(id).await.map_err(derive_status)?;
-        ctx.derive::<PathHistory>(id).await.map_err(derive_status)?;
-        created.push((id, root.0));
-    }
-    staged.store().await.map_err(store_status)?;
+    let created = created?;
+    skipped.map_err(derive_status)?;
+    staged.store_pointers().await.map_err(store_status)?;
     Ok(created)
 }
 

@@ -284,19 +284,16 @@ fn decode_timestamp(r: &mut Reader<'_>) -> Result<Timestamp, CanonicalError> {
     })
 }
 
-/// Insert into a map while enforcing strictly increasing key order.
-fn insert_sorted<K: Ord + Clone, V>(
+/// Insert into a map while enforcing strictly increasing key order: the
+/// map's last key is the previous one.
+fn insert_sorted<K: Ord, V>(
     map: &mut BTreeMap<K, V>,
-    last: &mut Option<K>,
     key: K,
     value: V,
 ) -> Result<(), CanonicalError> {
-    if let Some(prev) = last {
-        if *prev >= key {
-            return Err(CanonicalError::UnsortedKeys);
-        }
+    if map.last_key_value().is_some_and(|(prev, _)| *prev >= key) {
+        return Err(CanonicalError::UnsortedKeys);
     }
-    *last = Some(key.clone());
     map.insert(key, value);
     Ok(())
 }
@@ -365,7 +362,6 @@ impl Decode for Changeset {
 
         let n = r.seq_len()?;
         let mut file_changes = BTreeMap::new();
-        let mut last: Option<RepoPath> = None;
         for _ in 0..n {
             let path = RepoPath::new(r.str()?)?;
             let change = match r.u8()? {
@@ -393,16 +389,15 @@ impl Decode for Changeset {
                     });
                 }
             };
-            insert_sorted(&mut file_changes, &mut last, path, change)?;
+            insert_sorted(&mut file_changes, path, change)?;
         }
 
         let n = r.seq_len()?;
         let mut extra = BTreeMap::new();
-        let mut last: Option<String> = None;
         for _ in 0..n {
             let k = r.str()?.to_owned();
             let v = r.bytes()?.to_vec();
-            insert_sorted(&mut extra, &mut last, k, v)?;
+            insert_sorted(&mut extra, k, v)?;
         }
 
         Ok(Changeset {
@@ -452,7 +447,6 @@ impl Decode for Tree {
         r.version()?;
         let n = r.seq_len()?;
         let mut entries = BTreeMap::new();
-        let mut last: Option<PathComponent> = None;
         for _ in 0..n {
             let name = PathComponent::new(r.str()?)?;
             let entry = match r.u8()? {
@@ -472,7 +466,7 @@ impl Decode for Tree {
                     });
                 }
             };
-            insert_sorted(&mut entries, &mut last, name, entry)?;
+            insert_sorted(&mut entries, name, entry)?;
         }
         Ok(Tree { entries })
     }

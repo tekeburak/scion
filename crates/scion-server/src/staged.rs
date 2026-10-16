@@ -3,10 +3,13 @@
 //! Deriving a changeset reads what its parent's derivation just wrote: trees,
 //! path-history nodes and derived pointers. [`Staged`] answers those reads
 //! from memory and holds the writes, so a batch derives without waiting on
-//! the stores; [`Staged::store`] then writes every object concurrently and,
-//! once all are stored, every derived pointer in one call. A pointer never
-//! names a missing object, so an interrupted batch leaves only changesets
-//! whose derived data is computed again on first use.
+//! the stores. It also answers for the batch's own changesets, so derivation
+//! need not wait for their rows to be inserted. [`Staged::store_objects`]
+//! writes every object concurrently and [`Staged::store_pointers`], called
+//! once the objects and the changeset rows are stored, every derived pointer
+//! in one call. A pointer never names a missing object or changeset, so an
+//! interrupted batch leaves only changesets whose derived data is computed
+//! again on first use.
 
 use std::collections::HashMap;
 use std::sync::Mutex;
@@ -27,6 +30,7 @@ pub(crate) struct Staged<'a> {
     meta: &'a dyn MetadataStore,
     objects: &'a dyn ObjectStore,
     repo: &'a str,
+    batch: HashMap<ChangesetId, &'a Changeset>,
     writes: Mutex<Writes>,
 }
 
@@ -38,16 +42,19 @@ struct Writes {
 }
 
 impl<'a> Staged<'a> {
-    /// Stage derived data of `repo` over `meta` and `objects`.
+    /// Stage derived data of `batch`, changesets of `repo`, over `meta` and
+    /// `objects`.
     pub(crate) fn new(
         repo: &'a str,
         meta: &'a dyn MetadataStore,
         objects: &'a dyn ObjectStore,
+        batch: &'a [Changeset],
     ) -> Self {
         Self {
             meta,
             objects,
             repo,
+            batch: batch.iter().map(|cs| (cs.id(), cs)).collect(),
             writes: Mutex::default(),
         }
     }
@@ -56,13 +63,15 @@ impl<'a> Staged<'a> {
         self.writes.lock().expect("poisoned")
     }
 
-    /// Store the staged objects, then the staged derived pointers.
-    pub(crate) async fn store(self) -> Result<()> {
-        let Writes {
-            trees,
-            blobs,
-            derived,
-        } = self.writes.into_inner().expect("poisoned");
+    /// Store the objects staged so far.
+    pub(crate) async fn store_objects(&self) -> Result<()> {
+        let (trees, blobs) = {
+            let mut writes = self.writes();
+            (
+                std::mem::take(&mut writes.trees),
+                std::mem::take(&mut writes.blobs),
+            )
+        };
         let objects = trees
             .into_values()
             .map(Object::Tree)
@@ -70,8 +79,14 @@ impl<'a> Staged<'a> {
         stream::iter(objects)
             .map(|object| put(self.objects, object))
             .buffer_unordered(STORE_CONCURRENCY)
-            .try_collect::<()>()
-            .await?;
+            .try_collect()
+            .await
+    }
+
+    /// Store the staged derived pointers. Called after
+    /// [`store_objects`](Self::store_objects) and the batch's insert.
+    pub(crate) async fn store_pointers(self) -> Result<()> {
+        let Writes { derived, .. } = self.writes.into_inner().expect("poisoned");
         let pointers = derived
             .into_iter()
             .map(|((ty, version, cs), pointer)| (ty, version, cs, pointer))
@@ -142,7 +157,10 @@ impl MetadataStore for Staged<'_> {
     }
 
     async fn get_changeset(&self, repo: &str, id: ChangesetId) -> Result<Option<Changeset>> {
-        self.meta.get_changeset(repo, id).await
+        match self.batch.get(&id) {
+            Some(cs) => Ok(Some((*cs).clone())),
+            None => self.meta.get_changeset(repo, id).await,
+        }
     }
 
     async fn generation(&self, repo: &str, id: ChangesetId) -> Result<Option<u64>> {
@@ -197,6 +215,10 @@ impl MetadataStore for Staged<'_> {
             .cloned();
         match staged {
             Some(pointer) => Ok(Some(pointer)),
+            // Derived here even if the changeset was created before: the
+            // derivation is deterministic and the pointers' insert keeps the
+            // first value.
+            None if self.batch.contains_key(&cs) => Ok(None),
             None => self.meta.get_derived(repo, ty, version, cs).await,
         }
     }

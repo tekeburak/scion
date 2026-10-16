@@ -17,8 +17,8 @@ use scion_proto::v1::control_service_server::ControlServiceServer;
 use scion_proto::v1::object_service_server::ObjectServiceServer;
 use scion_store::{MetadataStore, ObjectStore, StoreError};
 use tokio::net::TcpListener;
-use tokio_stream::wrappers::TcpListenerStream;
 use tonic::Status;
+use tonic::transport::server::TcpIncoming;
 
 use control::ControlServer;
 use object::ObjectServer;
@@ -58,7 +58,9 @@ pub async fn serve(
         .add_service(health_service)
         .add_service(control_service)
         .add_service(object_service)
-        .serve_with_incoming(TcpListenerStream::new(listener))
+        // Without TCP_NODELAY a small reply waits for the client's delayed
+        // ACK, about 40 ms on Linux, whenever two writes go out back to back.
+        .serve_with_incoming(TcpIncoming::from(listener).with_nodelay(Some(true)))
         .await
 }
 

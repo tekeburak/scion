@@ -3255,7 +3255,6 @@ dependencies = [
  "scion-store",
  "scion-types",
  "tokio",
- "tokio-stream",
  "tonic",
  "tonic-health",
 ]

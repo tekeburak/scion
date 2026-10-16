@@ -96,9 +96,11 @@ basename/suffix indexes for path search.
 
 Creating changesets has one code path, `scion_server::create_changesets`, which takes a batch:
 `CreateChangeset` passes a batch of one, and the git importer (Phase 6.11) passes up to 64
-uploaded commits at a time. The batch's changesets are stored in one transaction, its derived
-objects are then written concurrently, and its derived-data pointers in one more statement, so
-a batch costs a few round trips however many changesets it holds. `PathHistory` mirrors the
+uploaded commits at a time. Three things run at once: the batch's changesets are stored in one
+transaction, its trees and path-history pages are derived and written concurrently, and its
+skip lists (pointers only) are derived. Its derived-data pointers follow in one more statement,
+so no pointer names a missing object, and a batch costs a few round trips however many
+changesets it holds. `PathHistory` mirrors the
 root tree with one history node per directory, but the nodes one changeset rewrites are stored
 together, children before parents, in pages of about 16 KiB, one object per page: a one-file
 change writes one history object however deep the file is.
