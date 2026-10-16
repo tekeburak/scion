@@ -8,8 +8,6 @@
   <a href="#status"><img src="docs/assets/badge-status.svg" alt="status: MVP, Phase 6 in progress"></a>
 </p>
 
-<h1 align="center"><img src="docs/assets/logo.svg" width="96" alt=""><br>Scion</h1>
-
 <p align="center"><b>A server-authoritative source control system for one very large monorepo whose
 clients are always online and whose commits come mostly from coding agents.</b></p>
 
@@ -17,6 +15,10 @@ clients are always online and whose commits come mostly from coding agents.</b><
 packfiles and no materialized repository copy anywhere · trees, history, blame and ancestry are
 derived data, so a commit costs what it changes · strict daemon → cache → server tiering, and
 deliberate deviations from the reference design (trees in S3, canonical BLAKE3, only `main` and `release/*`).
+
+<p align="center">
+  <img src="docs/assets/architecture.svg" width="800" alt="Architecture: clients send control-plane RPCs to scion-server; objects flow daemon to cache to server; the server stores metadata in Postgres and objects in an S3-compatible store">
+</p>
 
 ## Status
 
@@ -71,10 +73,6 @@ It is not affiliated with or endorsed by Anthropic. The name may change before t
   than the metadata database ([why](docs/DATA_MODEL.md#deviation-trees-in-the-object-store));
   hashing uses our own canonical BLAKE3 encoding, never protobuf; the only server refs are
   `main` and `release/*`.
-
-<p align="center">
-  <img src="docs/assets/architecture.svg" width="800" alt="Architecture: clients send control-plane RPCs to scion-server; objects flow daemon to cache to server; the server stores metadata in Postgres and objects in an S3-compatible store">
-</p>
 
 <p align="center">
   <img src="docs/assets/changeset.svg" width="800" alt="A changeset: repo, parents, author, committer, message, file_changes and extra; file changes point at blobs; trees, path history, blame and the skip list are derived">
