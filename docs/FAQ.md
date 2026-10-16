@@ -66,8 +66,9 @@ cannot represent and blobs over the per-blob limit stop the import with the comm
 It should not, and the tests hold the derivation to that. Deriving a changeset's root tree
 rewrites only the directories on the changed paths: one changed file at depth four in a
 2,500-file tree rewrites exactly 5 tree nodes
-(`rewritten_nodes_bounded_by_depth_not_file_count` in `crates/scion-derived/src/root_tree.rs`;
-`PathHistory` has the same bound). Ancestry and merge-base use generation numbers and the
+(`rewritten_nodes_bounded_by_depth_not_file_count` in `crates/scion-derived/src/root_tree.rs`).
+`PathHistory` rewrites the same 5 nodes and stores them as a single object, one page
+(`rewritten_history_nodes_bounded_by_depth` in `crates/scion-derived/src/path_history.rs`). Ancestry and merge-base use generation numbers and the
 `SkipList` derived type instead of walking the changeset log.
 
 ## Is it faster than git?
