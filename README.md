@@ -23,7 +23,7 @@ deliberate deviations from the reference design (trees in S3, canonical BLAKE3, 
 ## Status
 
 <p align="center">
-  <img src="docs/assets/roadmap.svg" width="800" alt="Phases 0 to 3 done; Phase 6 in progress; then Phases 4, 5, 7 and 8 planned in that order">
+  <img src="docs/assets/roadmap.svg" width="800" alt="Phases 0 to 3 done; Phase 6 in progress; then Phases 5, 7, 9, 4 and 8 planned in that order">
 </p>
 
 **MVP (Phase 3) done; git import (Phase 6) in progress. Not production-ready: no auth, no cache tiers.**
@@ -44,10 +44,13 @@ deliberate deviations from the reference design (trees in S3, canonical BLAKE3, 
   published yet. Known limit: a cold path `log` takes seconds and a cold `blame` of a
   frequently edited file exceeds the 30 s RPC deadline, so a full run stops early
   ([#63](https://github.com/tekeburak/scion/issues/63), Phase 6.12).
-- **Next:** `log`, `blame` and `land` at least as fast as git on that slice
-  (Phase 6.12), the results as a table and chart in this README (6.13) and an import
-  how-to (6.14); then the cache and daemon tiers (Phase 4), change requests and server-side rebase on land (Phase 5),
-  IAM (Phase 7) and virtualized checkouts (Phase 8).
+- **Next:** bounded cold `log` and `blame` (Phase 6.12), the results as a table and chart in
+  this README (6.13), an import how-to (6.14), then the steps that make the MVP usable by a
+  team on one machine: bounded derivation with `backfill` (6.15), `scn init` (6.16),
+  `scn update` and `scn checkout` (6.17), idempotent writes and a compose service for the
+  server (6.18). After that: change requests and the land worker (Phase 5), IAM (Phase 7),
+  release binaries and a quickstart (Phase 9), the cache and daemon tiers (Phase 4) and
+  virtualized checkouts (Phase 8).
 
 Scion is *not* a general replacement for git. Git's distributed, offline-first model is the right
 design for the overwhelming majority of repositories. Scion targets one specific situation: a
@@ -191,15 +194,18 @@ Full details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
 | 1 | Postgres metadata store, S3-compatible object store | done |
 | 2 | Derived data (trees, path history, blame, skip lists), diff / merge-base / rebase / merge | done |
 | 3 | `scion-server` (gRPC) + `scn` CLI — the MVP | done |
-| 6 | git → Scion ingestion, benchmarks on a real repository | next |
-| 4 | `scion-cache` and `scion-daemon` tiers, manifest-based seeding | post-MVP |
+| 6 | git → Scion ingestion, benchmarks on a real repository, `scn init` / `update` / `checkout`, bounded cold derivation | in progress |
 | 5 | Server-side rebase/merge UX, change requests, serial land worker | post-MVP |
 | 7 | IAM (GitHub device-flow login, service principals, repo + directory ACLs), fuzzing, hermetic simulation | post-MVP |
+| 9 | Release and onboarding: versioned binaries, server image, production compose profile, five-minute quickstart | post-MVP |
+| 4 | `scion-cache` and `scion-daemon` tiers, manifest-based seeding | post-MVP |
 | 8 | Virtualized checkouts (FUSE / NFS) | post-MVP |
 
 Phases run in table order: git import comes right after the MVP because testing and
-benchmarking against real repositories needs it. From Phase 6 on, each phase's single-PR
-steps go into `docs/ROADMAP.md` when the phase starts.
+benchmarking against real repositories needs it; the land worker and IAM come before any
+release, so a released server handles concurrent writers and authenticates them; the cache
+and daemon tiers wait until there is more than one machine to serve. From Phase 6 on, each
+phase's single-PR steps go into `docs/ROADMAP.md` when the phase starts.
 
 ## Development
 

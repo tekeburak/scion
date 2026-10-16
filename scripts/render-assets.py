@@ -42,10 +42,11 @@ ROADMAP = [
     ("1", "Data model, Postgres + S3 stores", "done"),
     ("2", "Derived data, diff, merge, rebase", "done"),
     ("3", "scion-server + scn CLI (MVP)", "done"),
-    ("6", "git import into Scion", "active"),
-    ("4", "Cache and daemon tiers", "planned"),
+    ("6", "git import, usable MVP", "active"),
     ("5", "Change requests, land worker", "planned"),
     ("7", "IAM, fuzzing, simulation", "planned"),
+    ("9", "Release and onboarding", "planned"),
+    ("4", "Cache and daemon tiers", "planned"),
     ("8", "Virtual checkouts (FUSE / NFS)", "planned"),
 ]
 # Phases run in the order listed: git import comes right after the MVP so real repositories

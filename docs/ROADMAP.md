@@ -1,6 +1,6 @@
 # Roadmap steps
 
-The phase table lives in `README.md`. Phases run in the order 3, 6, 4, 5, 7, 8. When a phase
+The phase table lives in `README.md`. Phases run in the order 3, 6, 5, 7, 9, 4, 8. When a phase
 starts, its single-PR steps are added here as `N.M`, each with one acceptance criterion; PRs
 are titled `Phase N.M: …` and land in order. Non-goals in `docs/ARCHITECTURE.md` stay out of
 every phase.
@@ -73,9 +73,16 @@ commit, `file_changes` relative to the first parent only (invariant 8), the comm
   create path and uploading objects concurrently. *Accepted when* the 6.9 median is at or below
   10× git's on the same machine, the 6.8 peak-RSS bound still holds, and an ingest test bounds
   object-store and Postgres round trips per commit.
-- **6.12 `log`, `blame` and `land` at least as fast as git.** Path log, cold blame of a large
-  frequently edited file, and commit + land on the 6.9 slice. *Accepted when* the 6.9 medians
-  are at or below git's on the same machine and cold blame stays well inside the RPC deadline.
+- **6.12 `log`, `blame` and `land` fast on the 6.9 slice.** A cold request pays one remote
+  round trip per pointer hop, which git's local packfiles never do, so cold and warm are
+  measured separately. Blame: a derived type that does not read its parents' values skips the
+  ancestor walk, and `Blame` is derived per file along that file's own version chain, reading
+  the versions concurrently; no new derived type. Path log: every rewritten `PathHistory` node
+  carries the id of the node it replaced, so a hop is one object read and no Postgres read.
+  *Accepted when*, on the same machine, warm `log` and `blame` and commit + `land` medians are
+  at or below git's; cold `blame` of the slice's most edited file is within 5× git and far
+  inside the RPC deadline; cold path `log` is within 20× git; and a counting-store test shows
+  cold blame of a path changed k times in N commits reads O(k) changesets, not O(N).
 - **6.13 Benchmark results in the README.** The CSV from 6.9 is rendered as a table and an SVG
   chart by `scripts/render-assets.py`. *Accepted when* the README shows both, states the
   repository, range and machine, and `scripts/render-assets.py --check` passes.
@@ -83,3 +90,45 @@ commit, `file_changes` relative to the first parent only (invariant 8), the comm
   resume and incremental behaviour) and the README a "Import a git repository" how-to.
   *Accepted when* following the how-to on the compose stack imports the fixture repository and
   `scn clone` of it works.
+
+Steps 6.15–6.18 come from a review of `main` at e0d9929 (issue #67). They make the MVP usable
+by one team on one machine before any release work.
+
+- **6.15 Bounded derivation and `backfill`.** `Deriver` drops a changeset and its memo entry
+  once every child that needs it is derived, so memory follows the frontier, not the history.
+  `scion-server backfill <repo> <type>` derives a type for every changeset reachable from the
+  repository's refs, in generation order, resumable; any PR that bumps a derived `VERSION` runs
+  it in its e2e test. *Accepted when* a counting-store test shows peak loaded changesets during
+  a cold derivation of the 6.8 fixture stay below a constant, and the first `log <path>` after a
+  `VERSION` bump completes inside the RPC deadline on the 6.9 slice.
+- **6.16 Explicit repository creation.** `scn init <server> <repo>` creates the repository, its
+  root changeset and `main` through `CreateChangeset` and `MoveRef`; nothing else creates a
+  repository, so `scion-ingest import` and every store write fail with NOT_FOUND on an unknown
+  name, and `scn clone` of a just-created repository yields an empty working copy. *Accepted
+  when* the e2e test runs init → clone → commit → land with no git repository involved, and a
+  misspelled repository name is rejected by every write path.
+- **6.17 `scn update` and `scn checkout`.** `scn checkout <rev>` moves the working copy to a
+  changeset (refusing with the list of dirty paths unless `--force`). `scn update [rev]`
+  (default: `main`) rebases the current head onto the target through `scion_core::rebase`,
+  creates the rebased changeset on the server, and applies the resulting tree to the working
+  copy; a conflict leaves the working copy untouched and prints the conflicting paths. After
+  `update`, `land` is a fast-forward again. *Accepted when* the e2e test has two clones land
+  alternately with `update` between, main stays linear, and a proptest over random
+  non-overlapping edit pairs shows `update` yields the same tree as `scion_core::merge`.
+- **6.18 Idempotent writes and an honest local stack.** `put_changesets` uses `ON CONFLICT DO
+  NOTHING` on both inserts and a conformance test stores one batch from two tasks at once;
+  `deploy/docker-compose.yml` gains a loopback-only `scion-server` service with its `AWS_*` and
+  `DATABASE_URL` wiring, and the README quickstart runs compose → `scn init` → `clone` →
+  `commit` → `land` with no git repository, noting that the server restarts after `down -v`
+  because its presence memo outlives the bucket. `scripts/bench-real` uses a fresh bucket per
+  run and reports import cold and warm as two rows, and the README states which it quotes.
+  *Accepted when* the quickstart works verbatim on a clean machine with Docker and the
+  toolchain, and the import row in the README is the cold one.
+
+## Phase 9: release and onboarding
+
+Steps are added when the phase starts (after Phase 7, so a released server has
+authentication). Scope: versioned `scn`, `scion-server` and `scion-ingest` binaries for Linux
+and macOS built by CI on a tag; a `scion-server` container image; a production compose profile
+(Postgres, S3 credentials, TLS termination in front); a five-minute quickstart that installs
+`scn`, logs in, clones and lands; and release notes generated from merged `Phase N.M:` PRs.
