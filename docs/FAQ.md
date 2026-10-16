@@ -81,12 +81,36 @@ files, an in-memory store and no cache tier. The real-repository comparison
 are set in `docs/ROADMAP.md`: `log`, `blame` and `land` at least as fast as git (6.12), and
 import within ten times git's time (6.11). Import is not expected to match git, because Scion
 writes every blob and tree as its own object to a remote store while git writes local packfiles.
+The comparison favours git where it can: git runs `status`, `log`, `blame` and `land` in a full
+clone, its best case, while `scn` runs them in a sparse clone, its normal case.
 
 The measurements so far, on the 600-commit slice `scripts/bench-real` imports (4 vCPU, the
 compose Postgres + RustFS stack): import takes about 6× git's push when the objects are already
 in the bucket and about 19× into an empty one, where the object store's write rate is the bound.
 A cold path `log` takes about 2 s against git's 28 ms, and a cold `blame` of a file with 44
 versions does not finish within the RPC deadline. Closing those gaps is Phase 6.12.
+
+## What are the known limits today?
+
+Beyond missing authentication and cache tiers, these are the gaps a first user hits, each with
+the roadmap step that closes it:
+
+- **No `scn init`.** A repository comes into being only through `scion-ingest import`, and any
+  store write to an unknown repository name creates it, so a misspelled name silently starts a
+  new repository. Explicit creation is Phase 6.16.
+- **No `scn update` or `scn checkout`.** `land` only fast-forwards `main`, so when two clones
+  commit, the second `land` fails with "not a fast-forward" and the only way forward is a fresh
+  clone. Phase 6.17 adds both commands.
+- **Incremental import is for mirror repositories.** A re-run of `scion-ingest import` refuses
+  with "the upstream history was rewritten" whenever `main` points at a changeset that did not
+  come from that git history, including one made with `scn land`.
+- **Restart `scion-server` after `docker compose ... down -v`.** The server remembers which
+  blobs the bucket already holds; after the bucket is wiped it skips uploading them, and later
+  reads fail. Phase 6.18 documents this in the quickstart.
+- **Concurrent creation of the same changeset** can return a spurious error to one of the
+  callers; Phase 6.18 makes the write idempotent.
+- **Cold `blame` and path `log` on long histories** are slow or exceed the RPC deadline (see
+  above); Phase 6.12 and 6.15 bound them.
 
 ## Why Postgres and S3?
 
