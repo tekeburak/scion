@@ -5,6 +5,8 @@
 
 use std::sync::Arc;
 
+use futures_util::{StreamExt, TryStreamExt, stream};
+
 use scion_derived::{Blame, DeriveError, Deriver, PathHistory, RootTree, SkipList};
 use scion_proto::v1::control_service_server::ControlService;
 use scion_proto::v1::{
@@ -23,6 +25,9 @@ use crate::store_status;
 /// Most changesets a single `Log` or `PathLog` call returns; larger limits are
 /// clamped. Clients page by asking again from the last parent.
 pub const MAX_LOG_LIMIT: u32 = 1000;
+
+/// Changesets a `Log` or `PathLog` reply reads at once.
+const READ_CONCURRENCY: usize = 32;
 
 /// Serves the control plane from the metadata and object stores.
 #[derive(Clone)]
@@ -47,18 +52,23 @@ impl ControlServer {
     }
 
     /// The canonical encodings of `ids`, in order.
+    /// The changesets `ids`, in order, read concurrently.
     async fn encoded(&self, repo: &str, ids: Vec<ChangesetId>) -> Result<Vec<Vec<u8>>, Status> {
-        let mut out = Vec::with_capacity(ids.len());
-        for id in ids {
-            let cs = self
-                .meta
-                .get_changeset(repo, id)
-                .await
-                .map_err(store_status)?
-                .ok_or_else(|| Status::data_loss(format!("indexed changeset {id} is missing")))?;
-            out.push(cs.encode_to_vec());
-        }
-        Ok(out)
+        stream::iter(ids)
+            .map(|id| async move {
+                let cs = self
+                    .meta
+                    .get_changeset(repo, id)
+                    .await
+                    .map_err(store_status)?
+                    .ok_or_else(|| {
+                        Status::data_loss(format!("indexed changeset {id} is missing"))
+                    })?;
+                Ok::<_, Status>(cs.encode_to_vec())
+            })
+            .buffered(READ_CONCURRENCY)
+            .try_collect()
+            .await
     }
 }
 

@@ -37,8 +37,10 @@
 #   sparse clone git clone --filter=blob:none --sparse + sparse-checkout set;
 #                scn clone --sparse
 #   status       clean working copy: git status; scn status
-#   log          first-parent history of one directory: git log; scn log
-#   blame        one file at the tip: git blame; scn blame
+#   log cold/warm   first-parent history of one directory: git log; scn log,
+#                   first and second call
+#   blame cold/warm one file at the tip: git blame; scn blame, first and
+#                   second call
 #   land         edit one file, commit it and publish it: git commit -a + push;
 #                scn commit + land
 #
@@ -295,8 +297,12 @@ impl_a_run() {
     time_it "sparse clone" impl-a "$run" "$a/scion" checkout main "$dir/a-sparse" --sparse "$SPARSE"
     same_checkout "$dir/git-sparse/$SPARSE" "$dir/a-sparse/$SPARSE" .scion
     time_it status impl-a "$run" "$a/scion" -C "$dir/a-sparse" status
-    time_it log impl-a "$run" "$a/scion" -C "$dir/a-sparse" log "$LOG_PATH" --rev main --first-parent --limit 1000
-    time_it blame impl-a "$run" "$a/scion" -C "$dir/a-sparse" blame "$BLAME_FILE"
+    for temp in cold warm; do
+        time_it "log $temp" impl-a "$run" "$a/scion" -C "$dir/a-sparse" log "$LOG_PATH" --rev main --first-parent --limit 1000
+    done
+    for temp in cold warm; do
+        time_it "blame $temp" impl-a "$run" "$a/scion" -C "$dir/a-sparse" blame "$BLAME_FILE"
+    done
     echo "// bench-real run $run" >>"$dir/a-sparse/$EDIT_FILE"
     time_it land impl-a "$run" sh -c "'$a/scion' -C '$dir/a-sparse' commit -m 'bench edit' &&
         '$a/scion' -C '$dir/a-sparse' land --ref main"
@@ -326,8 +332,10 @@ impl_b_run() {
     time_it "sparse clone" impl-b "$run" "$cli" --server "http://127.0.0.1:$port" clone "$dir/b-sparse" --path "$SPARSE"
     same_checkout "$dir/git-sparse/$SPARSE" "$dir/b-sparse/$SPARSE" ".$(basename "$cli")"
     unsupported status impl-b "$run"
-    unsupported log impl-b "$run"
-    unsupported blame impl-b "$run"
+    unsupported "log cold" impl-b "$run"
+    unsupported "log warm" impl-b "$run"
+    unsupported "blame cold" impl-b "$run"
+    unsupported "blame warm" impl-b "$run"
     echo "// bench-real run $run" >>"$dir/b-sparse/$EDIT_FILE"
     # Its commit uploads, creates the changeset and moves main in one step.
     time_it land impl-b "$run" "$cli" commit -m 'bench edit' --dir "$dir/b-sparse"
@@ -409,11 +417,16 @@ for run in $(seq 1 "$RUNS"); do
     time_it status git "$run" git -C "$dir/git-full" status --porcelain
     time_it status scion "$run" sh -c "cd '$dir/scn-sparse' && '$BIN/scn' status"
 
-    time_it log git "$run" git -C "$dir/git-full" log --first-parent -n 1000 -- "$LOG_PATH"
-    time_it log scion "$run" sh -c "cd '$dir/scn-sparse' && '$BIN/scn' log -n 1000 '$LOG_PATH'"
-
-    time_it blame git "$run" git -C "$dir/git-full" blame -- "$BLAME_FILE"
-    time_it blame scion "$run" sh -c "cd '$dir/scn-sparse' && '$BIN/scn' blame '$BLAME_FILE'"
+    # The first call is cold (nothing derived or cached for this repository
+    # yet), the second warm; both are recorded.
+    for temp in cold warm; do
+        time_it "log $temp" git "$run" git -C "$dir/git-full" log --first-parent -n 1000 -- "$LOG_PATH"
+        time_it "log $temp" scion "$run" sh -c "cd '$dir/scn-sparse' && '$BIN/scn' log -n 1000 '$LOG_PATH'"
+    done
+    for temp in cold warm; do
+        time_it "blame $temp" git "$run" git -C "$dir/git-full" blame -- "$BLAME_FILE"
+        time_it "blame $temp" scion "$run" sh -c "cd '$dir/scn-sparse' && '$BIN/scn' blame '$BLAME_FILE'"
+    done
 
     # The other implementations compare their checkouts with git's, so they
     # run before git's land edits it.

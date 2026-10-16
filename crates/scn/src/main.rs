@@ -363,15 +363,21 @@ async fn blame(out: &mut impl Write, path: &str, rev: &str) -> Result<()> {
     let cs = s.resolve(rev).await?;
     let path = s.repo_path(path)?;
     let repo = s.config.repo.clone();
-    let runs = s.remote.blame(&repo, cs, &path).await?;
-    // The newest changeset that touched the file holds its content.
-    let last = s.remote.path_log(&repo, cs, &path, 1).await?;
-    let Some(FileChange::Tracked { content, .. }) =
-        last.first().and_then(|c| c.file_changes.get(&path))
-    else {
-        return Err(format!("server history has no content for {path}").into());
-    };
-    let data = s.remote.get_blob(*content).await?;
+    // The attribution and the file's content are fetched at once; the newest
+    // changeset that touched the file holds its content.
+    let mut other = s.remote.clone();
+    let (runs, data) = tokio::try_join!(
+        async { Ok(s.remote.blame(&repo, cs, &path).await?) },
+        async {
+            let last = other.path_log(&repo, cs, &path, 1).await?;
+            let Some(FileChange::Tracked { content, .. }) =
+                last.first().and_then(|c| c.file_changes.get(&path))
+            else {
+                return Err(format!("server history has no content for {path}").into());
+            };
+            Ok::<_, Box<dyn std::error::Error>>(other.get_blob(*content).await?)
+        },
+    )?;
     let mut lines = data.split_inclusive(|b| *b == b'\n');
     for run in runs {
         let short = &run.changeset.to_hex()[..SHORT_ID];

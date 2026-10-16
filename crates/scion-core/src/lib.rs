@@ -21,7 +21,7 @@ mod merge;
 
 pub use merge::{Conflict, Side, ThreeWay, merge, rebase};
 
-use scion_derived::{Deriver, HistoryEntry, PathHistory, RootTree, SkipList};
+use scion_derived::{Deriver, PathHistory, RootTree, SkipList};
 use scion_store::ObjectStore;
 use scion_types::{
     BlobId, ChangesetId, FileType, PathComponent, RepoPath, Tree, TreeEntry, TreeId,
@@ -228,8 +228,9 @@ pub async fn log(ctx: &Deriver<'_>, head: ChangesetId, limit: usize) -> Result<V
 }
 
 /// Up to `limit` changesets on the first-parent chain of `head` that changed
-/// `path` (a file, or anything beneath a directory), newest first. Each step
-/// is one `PathHistory` lookup plus one index read.
+/// `path` (a file, or anything beneath a directory), newest first. One
+/// `PathHistory` lookup at `head`, then each step is one history-node read
+/// ([`scion_derived::HistoryEntry::previous`]) and no metadata read.
 ///
 /// Scope: the path's *current* existence. The walk stops at the changeset
 /// that created the path as it exists at `head`; a path absent at `head`,
@@ -243,22 +244,18 @@ pub async fn path_log(
     limit: usize,
 ) -> Result<Vec<ChangesetId>> {
     let mut out = Vec::new();
-    let mut cursor = head;
-    while out.len() < limit {
-        let history = ctx.derive::<PathHistory>(cursor).await?;
-        let Some(entry) = history.lookup(ctx.objects, path).await? else {
+    if limit == 0 {
+        return Ok(out);
+    }
+    let name = path.file_name();
+    let history = ctx.derive::<PathHistory>(head).await?;
+    let mut entry = history.lookup(ctx.objects, path).await?;
+    while let Some(e) = entry {
+        out.push(e.last_changed());
+        if out.len() == limit {
             break;
-        };
-        let changed = match entry {
-            HistoryEntry::File { last_changed } | HistoryEntry::Dir { last_changed, .. } => {
-                last_changed
-            }
-        };
-        out.push(changed);
-        match ctx.derive::<SkipList>(changed).await?.parents.first() {
-            Some((parent, _)) => cursor = *parent,
-            None => break,
         }
+        entry = e.previous(ctx.objects, &name).await?;
     }
     Ok(out)
 }
@@ -513,16 +510,15 @@ mod tests {
         d0.derive::<SkipList>(head).await.unwrap();
 
         let counting = CountingMeta::new(&store);
-        let d = Deriver::new(REPO, &counting, &store);
+        let objects = Counting::new(&store);
+        let d = Deriver::new(REPO, &counting, &objects);
         touched.reverse();
         assert_eq!(path_log(&d, head, &p, 100).await.unwrap(), touched);
         assert_eq!(counting.changeset_reads(), 0);
-        // 4 hops, a handful of index reads each; a scan would read 200 entries.
-        assert!(
-            counting.derived_reads() <= 16,
-            "index reads: {}",
-            counting.derived_reads()
-        );
+        // One pointer read at the head; a scan would read 200 entries.
+        assert_eq!(counting.derived_reads(), 1);
+        // A lookup at depth 2, then one node read per further change.
+        assert_eq!(objects.blob_gets(), 2 + touched.len() - 1);
         assert_eq!(path_log(&d, head, &p, 2).await.unwrap(), touched[..2]);
         assert_eq!(
             path_log(&d, head, &RepoPath::new("nope").unwrap(), 10)

@@ -45,9 +45,8 @@ The MVP (Phase 3) is done: `scion-server` serves the object and control gRPC ser
 Postgres + S3, and `scn` can `clone --sparse`, `status`, `log`, `diff`, `blame`, `add`,
 `commit` (an anonymous head) and `land` (fast-forward `main` only; server-side rebase is
 Phase 5). Git import (Phase 6) works and a benchmark script runs it against git on a real
-repository; its results are not published yet. `blame` is not usable on long histories yet: a
-cold blame of a frequently edited file exceeds the 30 s RPC deadline (Phase 6.12,
-[#63](https://github.com/tekeburak/scion/issues/63)).
+repository; its results are not published yet. A cold `blame` or path `log` (the first call
+for a revision) is still several times slower than git (Phase 6.12).
 The README status section tracks this.
 
 ## Can I bring an existing git repository?
@@ -87,8 +86,11 @@ clone, its best case, while `scn` runs them in a sparse clone, its normal case.
 The measurements so far, on the 600-commit slice `scripts/bench-real` imports (4 vCPU, the
 compose Postgres + RustFS stack): import takes about 6× git's push when the objects are already
 in the bucket and about 19× into an empty one, where the object store's write rate is the bound.
-A cold path `log` takes about 2 s against git's 28 ms, and a cold `blame` of a file with 44
-versions does not finish within the RPC deadline. Closing those gaps is Phase 6.12.
+`log` and `blame` are measured twice, cold (the first call for a new repository) and warm. Warm,
+both are at git's time (27 ms against 27 ms for a path `log`, 55 ms against 48 ms for `blame` of
+a 4,738-line file with 44 versions). Cold, a path `log` of 428 changes takes about 750 ms
+against git's 22 ms, one object-store read per change, and that `blame` about 375 ms against
+48 ms. Closing the rest of those gaps is Phase 6.12.
 
 ## What are the known limits today?
 
@@ -109,8 +111,8 @@ the roadmap step that closes it:
   reads fail. Phase 6.18 documents this in the quickstart.
 - **Concurrent creation of the same changeset** can return a spurious error to one of the
   callers; Phase 6.18 makes the write idempotent.
-- **Cold `blame` and path `log` on long histories** are slow or exceed the RPC deadline (see
-  above); Phase 6.12 and 6.15 bound them.
+- **Cold `blame` and path `log`** are several times slower than git (see above); Phase 6.12
+  and 6.15 work on them.
 
 ## Why Postgres and S3?
 

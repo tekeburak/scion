@@ -21,6 +21,10 @@ pub trait Derivable: Clone + Send + Sync + 'static {
     const NAME: &'static str;
     /// Bump when `derive` or the pointer format changes.
     const VERSION: u32;
+    /// Whether `derive` reads its parents' values. A type that does not is
+    /// derived for the requested changeset alone, with no parent values;
+    /// its `derive` finds and derives whatever earlier values it needs.
+    const READS_PARENTS: bool = true;
 
     /// Compute the value for `cs` from the values for its parents.
     async fn derive(ctx: &Deriver<'_>, cs: &Changeset, parents: &[Self]) -> Result<Self>;
@@ -82,6 +86,18 @@ impl<'a> Deriver<'a> {
     pub async fn derive<D: Derivable>(&self, target: ChangesetId) -> Result<D> {
         if let Some(v) = self.fetch::<D>(target).await? {
             return Ok(v);
+        }
+        if !D::READS_PARENTS {
+            let cs = self
+                .meta
+                .get_changeset(self.repo, target)
+                .await?
+                .ok_or(DeriveError::MissingChangeset(target))?;
+            let value = D::derive(self, &cs, &[]).await?;
+            self.meta
+                .put_derived(self.repo, D::NAME, D::VERSION, target, value.to_pointer())
+                .await?;
+            return Ok(value);
         }
 
         let mut memo: HashMap<ChangesetId, D> = HashMap::new();

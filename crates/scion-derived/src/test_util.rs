@@ -73,6 +73,7 @@ pub struct Counting<'a> {
     pub inner: &'a MemoryStore,
     pub tree_puts: AtomicUsize,
     pub blob_puts: AtomicUsize,
+    pub blob_gets: AtomicUsize,
     pub tree_gets: AtomicUsize,
 }
 
@@ -82,6 +83,7 @@ impl<'a> Counting<'a> {
             inner,
             tree_puts: AtomicUsize::new(0),
             blob_puts: AtomicUsize::new(0),
+            blob_gets: AtomicUsize::new(0),
             tree_gets: AtomicUsize::new(0),
         }
     }
@@ -90,6 +92,9 @@ impl<'a> Counting<'a> {
     }
     pub fn blob_puts(&self) -> usize {
         self.blob_puts.load(Ordering::Relaxed)
+    }
+    pub fn blob_gets(&self) -> usize {
+        self.blob_gets.load(Ordering::Relaxed)
     }
     pub fn tree_gets(&self) -> usize {
         self.tree_gets.load(Ordering::Relaxed)
@@ -103,6 +108,7 @@ impl ObjectStore for Counting<'_> {
         self.inner.put_blob(bytes).await
     }
     async fn get_blob(&self, id: BlobId) -> scion_store::Result<Option<Bytes>> {
+        self.blob_gets.fetch_add(1, Ordering::Relaxed);
         self.inner.get_blob(id).await
     }
     async fn has_blobs(&self, ids: &[BlobId]) -> scion_store::Result<Vec<bool>> {
