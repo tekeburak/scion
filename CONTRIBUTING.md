@@ -16,6 +16,9 @@ follows, for people and agents alike; read it, together with `docs/ARCHITECTURE.
   first.
 - **No I/O in `scion-types` or `scion-core`.** Algorithms are written against the store traits
   and tested with the in-memory store.
+- **Bumping a derived type's `VERSION` invalidates its stored values for every repository.**
+  Such a PR runs `scion_server::backfill` for that type in its end-to-end test, and its
+  description tells operators to run `scion-server backfill <repo> <type>` once it is deployed.
 - **Every store implementation passes the conformance suite** (`scion_store::conformance_tests!`).
 - **Server-side refs are only `main` and `release/*`** (`is_allowed_ref_name`). Do not add
   branch-like features.

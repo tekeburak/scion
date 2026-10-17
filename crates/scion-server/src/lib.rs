@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+mod backfill;
 mod control;
 mod object;
 mod staged;
@@ -23,6 +24,7 @@ use tonic::transport::server::TcpIncoming;
 use control::ControlServer;
 use object::ObjectServer;
 
+pub use backfill::{BACKFILL_TYPES, backfill};
 pub use control::{MAX_LOG_LIMIT, create_changesets, move_ref};
 
 /// Upper bound on every RPC. A client may ask for less with `grpc-timeout`;

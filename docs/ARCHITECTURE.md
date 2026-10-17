@@ -88,8 +88,18 @@ A changeset records only what changed, so blame, path history and ancestry quest
 indexes. Each derived-data type implements one trait whose `derive` takes the changeset and the
 type's value for each parent — the definition is recursive. Types can be computed eagerly on
 commit or lazily on first request (`CreateChangeset` derives what clone, log and diff need;
-blame is lazy); background backfill is planned, not built. Because the client never
-sees these structures, they can be replaced without a client change.
+blame is lazy). Because the client never sees these structures, they can be replaced
+without a client change.
+
+A type whose value is missing for a changeset (a cold history, or every changeset after its
+`VERSION` is bumped) is derived for the underived ancestors first, parents before children,
+stopping at stored values. The walk holds every underived ancestor as an id only, at most 64
+changesets at once (the rest are read again in batches of 64 when their turn comes) and a
+value only until every child that reads it is derived, so its memory follows the frontier of
+the history, not its length. `scion-server backfill <repo> <type>` runs that walk from every
+ref for `root_tree`, `path_history` or `skip_list`, so the first request after a bump does not
+pay for the whole history; each value is stored as it is derived, so an interrupted backfill
+resumes where it stopped and a finished one is a no-op.
 
 Types (phase 2): `RootTree`, `PathHistory`, `Blame`, `SkipList`. Later: copy detection,
 basename/suffix indexes for path search.

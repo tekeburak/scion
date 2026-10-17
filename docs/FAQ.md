@@ -117,8 +117,11 @@ the roadmap step that closes it:
   reads fail. Phase 6.18 documents this in the quickstart.
 - **Concurrent creation of the same changeset** can return a spurious error to one of the
   callers; Phase 6.18 makes the write idempotent.
-- **Cold `blame` and path `log`** take several times git's time (see above); Phase 6.15
-  bounds the derivation behind them.
+- **The first request after a derived type's `VERSION` bump derives that type for the whole
+  history.** Memory stays bounded, but on the 600-commit benchmark slice the first path `log`
+  after a `path_history` bump takes about 14 s of the 30 s RPC deadline; run
+  `scion-server backfill <repo> path_history` (about as long, once) after deploying the bump
+  and the first `log` is warm.
 
 ## Why Postgres and S3?
 

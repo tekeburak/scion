@@ -32,6 +32,8 @@ deliberate deviations from the reference design (trees in S3, canonical BLAKE3, 
   S3 (`log`, `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`, `move_ref`), and the
   `scn` CLI can `clone --sparse`, `status`, `log`, `diff`, `blame`, `add`, `commit` (an anonymous
   head) and `land` (fast-forward `main`). CI runs that loop end to end on Postgres + S3.
+  Deriving a cold history holds a bounded number of changesets, and `scion-server backfill`
+  derives a type for a repository's whole history ahead of the first request (6.15).
 - **Git import (Phase 6.1–6.8, 6.11 and 6.14 merged; [how-to](#import-a-git-repository)):**
   `scion-ingest import <git-dir> <repo> [<rev>]` turns a git history into changesets
   (first-parent file changes, renames and copies as `copy_from`, the git sha kept in `extra`),
@@ -45,11 +47,11 @@ deliberate deviations from the reference design (trees in S3, canonical BLAKE3, 
   (first call) and warm; the results are under [Benchmarks](#benchmarks). Clone, `status`,
   warm `log` and `blame` and commit + `land` run at or below git's time; cold, a path `log`
   takes about 7× git's and a `blame` about 3.5×.
-- **Next:** the steps that make the MVP usable by a team on one machine: bounded derivation with
-  `backfill` (6.15), `scn init` (6.16), `scn update` and `scn checkout` (6.17), idempotent
-  writes and a compose service for the server (6.18). After that: change requests and the land
-  worker (Phase 5), IAM (Phase 7), release binaries and a quickstart (Phase 9), the cache and
-  daemon tiers (Phase 4) and virtualized checkouts (Phase 8).
+- **Next:** the steps that make the MVP usable by a team on one machine: `scn init` (6.16),
+  `scn update` and `scn checkout` (6.17), idempotent writes and a compose service for the server
+  (6.18). After that: change requests and the land worker (Phase 5), IAM (Phase 7), release
+  binaries and a quickstart (Phase 9), the cache and daemon tiers (Phase 4) and virtualized
+  checkouts (Phase 8).
 
 Scion is *not* a general replacement for git. Git's distributed, offline-first model is the right
 design for the overwhelming majority of repositories. Scion targets one specific situation: a
