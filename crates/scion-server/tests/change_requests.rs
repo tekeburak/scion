@@ -1,0 +1,143 @@
+//! `SubmitChangeRequest` and `GetChangeRequest` over a real transport.
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
+use bytes::Bytes;
+use scion_derived::test_util::{REPO, changeset, tracked};
+use scion_proto::v1::control_service_client::ControlServiceClient;
+use scion_proto::v1::{ChangeRequestStatus, GetChangeRequestRequest, SubmitChangeRequestRequest};
+use scion_store::{LandOutcome, MemoryStore, MetadataStore, ObjectStore};
+use scion_types::{ChangesetId, RepoPath};
+use tokio::net::TcpListener;
+use tonic::Code;
+use tonic::transport::Channel;
+
+async fn commit(store: &MemoryStore, parents: Vec<ChangesetId>, msg: &str) -> ChangesetId {
+    let content = msg.as_bytes();
+    store
+        .put_blob(Bytes::copy_from_slice(content))
+        .await
+        .unwrap();
+    let changes = BTreeMap::from([(RepoPath::new("f.txt").unwrap(), tracked(content))]);
+    store
+        .put_changeset(&changeset(parents, changes, msg))
+        .await
+        .unwrap()
+}
+
+async fn start(store: Arc<MemoryStore>) -> ControlServiceClient<Channel> {
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    tokio::spawn(scion_server::serve(listener, store.clone(), store));
+    let channel = Channel::from_shared(format!("http://{addr}"))
+        .unwrap()
+        .connect()
+        .await
+        .unwrap();
+    ControlServiceClient::new(channel)
+}
+
+fn submit(repo: &str, head: ChangesetId) -> SubmitChangeRequestRequest {
+    SubmitChangeRequestRequest {
+        repo: repo.into(),
+        head: head.as_bytes().to_vec(),
+    }
+}
+
+fn get(repo: &str, id: u64) -> GetChangeRequestRequest {
+    GetChangeRequestRequest {
+        repo: repo.into(),
+        id,
+    }
+}
+
+#[tokio::test]
+async fn submits_and_reads_back() {
+    let store = Arc::new(MemoryStore::with_repo(REPO));
+    let root = commit(&store, vec![], "root").await;
+    store.create_ref(REPO, "main", root).await.unwrap();
+    let head = commit(&store, vec![root], "edit").await;
+    let mut c = start(store.clone()).await;
+
+    let submitted = c.submit_change_request(submit(REPO, head)).await.unwrap();
+    let submitted = submitted.into_inner();
+    assert_eq!(submitted.head, head.as_bytes());
+    assert_eq!(
+        submitted.base,
+        root.as_bytes(),
+        "base is main at submission"
+    );
+    assert_eq!(submitted.status(), ChangeRequestStatus::Pending);
+    assert_eq!(
+        (submitted.landed.as_ref(), submitted.conflicts.len()),
+        (None, 0)
+    );
+    let got = c.get_change_request(get(REPO, submitted.id)).await.unwrap();
+    assert_eq!(got.into_inner(), submitted);
+
+    // What the land worker records comes back through `Get`.
+    store
+        .claim_next_change_request(REPO)
+        .await
+        .unwrap()
+        .unwrap();
+    store
+        .finish_change_request(
+            REPO,
+            submitted.id,
+            LandOutcome::NeedsRebase(vec!["f.txt".into()]),
+        )
+        .await
+        .unwrap();
+    let got = c
+        .get_change_request(get(REPO, submitted.id))
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(got.status(), ChangeRequestStatus::NeedsRebase);
+    assert_eq!(got.conflicts, ["f.txt"]);
+}
+
+#[tokio::test]
+async fn unknown_head_repository_or_request_is_not_found() {
+    let store = Arc::new(MemoryStore::with_repo(REPO));
+    let root = commit(&store, vec![], "root").await;
+    store.create_ref(REPO, "main", root).await.unwrap();
+    let mut c = start(store.clone()).await;
+
+    let unknown = ChangesetId::from_bytes([7; 32]);
+    let code = |r: Result<_, tonic::Status>| r.map(|_| ()).unwrap_err().code();
+    assert_eq!(
+        code(c.submit_change_request(submit(REPO, unknown)).await),
+        Code::NotFound
+    );
+    assert_eq!(
+        code(c.submit_change_request(submit("nope", root)).await),
+        Code::NotFound
+    );
+    assert_eq!(
+        code(c.get_change_request(get(REPO, 1)).await),
+        Code::NotFound
+    );
+    let id = c
+        .submit_change_request(submit(REPO, root))
+        .await
+        .unwrap()
+        .into_inner()
+        .id;
+    assert_eq!(
+        code(c.get_change_request(get("nope", id)).await),
+        Code::NotFound
+    );
+    assert_eq!(
+        code(
+            c.submit_change_request(SubmitChangeRequestRequest {
+                repo: REPO.into(),
+                head: vec![1, 2, 3],
+            })
+            .await
+        ),
+        Code::InvalidArgument
+    );
+}

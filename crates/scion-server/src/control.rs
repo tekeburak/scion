@@ -10,10 +10,11 @@ use futures_util::{StreamExt, TryStreamExt, stream};
 use scion_derived::{Blame, DeriveError, Deriver, PathHistory, RootTree, SkipList};
 use scion_proto::v1::control_service_server::ControlService;
 use scion_proto::v1::{
-    BlameRequest, BlameResponse, BlameRun, CreateChangesetRequest, CreateChangesetResponse,
-    DiffEntry, DiffRequest, DiffResponse, FileEntry, FileType, GetRefRequest, GetRefResponse,
-    LogRequest, LogResponse, MergeBaseRequest, MergeBaseResponse, MoveRefRequest, MoveRefResponse,
-    PathLogRequest, RebaseRequest, RebaseResponse,
+    BlameRequest, BlameResponse, BlameRun, ChangeRequest, ChangeRequestStatus,
+    CreateChangesetRequest, CreateChangesetResponse, DiffEntry, DiffRequest, DiffResponse,
+    FileEntry, FileType, GetChangeRequestRequest, GetRefRequest, GetRefResponse, LogRequest,
+    LogResponse, MergeBaseRequest, MergeBaseResponse, MoveRefRequest, MoveRefResponse,
+    PathLogRequest, RebaseRequest, RebaseResponse, SubmitChangeRequestRequest,
 };
 use scion_store::{MetadataStore, ObjectStore, StoreError, is_allowed_ref_name};
 use scion_types::{BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, RepoPath, TreeId};
@@ -139,6 +140,25 @@ fn diff_entry(e: scion_core::DiffEntry) -> DiffEntry {
         path: path.as_str().to_owned(),
         old: old.map(file_entry),
         new: new.map(file_entry),
+    }
+}
+
+fn change_request(cr: scion_store::ChangeRequest) -> ChangeRequest {
+    use scion_store::ChangeRequestStatus as S;
+    ChangeRequest {
+        id: cr.id,
+        head: cr.head.as_bytes().to_vec(),
+        base: cr.base.as_bytes().to_vec(),
+        status: match cr.status {
+            S::Pending => ChangeRequestStatus::Pending,
+            S::Landing => ChangeRequestStatus::Landing,
+            S::Landed => ChangeRequestStatus::Landed,
+            S::NeedsRebase => ChangeRequestStatus::NeedsRebase,
+            S::Rejected => ChangeRequestStatus::Rejected,
+        }
+        .into(),
+        landed: cr.landed.map(|cs| cs.as_bytes().to_vec()),
+        conflicts: cr.conflicts,
     }
 }
 
@@ -571,5 +591,55 @@ impl ControlService for ControlServer {
                 })
                 .collect(),
         }))
+    }
+
+    async fn submit_change_request(
+        &self,
+        request: Request<SubmitChangeRequestRequest>,
+    ) -> Result<Response<ChangeRequest>, Status> {
+        let req = request.into_inner();
+        let head = changeset_id(&req.head, "head")?;
+        if self
+            .meta
+            .get_changeset(&req.repo, head)
+            .await
+            .map_err(store_status)?
+            .is_none()
+        {
+            return Err(Status::not_found(format!(
+                "changeset {head} in {:?}",
+                req.repo
+            )));
+        }
+        // Every repository gets `main` from `scn init`; without it the
+        // repository does not exist.
+        let main = self
+            .meta
+            .get_ref(&req.repo, "main")
+            .await
+            .map_err(store_status)?
+            .ok_or_else(|| Status::not_found(format!("ref \"main\" in {:?}", req.repo)))?;
+        let cr = self
+            .meta
+            .submit_change_request(&req.repo, head, main.target)
+            .await
+            .map_err(store_status)?;
+        Ok(Response::new(change_request(cr)))
+    }
+
+    async fn get_change_request(
+        &self,
+        request: Request<GetChangeRequestRequest>,
+    ) -> Result<Response<ChangeRequest>, Status> {
+        let req = request.into_inner();
+        let cr = self
+            .meta
+            .get_change_request(&req.repo, req.id)
+            .await
+            .map_err(store_status)?
+            .ok_or_else(|| {
+                Status::not_found(format!("change request {} in {:?}", req.id, req.repo))
+            })?;
+        Ok(Response::new(change_request(cr)))
     }
 }
