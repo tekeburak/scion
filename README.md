@@ -32,24 +32,24 @@ deliberate deviations from the reference design (trees in S3, canonical BLAKE3, 
   S3 (`log`, `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`, `move_ref`), and the
   `scn` CLI can `clone --sparse`, `status`, `log`, `diff`, `blame`, `add`, `commit` (an anonymous
   head) and `land` (fast-forward `main`). CI runs that loop end to end on Postgres + S3.
-- **Git import (Phase 6.1–6.8 and 6.11 merged):** `scion-ingest import <git-dir> <repo> [<rev>]` turns a
-  git history into changesets (first-parent file changes, renames and copies as `copy_from`,
-  the git sha kept in `extra`), resumes from checkpoints, syncs incrementally and refuses a
-  rewritten upstream; `scion-ingest verify` compares every imported tree with `git ls-tree`.
-  Changesets are created in batches, so importing the benchmark's 600-commit slice takes about
-  6× git's push when its objects are already in the bucket and about 19× into an empty bucket.
+- **Git import (Phase 6.1–6.8, 6.11 and 6.14 merged; [how-to](#import-a-git-repository)):**
+  `scion-ingest import <git-dir> <repo> [<rev>]` turns a git history into changesets
+  (first-parent file changes, renames and copies as `copy_from`, the git sha kept in `extra`),
+  resumes from checkpoints, syncs incrementally and refuses a rewritten upstream; `scion-ingest
+  verify` compares every imported tree with `git ls-tree`. Changesets are created in batches, so
+  importing the benchmark's 600-commit slice takes about 6× git's push when its objects are
+  already in the bucket and about 19× into an empty bucket.
 - **Real-repository benchmark (Phase 6.9–6.13 merged):** `scripts/bench-real` rebuilds a
   pinned slice of a real repository's history and times import, clone, sparse clone, `status`,
   `log`, `blame` and `land` against git on Postgres + S3, with `log` and `blame` measured cold
   (first call) and warm; the results are under [Benchmarks](#benchmarks). Clone, `status`,
   warm `log` and `blame` and commit + `land` run at or below git's time; cold, a path `log`
   takes about 7× git's and a `blame` about 3.5×.
-- **Next:** an import how-to (6.14), then the steps that make the MVP usable by a
-  team on one machine: bounded derivation with `backfill` (6.15), `scn init` (6.16),
-  `scn update` and `scn checkout` (6.17), idempotent writes and a compose service for the
-  server (6.18). After that: change requests and the land worker (Phase 5), IAM (Phase 7),
-  release binaries and a quickstart (Phase 9), the cache and daemon tiers (Phase 4) and
-  virtualized checkouts (Phase 8).
+- **Next:** the steps that make the MVP usable by a team on one machine: bounded derivation with
+  `backfill` (6.15), `scn init` (6.16), `scn update` and `scn checkout` (6.17), idempotent
+  writes and a compose service for the server (6.18). After that: change requests and the land
+  worker (Phase 5), IAM (Phase 7), release binaries and a quickstart (Phase 9), the cache and
+  daemon tiers (Phase 4) and virtualized checkouts (Phase 8).
 
 Scion is *not* a general replacement for git. Git's distributed, offline-first model is the right
 design for the overwhelming majority of repositories. Scion targets one specific situation: a
@@ -61,6 +61,48 @@ centralized, server-authoritative design with thin clients and tiered object cac
 This is an independent open-source project inspired by the design described in Anthropic's
 engineering post [*Redesigning source control at Anthropic*](https://www.anthropic.com/engineering/redesigning-source-control).
 It is not affiliated with or endorsed by Anthropic. The name may change before the first release.
+
+## Import a git repository
+
+`scion-ingest` copies a git history into Scion: one changeset per commit, file changes
+against the first parent, renames and copies kept for `blame`, the git sha kept in the
+changeset's `extra`, and `main` pointed at the imported tip. The rules, and what it refuses,
+are in [Ingestion](docs/ARCHITECTURE.md#ingestion). On the local compose stack, from a checkout
+of this repository:
+
+```sh
+# Postgres on :5432 and S3 (RustFS) on :9000, then the three binaries
+docker compose -f deploy/docker-compose.yml up -d --wait
+cargo build --release -p scion-server -p scion-ingest -p scn
+export PATH=$PWD/target/release:$PATH
+
+# scion-ingest and scion-server work on the stores directly
+export DATABASE_URL=postgres://scion:scion@127.0.0.1:5432/scion
+export AWS_ENDPOINT=http://127.0.0.1:9000 AWS_ALLOW_HTTP=true AWS_BUCKET=scion-objects
+export AWS_ACCESS_KEY_ID=scion AWS_SECRET_ACCESS_KEY=scionscion AWS_REGION=us-east-1
+
+# a two-commit git repository with a rename; any local clone works the same way
+cd "$(mktemp -d)"
+export GIT_AUTHOR_NAME=Ada GIT_AUTHOR_EMAIL=ada@example.com
+export GIT_COMMITTER_NAME=Ada GIT_COMMITTER_EMAIL=ada@example.com
+git init -q -b main demo
+printf 'one\ntwo\nthree\n' >demo/notes.txt
+git -C demo add -A && git -C demo commit -qm "add notes"
+git -C demo mv notes.txt README.txt && printf 'four\n' >>demo/README.txt
+git -C demo commit -qam "rename notes, add a line"
+
+scion-ingest import demo demo main   # git dir, Scion repository, git revision
+scion-ingest verify demo demo        # every imported tree against git ls-tree
+
+SCION_LISTEN=127.0.0.1:7420 scion-server &   # prints "listening" once it accepts clones
+sleep 2
+scn clone http://127.0.0.1:7420 demo demo-scn
+cd demo-scn && scn log && scn blame README.txt   # "one" to "three" blame to "add notes"
+```
+
+Run `import` again after new git commits and it imports only those and fast-forwards `main`;
+an interrupted import resumes the same way. If the git history was rewritten under an import,
+`import` names the commit `main` is at and writes nothing.
 
 ## Why it is different, in detail
 

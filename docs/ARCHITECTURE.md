@@ -169,10 +169,53 @@ the results are the Benchmarks table and chart in `README.md` (Phase 6.13), rend
 `docs/bench-real.csv`, and the measurement script (`scripts/bench-real`) stays in the
 repository.
 
-### Ingestion dependency
+### Ingestion
 
-`scion-ingest` (phase 6) reads git repositories with `gix` (pure Rust, `zlib-rs`, no network
-features); the dependency stays in that crate so no other crate builds it.
+`scion-ingest` (phase 6) is the only way history enters Scion from git; there is no git wire
+protocol. Like `scion-server` it is an operator tool that works on Postgres and the object
+store directly (`DATABASE_URL`, `AWS_*`) and creates changesets through the same code path as
+`CreateChangeset`, so eager derivation and every server-side check apply unchanged.
+`scion-ingest import <git-dir> <repo> [<rev>]` imports every commit reachable from `<rev>`
+(default `HEAD`), parents before children; `scion-ingest verify <git-dir> <repo> [--sample <n>]`
+compares each imported tree with the git tree by path, file kind and content and names the
+first path that differs.
+
+**Mapping.** One changeset per git commit. `parents` keeps every git parent in order, but
+`file_changes` is the tree diff against the first parent only (the empty tree for a root
+commit), per invariant 8. A file added in a commit that also deletes or changes a file with the
+same content, or with at least half its lines, records that file as `copy_from` at the first
+parent, so `blame` follows renames and copies. Git modes map to `FileType` (regular,
+executable, symlink). Author and committer keep their own dates and UTC offsets; names, emails
+and the message are read as UTF-8 with invalid bytes replaced. The commit's raw sha goes into
+`extra["git-sha"]`: provenance, not a field (invariant 4). The only ref an import creates or
+moves is `main` (invariant 6), by compare-and-swap once every changeset exists.
+
+**Rejected.** A submodule (gitlink) entry, a path that is not a valid `RepoPath` (not UTF-8,
+or with a `.` or `..` component) and a blob over the server's per-blob limit (64 MiB)
+stop the import with an error naming the commit and path. Nothing is rewritten to make such a
+commit fit; the history has to be fixed in git first.
+
+**Resume.** Each created batch of changesets is recorded in `ingest_checkpoints`
+(`repo`, git sha → changeset id) right after its derived data is stored. A run skips every
+commit already recorded, so an interrupted import is resumed by running the same command
+again: it creates exactly the remaining commits and ends at the same `main` as an
+uninterrupted run. Changeset ids are content hashes, so a commit that was created but not yet
+checkpointed is created again as the same changeset.
+
+**Incremental sync.** Running `import` again against an updated repository imports only the
+new commits and fast-forwards `main`; importing at X and then at Y gives the same changeset ids
+as one import at Y. If `main` points at a commit the new revision does not contain (the
+upstream history was rewritten), the import fails naming that commit and writes nothing. A
+`main` that has moved past the import, because changes were landed on it, is refused the same
+way: Scion is then the source of truth and git is no longer imported into it.
+
+**Bounded memory.** Commits are mapped on one thread, their blobs uploaded concurrently (one
+presence check per commit, then only the missing blobs), and the uploaded ones created in order
+in batches. Only commits in flight are held, so memory follows the largest commit, not the
+history.
+
+`scion-ingest` reads git repositories with `gix` (pure Rust, `zlib-rs`, no network features);
+the dependency stays in that crate so no other crate builds it.
 
 ## Non-goals (first 12 months)
 
