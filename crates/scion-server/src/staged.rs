@@ -17,7 +17,9 @@ use std::sync::Mutex;
 use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::{StreamExt, TryStreamExt, stream};
-use scion_store::{DerivedPointer, MetadataStore, ObjectStore, RefState, Result};
+use scion_store::{
+    ChangeRequest, DerivedPointer, LandOutcome, MetadataStore, ObjectStore, RefState, Result,
+};
 use scion_types::{BlobId, Changeset, ChangesetId, Tree, TreeId};
 
 /// Most object writes in flight at once when a batch is stored.
@@ -237,5 +239,31 @@ impl MetadataStore for Staged<'_> {
 
     async fn ingest_checkpoints(&self, repo: &str) -> Result<Vec<(Vec<u8>, ChangesetId)>> {
         self.meta.ingest_checkpoints(repo).await
+    }
+
+    async fn submit_change_request(
+        &self,
+        repo: &str,
+        head: ChangesetId,
+        base: ChangesetId,
+    ) -> Result<ChangeRequest> {
+        self.meta.submit_change_request(repo, head, base).await
+    }
+
+    async fn get_change_request(&self, repo: &str, id: u64) -> Result<Option<ChangeRequest>> {
+        self.meta.get_change_request(repo, id).await
+    }
+
+    async fn claim_next_change_request(&self, repo: &str) -> Result<Option<ChangeRequest>> {
+        self.meta.claim_next_change_request(repo).await
+    }
+
+    async fn finish_change_request(
+        &self,
+        repo: &str,
+        id: u64,
+        outcome: LandOutcome,
+    ) -> Result<ChangeRequest> {
+        self.meta.finish_change_request(repo, id, outcome).await
     }
 }

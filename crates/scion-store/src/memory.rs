@@ -8,7 +8,8 @@ use bytes::Bytes;
 use scion_types::{BlobId, Changeset, ChangesetId, Tree, TreeId};
 
 use crate::{
-    DerivedPointer, MetadataStore, ObjectStore, RefState, Result, StoreError, is_allowed_ref_name,
+    ChangeRequest, ChangeRequestStatus, DerivedPointer, LandOutcome, MetadataStore, ObjectStore,
+    RefState, Result, StoreError, is_allowed_ref_name,
 };
 
 #[derive(Debug, Default)]
@@ -18,6 +19,10 @@ struct Metadata {
     refs: HashMap<String, BTreeMap<String, RefState>>,
     derived: HashMap<(String, String, u32, ChangesetId), Vec<u8>>,
     checkpoints: HashMap<String, BTreeMap<Vec<u8>, ChangesetId>>,
+    /// Per repository, by id; ids are shared by all repositories, like a
+    /// `BIGSERIAL`.
+    change_requests: HashMap<String, BTreeMap<u64, ChangeRequest>>,
+    last_request_id: u64,
 }
 
 #[derive(Debug, Default)]
@@ -203,6 +208,77 @@ impl MetadataStore for MemoryStore {
             .get(repo)
             .map(|c| c.iter().map(|(k, v)| (k.clone(), *v)).collect())
             .unwrap_or_default())
+    }
+
+    async fn submit_change_request(
+        &self,
+        repo: &str,
+        head: ChangesetId,
+        base: ChangesetId,
+    ) -> Result<ChangeRequest> {
+        let mut m = self.meta.write().expect("poisoned");
+        m.check_repo(repo)?;
+        m.last_request_id += 1;
+        let request = ChangeRequest {
+            id: m.last_request_id,
+            head,
+            base,
+            status: ChangeRequestStatus::Pending,
+            landed: None,
+            conflicts: Vec::new(),
+        };
+        m.change_requests
+            .entry(repo.to_owned())
+            .or_default()
+            .insert(request.id, request.clone());
+        Ok(request)
+    }
+
+    async fn get_change_request(&self, repo: &str, id: u64) -> Result<Option<ChangeRequest>> {
+        let m = self.meta.read().expect("poisoned");
+        Ok(m.change_requests
+            .get(repo)
+            .and_then(|r| r.get(&id))
+            .cloned())
+    }
+
+    async fn claim_next_change_request(&self, repo: &str) -> Result<Option<ChangeRequest>> {
+        let mut m = self.meta.write().expect("poisoned");
+        let next = m.change_requests.get_mut(repo).and_then(|r| {
+            r.values_mut()
+                .find(|cr| cr.status == ChangeRequestStatus::Pending)
+        });
+        Ok(next.map(|cr| {
+            cr.status = ChangeRequestStatus::Landing;
+            cr.clone()
+        }))
+    }
+
+    async fn finish_change_request(
+        &self,
+        repo: &str,
+        id: u64,
+        outcome: LandOutcome,
+    ) -> Result<ChangeRequest> {
+        let mut m = self.meta.write().expect("poisoned");
+        let cr = m
+            .change_requests
+            .get_mut(repo)
+            .and_then(|r| r.get_mut(&id))
+            .ok_or(StoreError::ChangeRequestNotFound(id))?;
+        if cr.status != ChangeRequestStatus::Landing {
+            return Err(StoreError::ChangeRequestNotLanding {
+                id,
+                status: cr.status,
+            });
+        }
+        cr.status = outcome.status();
+        match outcome {
+            LandOutcome::Landed(cs) => cr.landed = Some(cs),
+            LandOutcome::NeedsRebase(paths) => cr.conflicts = paths,
+            LandOutcome::Rejected => {}
+        }
+        Ok(cr.clone())
     }
 }
 

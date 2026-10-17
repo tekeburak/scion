@@ -15,7 +15,7 @@ use scion_types::{
     Timestamp, Tree, TreeEntry,
 };
 
-use crate::{MetadataStore, ObjectStore, StoreError};
+use crate::{ChangeRequestStatus, LandOutcome, MetadataStore, ObjectStore, StoreError};
 
 const REPO: &str = "conformance";
 
@@ -300,6 +300,151 @@ pub async fn checkpoints<S: MetadataStore>(s: &S) {
     );
 }
 
+/// Change requests are claimed oldest first, finish only from `landing`,
+/// and belong to one repository.
+pub async fn change_requests<S: MetadataStore>(s: &S) {
+    use ChangeRequestStatus::{Landed, Landing, NeedsRebase, Pending, Rejected};
+    let cs = |b: u8| ChangesetId::from_bytes([b; 32]);
+    s.create_repo(REPO).await.unwrap();
+    assert_eq!(s.claim_next_change_request(REPO).await.unwrap(), None);
+
+    let mut ids = Vec::new();
+    for b in 1..=4 {
+        let cr = s.submit_change_request(REPO, cs(b), cs(0)).await.unwrap();
+        assert_eq!((cr.head, cr.base, cr.status), (cs(b), cs(0), Pending));
+        assert_eq!((cr.landed, cr.conflicts.len()), (None, 0));
+        assert_eq!(
+            s.get_change_request(REPO, cr.id).await.unwrap(),
+            Some(cr.clone())
+        );
+        ids.push(cr.id);
+    }
+    assert!(ids.windows(2).all(|w| w[0] < w[1]), "ids follow submission");
+
+    // Only a `landing` request finishes; a refused finish changes nothing.
+    assert!(matches!(
+        s.finish_change_request(REPO, ids[0], LandOutcome::Rejected)
+            .await,
+        Err(StoreError::ChangeRequestNotLanding {
+            status: Pending,
+            ..
+        })
+    ));
+    let mut claimed = Vec::new();
+    for want in &ids {
+        let cr = s.claim_next_change_request(REPO).await.unwrap().unwrap();
+        assert_eq!((cr.id, cr.status), (*want, Landing), "oldest first");
+        claimed.push(cr);
+    }
+    assert_eq!(s.claim_next_change_request(REPO).await.unwrap(), None);
+
+    let landed = s
+        .finish_change_request(REPO, ids[0], LandOutcome::Landed(cs(7)))
+        .await
+        .unwrap();
+    assert_eq!((landed.status, landed.landed), (Landed, Some(cs(7))));
+    let conflicts = vec!["a/b.rs".to_owned(), "c.txt".to_owned()];
+    let conflicted = s
+        .finish_change_request(REPO, ids[1], LandOutcome::NeedsRebase(conflicts.clone()))
+        .await
+        .unwrap();
+    assert_eq!(
+        (conflicted.status, &conflicted.conflicts),
+        (NeedsRebase, &conflicts)
+    );
+    let rejected = s
+        .finish_change_request(REPO, ids[2], LandOutcome::Rejected)
+        .await
+        .unwrap();
+    assert_eq!((rejected.status, rejected.landed), (Rejected, None));
+    for (cr, status) in [
+        (&landed, Landed),
+        (&conflicted, NeedsRebase),
+        (&rejected, Rejected),
+    ] {
+        assert_eq!(
+            s.get_change_request(REPO, cr.id).await.unwrap().as_ref(),
+            Some(cr)
+        );
+        assert!(matches!(
+            s.finish_change_request(REPO, cr.id, LandOutcome::Landed(cs(8))).await,
+            Err(StoreError::ChangeRequestNotLanding { status: st, .. }) if st == status
+        ));
+        assert_eq!(
+            s.get_change_request(REPO, cr.id).await.unwrap().as_ref(),
+            Some(cr)
+        );
+    }
+    assert!(matches!(
+        s.finish_change_request(REPO, u64::from(u32::MAX), LandOutcome::Rejected)
+            .await,
+        Err(StoreError::ChangeRequestNotFound(_))
+    ));
+    assert_eq!(
+        s.get_change_request(REPO, ids[3])
+            .await
+            .unwrap()
+            .map(|cr| cr.status),
+        Some(Landing)
+    );
+}
+
+/// A change request of one repository is invisible from another.
+pub async fn change_requests_by_repo<S: MetadataStore>(s: &S) {
+    const OTHER: &str = "conformance-other";
+    let (head, base) = (
+        ChangesetId::from_bytes([1; 32]),
+        ChangesetId::from_bytes([0; 32]),
+    );
+    assert!(matches!(
+        s.submit_change_request(REPO, head, base).await,
+        Err(StoreError::RepoNotFound(_))
+    ));
+    s.create_repo(REPO).await.unwrap();
+    s.create_repo(OTHER).await.unwrap();
+    let ours = s.submit_change_request(REPO, head, base).await.unwrap();
+    let theirs = s.submit_change_request(OTHER, head, base).await.unwrap();
+    assert_eq!(s.get_change_request(OTHER, ours.id).await.unwrap(), None);
+    assert_eq!(s.get_change_request(REPO, theirs.id).await.unwrap(), None);
+    let claimed = s.claim_next_change_request(OTHER).await.unwrap().unwrap();
+    assert_eq!(claimed.id, theirs.id);
+    assert_eq!(s.claim_next_change_request(OTHER).await.unwrap(), None);
+    assert!(matches!(
+        s.finish_change_request(REPO, theirs.id, LandOutcome::Rejected).await,
+        Err(StoreError::ChangeRequestNotFound(id)) if id == theirs.id
+    ));
+    assert_eq!(
+        s.get_change_request(REPO, ours.id)
+            .await
+            .unwrap()
+            .map(|cr| cr.status),
+        Some(ChangeRequestStatus::Pending)
+    );
+}
+
+/// Concurrent claims split the pending requests between them, each exactly
+/// once.
+pub async fn concurrent_claims<S: MetadataStore>(s: &S) {
+    s.create_repo(REPO).await.unwrap();
+    let base = ChangesetId::from_bytes([0; 32]);
+    let mut submitted = Vec::new();
+    for b in 1..=16 {
+        let head = ChangesetId::from_bytes([b; 32]);
+        submitted.push(s.submit_change_request(REPO, head, base).await.unwrap().id);
+    }
+    let claim_all = || async {
+        let mut ids = Vec::new();
+        while let Some(cr) = s.claim_next_change_request(REPO).await.unwrap() {
+            ids.push(cr.id);
+        }
+        ids
+    };
+    let (a, b) = tokio::join!(claim_all(), claim_all());
+    let mut claimed: Vec<u64> = a.into_iter().chain(b).collect();
+    claimed.sort_unstable();
+    assert_eq!(claimed, submitted);
+}
+
 /// Blobs and trees are content-addressed and idempotent.
 pub async fn objects<S: ObjectStore>(s: &S) {
     let data = Bytes::from_static(b"hello, scion");
@@ -372,6 +517,18 @@ macro_rules! conformance_tests {
                 $crate::conformance::checkpoints(&$ctor.await).await;
             }
             #[tokio::test]
+            async fn change_requests() {
+                $crate::conformance::change_requests(&$ctor.await).await;
+            }
+            #[tokio::test]
+            async fn change_requests_by_repo() {
+                $crate::conformance::change_requests_by_repo(&$ctor.await).await;
+            }
+            #[tokio::test]
+            async fn concurrent_claims() {
+                $crate::conformance::concurrent_claims(&$ctor.await).await;
+            }
+            #[tokio::test]
             async fn objects() {
                 $crate::conformance::objects(&$ctor.await).await;
             }
@@ -411,6 +568,18 @@ macro_rules! metadata_conformance_tests {
             #[tokio::test]
             async fn checkpoints() {
                 $crate::conformance::checkpoints(&$ctor.await).await;
+            }
+            #[tokio::test]
+            async fn change_requests() {
+                $crate::conformance::change_requests(&$ctor.await).await;
+            }
+            #[tokio::test]
+            async fn change_requests_by_repo() {
+                $crate::conformance::change_requests_by_repo(&$ctor.await).await;
+            }
+            #[tokio::test]
+            async fn concurrent_claims() {
+                $crate::conformance::concurrent_claims(&$ctor.await).await;
             }
         }
     };
