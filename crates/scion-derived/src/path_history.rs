@@ -780,7 +780,7 @@ mod tests {
 
     #[tokio::test]
     async fn unchanged_tree_reuses_history_pointer() {
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let d = Deriver::new(REPO, &store, &store);
         let mut c = BTreeMap::new();
         c.insert(RepoPath::new("a/f").unwrap(), tracked(b"1"));
@@ -821,7 +821,7 @@ mod tests {
 
     #[tokio::test]
     async fn merge_follows_first_parent() {
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let d = Deriver::new(REPO, &store, &store);
         let single = |path: &str| {
             let mut changes = BTreeMap::new();
@@ -861,7 +861,7 @@ mod tests {
     async fn rewritten_history_nodes_bounded_by_depth() {
         const WIDTH: usize = 50;
         const DEPTH: usize = 4;
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let mut changes = BTreeMap::new();
         for i in 0..WIDTH {
             for j in 0..WIDTH {
@@ -928,7 +928,7 @@ mod tests {
         fn lookup_equals_naive(steps in prop::collection::vec(arb_changes(), 1..8)) {
             let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
             rt.block_on(async {
-                let store = MemoryStore::new();
+                let store = MemoryStore::with_repo(REPO);
                 let d = Deriver::new(REPO, &store, &store);
                 let mut ids = Vec::new();
                 let mut flats = Vec::new();

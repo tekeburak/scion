@@ -38,6 +38,8 @@ pub use refs::{RefState, is_allowed_ref_name};
 /// Error returned by store operations.
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
+    #[error("repository {0:?} does not exist (create it with `scn init`)")]
+    RepoNotFound(String),
     #[error("ref {0:?} already exists")]
     RefExists(String),
     #[error("ref {0:?} not found")]
@@ -64,6 +66,10 @@ pub type DerivedPointer = (String, u32, ChangesetId, Vec<u8>);
 /// Changesets, refs and derived-data pointers.
 #[async_trait]
 pub trait MetadataStore: Send + Sync {
+    /// Create repository `name`; a no-op if it exists. Every other write
+    /// fails with [`StoreError::RepoNotFound`] until this has run.
+    async fn create_repo(&self, name: &str) -> Result<()>;
+
     /// Store changesets in order. Idempotent: storing a changeset again is a
     /// no-op. Every parent must already exist or come earlier in `batch`.
     async fn put_changesets(&self, batch: &[Changeset]) -> Result<()>;

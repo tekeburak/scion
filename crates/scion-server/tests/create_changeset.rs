@@ -22,7 +22,7 @@ struct Server {
 }
 
 async fn start() -> Server {
-    let store = Arc::new(MemoryStore::new());
+    let store = Arc::new(MemoryStore::with_repo(REPO));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(scion_server::serve(listener, store.clone(), store.clone()));
@@ -168,4 +168,36 @@ async fn deletions_need_no_blob() {
     );
     let (_, tree) = s.create(&delete).await.unwrap();
     assert!(s.store.get_tree(tree).await.unwrap().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn only_the_repository_root_creates_a_repository() {
+    let mut s = start().await;
+    s.upload(b"one\n").await;
+    let mut typo = changeset(vec![], files(&[("a.txt", b"one\n")]), "root");
+    typo.repo = "tt".into();
+    assert_eq!(s.create(&typo).await, Err(Code::NotFound));
+    let move_typo = |expected_version| scion_proto::v1::MoveRefRequest {
+        repo: "tt".into(),
+        name: "main".into(),
+        target: typo.id().as_bytes().to_vec(),
+        expected_version,
+    };
+    for expected in [None, Some(0)] {
+        let err = s.control.move_ref(move_typo(expected)).await.unwrap_err();
+        assert_eq!(err.code(), Code::NotFound, "{expected:?}: {err}");
+    }
+    assert!(
+        s.store
+            .get_changeset("tt", typo.id())
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    let root = Changeset::repository_root("tt");
+    let (id, tree) = s.create(&root).await.unwrap();
+    assert_eq!((id, tree), (root.id(), scion_types::Tree::empty().id()));
+    assert_eq!(s.create(&root).await, Ok((id, tree)), "idempotent");
+    assert!(s.create(&typo).await.is_ok(), "the repository exists now");
 }

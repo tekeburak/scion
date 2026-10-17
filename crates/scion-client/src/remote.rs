@@ -275,6 +275,27 @@ impl Remote {
         changeset_id(&resp.id, "changeset id")
     }
 
+    /// Create server ref `name` at `target`; `ALREADY_EXISTS` if it exists.
+    /// Returns its version.
+    pub async fn create_ref(
+        &mut self,
+        repo: &str,
+        name: &str,
+        target: ChangesetId,
+    ) -> Result<u64, RemoteError> {
+        Ok(self
+            .control
+            .move_ref(MoveRefRequest {
+                repo: repo.to_owned(),
+                name: name.to_owned(),
+                target: target.as_bytes().to_vec(),
+                expected_version: None,
+            })
+            .await?
+            .into_inner()
+            .version)
+    }
+
     /// Move server ref `name` to `target` if it is still at
     /// `expected_version` and `target` descends from it; returns the new
     /// version.

@@ -19,6 +19,7 @@ async fn honest_import_verifies() {
     fixture(tmp.path());
     let git_repo = GitRepo::open(tmp.path()).unwrap();
     let store = MemoryStore::new();
+    common::init(&store, &store, REPO).await;
     import(&git_repo, "main", REPO, &store, &store)
         .await
         .unwrap();
@@ -59,6 +60,7 @@ async fn corrupted_mapping_is_reported_at_its_path() {
     fixture(dir);
     let git_repo = GitRepo::open(dir).unwrap();
     let store = MemoryStore::new();
+    common::init(&store, &store, REPO).await;
     let tip = import(&git_repo, "main", REPO, &store, &store)
         .await
         .unwrap()

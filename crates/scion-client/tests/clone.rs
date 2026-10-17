@@ -27,7 +27,7 @@ const FILES: &[(&str, &[u8], FileType)] = &[
 
 /// A server whose `main` holds [`FILES`]; returns its address and `main`.
 async fn serve() -> (String, ChangesetId) {
-    let store = Arc::new(MemoryStore::new());
+    let store = Arc::new(MemoryStore::with_repo(REPO));
     let mut changes = BTreeMap::new();
     for (path, content, kind) in FILES {
         store.put_blob(Bytes::from_static(content)).await.unwrap();

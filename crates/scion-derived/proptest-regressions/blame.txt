@@ -1,7 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc 432141dcce6b41b3d1c15b0a9e35392ec1e23aa6b9ea373dc8f3e7d563b03565 # shrinks to steps = [Step { deletes: [], inserts: [Index(0), Index(0)], trailing_newline: false, rename: false }, Step { deletes: [Index(9223372036854775808)], inserts: [], trailing_newline: false, rename: false }]

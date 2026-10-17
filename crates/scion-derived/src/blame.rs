@@ -553,7 +553,7 @@ mod tests {
 
     #[tokio::test]
     async fn new_edit_rename_and_readd() {
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let d = Deriver::new(REPO, &store, &store);
         let path = |p: &str| RepoPath::new(p).unwrap();
 
@@ -639,7 +639,7 @@ mod tests {
 
     #[tokio::test]
     async fn non_utf8_and_empty_files() {
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let d = Deriver::new(REPO, &store, &store);
         let mut ch = BTreeMap::new();
         ch.insert(
@@ -671,7 +671,7 @@ mod tests {
 
     #[tokio::test]
     async fn blame_node_holds_only_changed_files() {
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let mut ch = BTreeMap::new();
         for i in 0..200 {
             ch.insert(
@@ -712,7 +712,7 @@ mod tests {
     async fn cold_blame_reads_the_file_versions_not_the_history() {
         const N: usize = 900;
         const EVERY: usize = 3;
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let hot = RepoPath::new("src/hot.rs").unwrap();
         let mut ids: Vec<ChangesetId> = Vec::new();
         let mut versions = Vec::new();
@@ -819,7 +819,7 @@ mod tests {
         fn attribution_equals_model(steps in prop::collection::vec(arb_step(), 1..48)) {
             let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
             rt.block_on(async {
-                let store = MemoryStore::new();
+                let store = MemoryStore::with_repo(REPO);
                 let d = Deriver::new(REPO, &store, &store);
                 let mut model = Model::default();
                 let mut next_token = 0u32;

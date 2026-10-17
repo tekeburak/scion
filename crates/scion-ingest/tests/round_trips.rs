@@ -153,6 +153,10 @@ impl CountingMeta {
 
 #[async_trait]
 impl MetadataStore for CountingMeta {
+    async fn create_repo(&self, name: &str) -> scion_store::Result<()> {
+        self.tick();
+        self.inner.create_repo(name).await
+    }
     async fn put_changesets(&self, batch: &[Changeset]) -> scion_store::Result<()> {
         self.tick();
         self.inner.put_changesets(batch).await
@@ -247,6 +251,7 @@ async fn round_trips_per_commit_do_not_grow_with_history() {
         inner: MemoryStore::new(),
         calls: AtomicUsize::new(0),
     };
+    common::init(&meta, &objects, REPO).await;
 
     // Per-commit cost of importing up to `rev`, from where the last call
     // stopped. The fixed per-import calls (checkpoints, `main`) are a few,

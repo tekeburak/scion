@@ -288,7 +288,7 @@ mod tests {
 
     #[tokio::test]
     async fn root_changeset_builds_tree_and_empty_dirs_are_pruned() {
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let mut changes = BTreeMap::new();
         changes.insert(RepoPath::new("a/b/c.txt").unwrap(), tracked(b"1"));
         changes.insert(RepoPath::new("a/d.txt").unwrap(), tracked(b"2"));
@@ -329,7 +329,7 @@ mod tests {
         // rewrite exactly D+1 tree nodes (the directories on its path).
         const WIDTH: usize = 50;
         const DEPTH: usize = 4; // path has DEPTH directory components
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
 
         let mut changes = BTreeMap::new();
         for i in 0..WIDTH {
@@ -378,7 +378,7 @@ mod tests {
 
     #[tokio::test]
     async fn diamond_derives_each_ancestor_once_and_caches() {
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let single = |path: &str| {
             let mut changes = BTreeMap::new();
             changes.insert(RepoPath::new(path).unwrap(), tracked(path.as_bytes()));
@@ -424,7 +424,7 @@ mod tests {
 
     #[tokio::test]
     async fn missing_changeset_is_an_error() {
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let d = Deriver::new(REPO, &store, &store);
         let err = d
             .derive::<RootTree>(ChangesetId::from_bytes([9; 32]))
@@ -441,7 +441,7 @@ mod tests {
         fn incremental_equals_naive(steps in prop::collection::vec(arb_changes(), 1..8)) {
             let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
             rt.block_on(async {
-                let store = MemoryStore::new();
+                let store = MemoryStore::with_repo(REPO);
                 let d = Deriver::new(REPO, &store, &store);
                 let mut parent: Option<ChangesetId> = None;
                 let mut flat = Flat::new();

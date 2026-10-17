@@ -287,7 +287,7 @@ mod tests {
 
     #[tokio::test]
     async fn skips_point_at_powers_of_two() {
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let ids = chain(&store, 40, "c").await;
         let d = Deriver::new(REPO, &store, &store);
         let top = d.derive::<SkipList>(ids[39]).await.unwrap();
@@ -308,7 +308,7 @@ mod tests {
 
     #[tokio::test]
     async fn ancestry_reads_are_logarithmic_on_a_long_chain() {
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let ids = chain(&store, 1000, "c").await;
         // Build the index up front, then count what the queries read.
         Deriver::new(REPO, &store, &store)
@@ -357,7 +357,7 @@ mod tests {
 
     #[tokio::test]
     async fn unrelated_roots_have_no_merge_base() {
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let a = chain(&store, 3, "a").await;
         let b = chain(&store, 3, "b").await;
         let d = Deriver::new(REPO, &store, &store);
@@ -394,7 +394,7 @@ mod tests {
         fn queries_equal_naive(dag in arb_dag(), probes in prop::collection::vec((any::<prop::sample::Index>(), any::<prop::sample::Index>()), 1..6)) {
             let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
             rt.block_on(async {
-                let store = MemoryStore::new();
+                let store = MemoryStore::with_repo(REPO);
                 let d = Deriver::new(REPO, &store, &store);
                 let mut ids: Vec<ChangesetId> = Vec::new();
                 for (i, parents) in dag.iter().enumerate() {

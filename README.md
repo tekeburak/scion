@@ -30,8 +30,10 @@ deliberate deviations from the reference design (trees in S3, canonical BLAKE3, 
 
 - **Works today:** `scion-server` serves the object and control gRPC services over Postgres +
   S3 (`log`, `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`, `move_ref`), and the
-  `scn` CLI can `clone --sparse`, `status`, `log`, `diff`, `blame`, `add`, `commit` (an anonymous
-  head) and `land` (fast-forward `main`). CI runs that loop end to end on Postgres + S3.
+  `scn` CLI can `init` a repository, `clone --sparse`, `status`, `log`, `diff`, `blame`, `add`,
+  `commit` (an anonymous head) and `land` (fast-forward `main`). CI runs that loop, from `init`
+  on, end to end on Postgres + S3 with no git repository involved. Only `scn init` creates a
+  repository, so a misspelled name is refused by every write (6.16).
   Deriving a cold history holds a bounded number of changesets, and `scion-server backfill`
   derives a type for a repository's whole history ahead of the first request (6.15).
 - **Git import (Phase 6.1–6.8, 6.11 and 6.14 merged; [how-to](#import-a-git-repository)):**
@@ -47,9 +49,8 @@ deliberate deviations from the reference design (trees in S3, canonical BLAKE3, 
   (first call) and warm; the results are under [Benchmarks](#benchmarks). Clone, `status`,
   warm `log` and `blame` and commit + `land` run at or below git's time; cold, a path `log`
   takes about 7× git's and a `blame` about 3.5×.
-- **Next:** the steps that make the MVP usable by a team on one machine: `scn init` (6.16),
-  `scn update` and `scn checkout` (6.17), idempotent writes and a compose service for the server
-  (6.18). After that: change requests and the land worker (Phase 5), IAM (Phase 7), release
+- **Next:** the steps that make the MVP usable by a team on one machine: `scn update` and
+  `scn checkout` (6.17), idempotent writes and a compose service for the server (6.18). After that: change requests and the land worker (Phase 5), IAM (Phase 7), release
   binaries and a quickstart (Phase 9), the cache and daemon tiers (Phase 4) and virtualized
   checkouts (Phase 8).
 
@@ -68,7 +69,8 @@ It is not affiliated with or endorsed by Anthropic. The name may change before t
 
 `scion-ingest` copies a git history into Scion: one changeset per commit, file changes
 against the first parent, renames and copies kept for `blame`, the git sha kept in the
-changeset's `extra`, and `main` pointed at the imported tip. The rules, and what it refuses,
+changeset's `extra`, and `main` pointed at the imported tip. It imports into a repository
+created with `scn init` and never creates one. The rules, and what it refuses,
 are in [Ingestion](docs/ARCHITECTURE.md#ingestion). On the local compose stack, from a checkout
 of this repository:
 
@@ -93,11 +95,13 @@ git -C demo add -A && git -C demo commit -qm "add notes"
 git -C demo mv notes.txt README.txt && printf 'four\n' >>demo/README.txt
 git -C demo commit -qam "rename notes, add a line"
 
+SCION_LISTEN=127.0.0.1:7420 scion-server &   # prints "listening" once it accepts clones
+sleep 2
+scn init http://127.0.0.1:7420 demo  # an empty repository; import never creates one
+
 scion-ingest import demo demo main   # git dir, Scion repository, git revision
 scion-ingest verify demo demo        # every imported tree against git ls-tree
 
-SCION_LISTEN=127.0.0.1:7420 scion-server &   # prints "listening" once it accepts clones
-sleep 2
 scn clone http://127.0.0.1:7420 demo demo-scn
 cd demo-scn && scn log && scn blame README.txt   # "one" to "three" blame to "add notes"
 ```

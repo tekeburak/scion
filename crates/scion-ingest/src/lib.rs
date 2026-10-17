@@ -20,7 +20,8 @@
 //! [`verify`] checks an import against git, tree by tree.
 //!
 //! [`import`] writes the result to the stores through the same path as the
-//! `CreateChangeset` RPC, then points `main` at the imported tip.
+//! `CreateChangeset` RPC, then points `main` at the imported tip. The
+//! repository must exist (`scn init`); an import never creates one.
 
 #![forbid(unsafe_code)]
 
@@ -64,6 +65,8 @@ pub enum IngestError {
     },
     #[error("commit {commit}: parent {parent} has not been imported")]
     MissingParent { commit: ObjectId, parent: ObjectId },
+    #[error("repository {0:?} has no {MAIN_REF}: create it with `scn init <server> {0}` first")]
+    NoRepository(String),
     #[error("storing commit {0}: {1}")]
     Store(ObjectId, String),
     #[error("moving {MAIN_REF} to commit {0}: {1}")]

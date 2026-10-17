@@ -45,6 +45,9 @@ pub struct Imported {
 /// against an updated repository therefore imports only the new commits.
 /// If `main` already points at a commit that `rev` does not contain (the
 /// upstream history was rewritten), nothing is written.
+///
+/// `repo` must have been created by `scn init`; while `main` is still at the
+/// empty [`Changeset::repository_root`], the import replaces it.
 pub async fn import(
     git: &GitRepo,
     rev: &str,
@@ -60,15 +63,18 @@ pub async fn import(
     let store_err =
         |id: ObjectId| move |e: scion_store::StoreError| IngestError::Store(id, e.to_string());
 
-    // Refuse a rewritten upstream before writing anything: `main` must be at
-    // a commit this revision still contains.
+    // Refuse an unknown repository and a rewritten upstream before writing
+    // anything: `main` must be at the empty root `scn init` created or at a
+    // commit this revision still contains.
     let current = meta
         .get_ref(repo, MAIN_REF)
         .await
-        .map_err(|e| IngestError::Ref(tip_commit, e.to_string()))?;
-    if let Some(cur) = &current {
+        .map_err(|e| IngestError::Ref(tip_commit, e.to_string()))?
+        .ok_or_else(|| IngestError::NoRepository(repo.to_owned()))?;
+    let empty = current.target == Changeset::repository_root(repo).id();
+    if !empty {
         let main_sha = meta
-            .get_changeset(repo, cur.target)
+            .get_changeset(repo, current.target)
             .await
             .map_err(store_err(tip_commit))?
             .and_then(|cs| cs.extra.get(GIT_SHA).cloned())
@@ -76,7 +82,7 @@ pub async fn import(
         if !main_sha.is_some_and(|sha| commits.iter().any(|c| c.id == sha)) {
             return Err(IngestError::Diverged {
                 main: main_sha.map_or_else(
-                    || format!("changeset {} (not imported from git)", cur.target),
+                    || format!("changeset {} (not imported from git)", current.target),
                     |sha| format!("git commit {sha}"),
                 ),
                 rev: rev.to_owned(),
@@ -134,17 +140,16 @@ pub async fn import(
     let created = created?;
 
     let tip = imported[&tip_commit];
-    if current.as_ref().is_none_or(|c| c.target != tip) {
-        scion_server::move_ref(
-            meta,
-            objects,
-            repo,
-            MAIN_REF,
-            tip,
-            current.map(|c| c.version),
-        )
-        .await
-        .map_err(|e| IngestError::Ref(tip_commit, e.message().to_owned()))?;
+    if empty {
+        // The imported history does not descend from the empty root, so this
+        // is a plain compare-and-swap rather than a fast-forward.
+        meta.move_ref(repo, MAIN_REF, current.version, tip)
+            .await
+            .map_err(|e| IngestError::Ref(tip_commit, e.to_string()))?;
+    } else if current.target != tip {
+        scion_server::move_ref(meta, objects, repo, MAIN_REF, tip, Some(current.version))
+            .await
+            .map_err(|e| IngestError::Ref(tip_commit, e.message().to_owned()))?;
     }
     Ok(Imported { tip, created })
 }

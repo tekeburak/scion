@@ -43,8 +43,38 @@ fn changeset(parents: Vec<ChangesetId>, message: &str) -> Changeset {
     }
 }
 
+/// Only [`MetadataStore::create_repo`] creates a repository; every other
+/// write names an existing one.
+pub async fn repos<S: MetadataStore>(s: &S) {
+    let missing =
+        |r: Result<_, StoreError>| matches!(r, Err(StoreError::RepoNotFound(n)) if n == REPO);
+    let root = changeset(vec![], "root");
+    let id = root.id();
+    assert!(missing(s.put_changeset(&root).await.map(|_| ())));
+    assert!(missing(s.create_ref(REPO, "main", id).await.map(|_| ())));
+    assert!(missing(s.move_ref(REPO, "main", 0, id).await.map(|_| ())));
+    assert!(missing(
+        s.put_derived(REPO, "root_tree", 1, id, vec![1]).await
+    ));
+    assert!(missing(
+        s.put_ingest_checkpoints(REPO, &[(vec![0xaa; 20], id)])
+            .await
+    ));
+    assert!(s.get_changeset(REPO, id).await.unwrap().is_none());
+
+    s.create_repo(REPO).await.unwrap();
+    s.create_repo(REPO).await.unwrap();
+    s.put_changeset(&root).await.unwrap();
+    s.create_ref(REPO, "main", id).await.unwrap();
+    assert!(matches!(
+        s.move_ref(REPO, "release/1", 0, id).await,
+        Err(StoreError::RefNotFound(_))
+    ));
+}
+
 /// Changesets are content-addressed, idempotent, and track generation.
 pub async fn changesets<S: MetadataStore>(s: &S) {
+    s.create_repo(REPO).await.unwrap();
     let root = changeset(vec![], "root");
     let root_id = s.put_changeset(&root).await.unwrap();
     assert_eq!(root_id, root.id());
@@ -107,6 +137,7 @@ pub async fn changesets<S: MetadataStore>(s: &S) {
 
 /// Refs: policy, create-once, CAS semantics, listing.
 pub async fn refs<S: MetadataStore>(s: &S) {
+    s.create_repo(REPO).await.unwrap();
     let a = ChangesetId::from_bytes([1; 32]);
     let b = ChangesetId::from_bytes([2; 32]);
 
@@ -154,6 +185,7 @@ pub async fn refs<S: MetadataStore>(s: &S) {
 
 /// Derived-data pointers are keyed by (repo, type, version, changeset).
 pub async fn derived<S: MetadataStore>(s: &S) {
+    s.create_repo(REPO).await.unwrap();
     let cs = ChangesetId::from_bytes([3; 32]);
     assert!(
         s.get_derived(REPO, "root_tree", 1, cs)
@@ -217,6 +249,7 @@ pub async fn derived<S: MetadataStore>(s: &S) {
 /// Ingest checkpoints are per repository and idempotent: the first record of
 /// a git sha wins.
 pub async fn checkpoints<S: MetadataStore>(s: &S) {
+    s.create_repo(REPO).await.unwrap();
     assert_eq!(s.ingest_checkpoints(REPO).await.unwrap(), vec![]);
     let (a, b) = (
         ChangesetId::from_bytes([1; 32]),
@@ -287,6 +320,10 @@ macro_rules! conformance_tests {
             use super::*;
 
             #[tokio::test]
+            async fn repos() {
+                $crate::conformance::repos(&$ctor.await).await;
+            }
+            #[tokio::test]
             async fn changesets() {
                 $crate::conformance::changesets(&$ctor.await).await;
             }
@@ -319,6 +356,10 @@ macro_rules! metadata_conformance_tests {
             #[allow(unused_imports)]
             use super::*;
 
+            #[tokio::test]
+            async fn repos() {
+                $crate::conformance::repos(&$ctor.await).await;
+            }
             #[tokio::test]
             async fn changesets() {
                 $crate::conformance::changesets(&$ctor.await).await;

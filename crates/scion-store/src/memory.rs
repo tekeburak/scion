@@ -1,6 +1,6 @@
 //! In-memory store, for tests and the simulator.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::RwLock;
 
 use async_trait::async_trait;
@@ -13,6 +13,7 @@ use crate::{
 
 #[derive(Debug, Default)]
 struct Metadata {
+    repos: HashSet<String>,
     changesets: HashMap<(String, ChangesetId), (Changeset, u64)>,
     refs: HashMap<String, BTreeMap<String, RefState>>,
     derived: HashMap<(String, String, u32, ChangesetId), Vec<u8>>,
@@ -38,12 +39,44 @@ impl MemoryStore {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// A store holding only repository `repo`, with nothing in it.
+    #[must_use]
+    pub fn with_repo(repo: &str) -> Self {
+        let store = Self::default();
+        store
+            .meta
+            .write()
+            .expect("poisoned")
+            .repos
+            .insert(repo.to_owned());
+        store
+    }
+}
+
+impl Metadata {
+    fn check_repo(&self, repo: &str) -> Result<()> {
+        if self.repos.contains(repo) {
+            Ok(())
+        } else {
+            Err(StoreError::RepoNotFound(repo.to_owned()))
+        }
+    }
 }
 
 #[async_trait]
 impl MetadataStore for MemoryStore {
+    async fn create_repo(&self, name: &str) -> Result<()> {
+        let mut m = self.meta.write().expect("poisoned");
+        m.repos.insert(name.to_owned());
+        Ok(())
+    }
+
     async fn put_changesets(&self, batch: &[Changeset]) -> Result<()> {
         let mut m = self.meta.write().expect("poisoned");
+        for cs in batch {
+            m.check_repo(&cs.repo)?;
+        }
         for cs in batch {
             let id = cs.id();
             let key = (cs.repo.clone(), id);
@@ -79,6 +112,7 @@ impl MetadataStore for MemoryStore {
             return Err(StoreError::RefNameNotAllowed(name.to_owned()));
         }
         let mut m = self.meta.write().expect("poisoned");
+        m.check_repo(repo)?;
         let refs = m.refs.entry(repo.to_owned()).or_default();
         if refs.contains_key(name) {
             return Err(StoreError::RefExists(name.to_owned()));
@@ -101,6 +135,7 @@ impl MetadataStore for MemoryStore {
         new_target: ChangesetId,
     ) -> Result<RefState> {
         let mut m = self.meta.write().expect("poisoned");
+        m.check_repo(repo)?;
         let state = m
             .refs
             .get_mut(repo)
@@ -127,6 +162,7 @@ impl MetadataStore for MemoryStore {
 
     async fn put_derived_many(&self, repo: &str, pointers: Vec<DerivedPointer>) -> Result<()> {
         let mut m = self.meta.write().expect("poisoned");
+        m.check_repo(repo)?;
         for (ty, version, cs, pointer) in pointers {
             m.derived
                 .insert((repo.to_owned(), ty, version, cs), pointer);
@@ -153,6 +189,7 @@ impl MetadataStore for MemoryStore {
         done: &[(Vec<u8>, ChangesetId)],
     ) -> Result<()> {
         let mut m = self.meta.write().expect("poisoned");
+        m.check_repo(repo)?;
         let checkpoints = m.checkpoints.entry(repo.to_owned()).or_default();
         for (sha, cs) in done {
             checkpoints.entry(sha.clone()).or_insert(*cs);

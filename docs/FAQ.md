@@ -51,12 +51,13 @@ The README status section tracks this.
 
 ## Can I bring an existing git repository?
 
-Yes, one way. `scion-ingest import <git-dir> <repo> [<rev>]` is an operator tool that writes
+Yes, one way. Create the repository with `scn init <server> <repo>`, then run
+`scion-ingest import <git-dir> <repo> [<rev>]`, an operator tool that writes
 straight to Postgres and the object store (`DATABASE_URL`, `AWS_*`) through the same create
 path as `CreateChangeset`. Each commit reachable from `<rev>` (default `HEAD`) becomes one
 changeset with its parents, its files changed against the first parent, renames and copies as
 `copy_from` (so `scn blame` follows a moved file), and the git sha in `extra["git-sha"]`. Only
-`main` is created or moved. An interrupted import resumes from its checkpoints, a re-run
+`main` is moved. An interrupted import resumes from its checkpoints, a re-run
 imports only new commits, and an upstream history rewrite is refused. Submodules, paths Scion
 cannot represent and blobs over the per-blob limit stop the import with the commit and path.
 `scion-ingest verify <git-dir> <repo> [--sample <n>]` compares the imported trees with
@@ -103,9 +104,6 @@ file version per version of every file the last change touched.
 Beyond missing authentication and cache tiers, these are the gaps a first user hits, each with
 the roadmap step that closes it:
 
-- **No `scn init`.** A repository comes into being only through `scion-ingest import`, and any
-  store write to an unknown repository name creates it, so a misspelled name silently starts a
-  new repository. Explicit creation is Phase 6.16.
 - **No `scn update` or `scn checkout`.** `land` only fast-forwards `main`, so when two clones
   commit, the second `land` fails with "not a fast-forward" and the only way forward is a fresh
   clone. Phase 6.17 adds both commands.

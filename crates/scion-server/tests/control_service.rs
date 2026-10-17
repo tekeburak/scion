@@ -54,7 +54,7 @@ async fn commit(
 }
 
 async fn start() -> Repo {
-    let store = Arc::new(MemoryStore::new());
+    let store = Arc::new(MemoryStore::with_repo(REPO));
     let root = commit(&store, vec![], &[("a.txt", b"1\n2\n")], "root").await;
     let left = commit(
         &store,

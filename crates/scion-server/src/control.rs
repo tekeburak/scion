@@ -166,6 +166,12 @@ pub async fn create_changesets(
         )));
     }
 
+    // `scn init`: the repository's root is the one changeset that may name a
+    // repository that does not exist yet, and storing it creates one.
+    if batch[0] == Changeset::repository_root(repo) {
+        meta.create_repo(repo).await.map_err(store_status)?;
+    }
+
     // Every blob must be uploaded first, or blame and checkout would find
     // a hole later.
     let blobs: Vec<BlobId> = batch

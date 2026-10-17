@@ -167,6 +167,18 @@ Scion keeps them in the object store. Reasons:
 The cost is one extra object fetch to resolve a changeset's root tree the first time; in practice
 it is absorbed by the cache tiers.
 
+## Repositories
+
+A repository is a name on the server (the `repos` table; `repo` in every other table and in
+every changeset). It exists once its **root changeset** has been stored: the changeset
+`Changeset::repository_root(repo)` returns, with no parents, author `scion` with an empty email,
+author date `0 +0000`, no committer, message `Create repository`, no file changes and no
+`extra`. It depends only on the name, so every client builds the same one. `scn init <server>
+<repo>` sends it through `CreateChangeset`, which is the only write that creates a repository,
+and then creates `main` at it through `MoveRef`. Every other write naming a repository that does
+not exist, from a client or from `scion-ingest`, fails with `NOT_FOUND`, so a misspelled name
+never starts a new repository.
+
 ## Refs and anonymous heads
 
 Only two kinds of ref exist on the server: `main` and `release/<name>`. Creating or moving them

@@ -69,6 +69,7 @@ async fn per_commit_cost_does_not_grow_with_history() {
     generate(tmp.path());
     let git = GitRepo::open(tmp.path()).unwrap();
     let store = MemoryStore::new();
+    common::init(&store, &store, REPO).await;
 
     let first = timed(&git, &format!("main~{}", COMMITS - WINDOW), &store).await;
     timed(&git, &format!("main~{WINDOW}"), &store).await;

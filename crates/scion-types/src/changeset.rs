@@ -122,6 +122,24 @@ impl Changeset {
         self.parents.first().copied()
     }
 
+    /// The empty root changeset `scn init` creates a repository with. It
+    /// depends only on `repo`, so every client builds the same one; storing
+    /// it is the only write that creates a repository.
+    #[must_use]
+    pub fn repository_root(repo: &str) -> Self {
+        Self {
+            repo: repo.to_owned(),
+            parents: Vec::new(),
+            author: Identity::new("scion", ""),
+            author_date: Timestamp::new(0, 0),
+            committer: None,
+            committer_date: None,
+            message: "Create repository".to_owned(),
+            file_changes: BTreeMap::new(),
+            extra: BTreeMap::new(),
+        }
+    }
+
     /// Compute the content-addressed id: `blake3(canonical(self))`.
     #[must_use]
     pub fn id(&self) -> ChangesetId {

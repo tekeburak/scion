@@ -35,7 +35,7 @@ async fn underived(store: &MemoryStore) -> Vec<ChangesetId> {
 
 #[tokio::test]
 async fn derives_every_changeset_reachable_from_the_refs() {
-    let store = MemoryStore::new();
+    let store = MemoryStore::with_repo(REPO);
     let ids = underived(&store).await;
     let d = Deriver::new(REPO, &store, &store);
     assert!(
@@ -77,7 +77,7 @@ async fn derives_every_changeset_reachable_from_the_refs() {
 
 #[tokio::test]
 async fn refuses_an_unknown_type_or_repository() {
-    let store = MemoryStore::new();
+    let store = MemoryStore::with_repo(REPO);
     underived(&store).await;
     let err = backfill(REPO, "blame", &store, &store).await.unwrap_err();
     assert!(err.contains("root_tree, path_history, skip_list"), "{err}");

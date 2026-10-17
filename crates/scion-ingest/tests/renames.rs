@@ -88,6 +88,7 @@ async fn blame_follows_renames_and_copies() {
     commit(dir, "c4: copy");
 
     let store = MemoryStore::new();
+    common::init(&store, &store, REPO).await;
     let tip = import(&GitRepo::open(dir).unwrap(), "main", REPO, &store, &store)
         .await
         .unwrap()

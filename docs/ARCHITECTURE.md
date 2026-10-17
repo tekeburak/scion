@@ -186,7 +186,8 @@ protocol. Like `scion-server` it is an operator tool that works on Postgres and 
 store directly (`DATABASE_URL`, `AWS_*`) and creates changesets through the same code path as
 `CreateChangeset`, so eager derivation and every server-side check apply unchanged.
 `scion-ingest import <git-dir> <repo> [<rev>]` imports every commit reachable from `<rev>`
-(default `HEAD`), parents before children; `scion-ingest verify <git-dir> <repo> [--sample <n>]`
+(default `HEAD`), parents before children, into a repository created with `scn init`; it never
+creates one, and an unknown name is refused before anything is uploaded; `scion-ingest verify <git-dir> <repo> [--sample <n>]`
 compares each imported tree with the git tree by path, file kind and content and names the
 first path that differs.
 
@@ -198,7 +199,10 @@ parent, so `blame` follows renames and copies. Git modes map to `FileType` (regu
 executable, symlink). Author and committer keep their own dates and UTC offsets; names, emails
 and the message are read as UTF-8 with invalid bytes replaced. The commit's raw sha goes into
 `extra["git-sha"]`: provenance, not a field (invariant 4). The only ref an import creates or
-moves is `main` (invariant 6), by compare-and-swap once every changeset exists.
+moves is `main` (invariant 6), by compare-and-swap once every changeset exists. While `main`
+is still at the empty root `scn init` created, the first import replaces it rather than
+fast-forwarding: a git root commit has no parent, so the imported history does not descend
+from that root, which stays stored like every changeset.
 
 **Rejected.** A submodule (gitlink) entry, a path that is not a valid `RepoPath` (not UTF-8,
 or with a `.` or `..` component) and a blob over the server's per-blob limit (64 MiB)

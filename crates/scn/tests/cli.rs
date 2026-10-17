@@ -23,7 +23,7 @@ fn tracked(content: &[u8]) -> FileChange {
 /// A server whose `main` is `c1` on top of `c0`; returns its address and both
 /// changesets.
 async fn serve() -> (String, ChangesetId, ChangesetId) {
-    let store = Arc::new(MemoryStore::new());
+    let store = Arc::new(MemoryStore::with_repo(REPO));
     let mut c0 = BTreeMap::new();
     for (path, content) in [
         ("README", &b"one\ntwo\n"[..]),
@@ -275,4 +275,43 @@ async fn commit_needs_an_author() {
         .unwrap();
     assert!(!out.status.success());
     assert!(String::from_utf8_lossy(&out.stderr).contains("--author"));
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn init_clone_commit_land_without_git() {
+    let store = Arc::new(MemoryStore::new());
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let server = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(scion_server::serve(listener, store.clone(), store));
+    let dir = tempfile::tempdir().unwrap();
+
+    let out = scn(dir.path(), &["init", &server, "fresh"]);
+    assert!(
+        out.starts_with(&format!("created fresh on {server} (main at ")),
+        "{out}"
+    );
+    let (ok, _, err) = scn_try(dir.path(), &["init", &server, "fresh"]);
+    assert!(!ok && err.contains("fresh already exists"), "{err}");
+
+    let out = scn(dir.path(), &["clone", &server, "fresh"]);
+    assert!(out.ends_with("(0 files)\n"), "{out}");
+    let wc = dir.path().join("fresh");
+    assert_eq!(scn(&wc, &["status"]), "");
+
+    std::fs::write(wc.join("hello.txt"), b"hello\n").unwrap();
+    scn(&wc, &["add", "hello.txt"]);
+    let (ok, out, err) = scn_try(&wc, &["commit", "-m", "first file"]);
+    assert!(ok, "{err}");
+    let c1 = id_after(&out, "committed ");
+    assert!(scn(&wc, &["land"]).starts_with(&format!("landed {c1} on main")));
+    let out = scn(dir.path(), &["clone", &server, "fresh", "again"]);
+    assert_eq!(id_after(&out, "at "), c1);
+    assert_eq!(
+        std::fs::read(dir.path().join("again/hello.txt")).unwrap(),
+        b"hello\n"
+    );
+
+    // A misspelled name reaches no repository.
+    let (ok, _, err) = scn_try(dir.path(), &["clone", &server, "frehs"]);
+    assert!(!ok && err.contains("frehs"), "{err}");
 }

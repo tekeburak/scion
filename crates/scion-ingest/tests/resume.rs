@@ -7,7 +7,7 @@ use bytes::Bytes;
 use common::fixture;
 use scion_ingest::{GitRepo, MAIN_REF, import};
 use scion_store::{MemoryStore, MetadataStore, ObjectStore, StoreError};
-use scion_types::{BlobId, Tree, TreeId};
+use scion_types::{BlobId, Changeset, Tree, TreeId};
 
 const REPO: &str = "mono";
 
@@ -47,12 +47,14 @@ async fn stopped_import_resumes_with_the_remaining_commits() {
     let git = GitRepo::open(tmp.path()).unwrap();
 
     let reference = MemoryStore::new();
+    common::init(&reference, &reference, REPO).await;
     let uninterrupted = import(&git, "main", REPO, &reference, &reference)
         .await
         .unwrap();
 
     // Parents first, the third commit is "file to directory": die there.
     let store = MemoryStore::new();
+    common::init(&store, &store, REPO).await;
     let dying = DiesOn {
         inner: &store,
         contents: b"// a file became a directory\n",
@@ -60,7 +62,11 @@ async fn stopped_import_resumes_with_the_remaining_commits() {
     assert!(import(&git, "main", REPO, &store, &dying).await.is_err());
     let done = store.ingest_checkpoints(REPO).await.unwrap().len();
     assert_eq!(done, 2);
-    assert!(store.get_ref(REPO, MAIN_REF).await.unwrap().is_none());
+    assert_eq!(
+        store.get_ref(REPO, MAIN_REF).await.unwrap().unwrap().target,
+        Changeset::repository_root(REPO).id(),
+        "main is still at the empty root"
+    );
 
     let resumed = import(&git, "main", REPO, &store, &store).await.unwrap();
     assert_eq!(resumed.tip, uninterrupted.tip);

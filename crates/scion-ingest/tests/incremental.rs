@@ -16,6 +16,7 @@ async fn staged_import_equals_one_import() {
     let git_repo = GitRepo::open(tmp.path()).unwrap();
 
     let staged = MemoryStore::new();
+    common::init(&staged, &staged, REPO).await;
     let x = import(&git_repo, "main~1", REPO, &staged, &staged)
         .await
         .unwrap();
@@ -29,6 +30,7 @@ async fn staged_import_equals_one_import() {
     );
 
     let once = MemoryStore::new();
+    common::init(&once, &once, REPO).await;
     let all = import(&git_repo, "main", REPO, &once, &once).await.unwrap();
     assert_eq!(y.tip, all.tip);
     assert_eq!(
@@ -53,6 +55,7 @@ async fn rewritten_upstream_is_refused_and_nothing_changes() {
     let dir = tmp.path();
     fixture(dir);
     let store = MemoryStore::new();
+    common::init(&store, &store, REPO).await;
     let first = import(&GitRepo::open(dir).unwrap(), "main", REPO, &store, &store)
         .await
         .unwrap();

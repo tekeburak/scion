@@ -267,7 +267,7 @@ mod tests {
     #[tokio::test]
     async fn cold_derivation_holds_a_constant_number_of_changesets() {
         const N: usize = 20_000;
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let ids = long_history(&store, N).await;
         let tip = ids[N - 1];
         let counting = CountingMeta::new(&store);
@@ -305,7 +305,7 @@ mod tests {
     async fn values_are_kept_until_every_child_has_read_them() {
         // root ← a ← c, root ← b ← c (a diamond), then d ← c: `root` is
         // read by two children, `c` by one.
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let node = |parents: Vec<ChangesetId>, tag: &str| changeset(parents, BTreeMap::new(), tag);
         let root = store.put_changeset(&node(vec![], "root")).await.unwrap();
         let a = store.put_changeset(&node(vec![root], "a")).await.unwrap();

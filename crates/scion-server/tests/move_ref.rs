@@ -59,7 +59,7 @@ async fn move_ref(
 
 #[tokio::test]
 async fn creates_then_fast_forwards() {
-    let store = Arc::new(MemoryStore::new());
+    let store = Arc::new(MemoryStore::with_repo(REPO));
     let root = commit(&store, vec![], "root").await;
     let a = commit(&store, vec![root], "a").await;
     let b = commit(&store, vec![a], "b").await;
@@ -96,7 +96,7 @@ async fn creates_then_fast_forwards() {
 
 #[tokio::test]
 async fn rejects_non_fast_forward_and_stale_versions() {
-    let store = Arc::new(MemoryStore::new());
+    let store = Arc::new(MemoryStore::with_repo(REPO));
     let root = commit(&store, vec![], "root").await;
     let left = commit(&store, vec![root], "left").await;
     let right = commit(&store, vec![root], "right").await;
@@ -129,7 +129,7 @@ async fn rejects_non_fast_forward_and_stale_versions() {
 
 #[tokio::test]
 async fn rejects_bad_names_unknown_refs_and_unknown_targets() {
-    let store = Arc::new(MemoryStore::new());
+    let store = Arc::new(MemoryStore::with_repo(REPO));
     let root = commit(&store, vec![], "root").await;
     let mut c = start(store.clone()).await;
 

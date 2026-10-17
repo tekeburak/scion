@@ -196,7 +196,7 @@ async fn import(remote: &Remote, root: &Path, files: &Files) -> (ChangesetId, u6
 }
 
 async fn serve() -> String {
-    let store = Arc::new(MemoryStore::new());
+    let store = Arc::new(MemoryStore::with_repo(REPO));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(scion_server::serve(listener, store.clone(), store));

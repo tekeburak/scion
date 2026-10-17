@@ -80,3 +80,18 @@ pub fn fixture(dir: &Path) {
     commit(dir, "file to directory");
     git(dir, &["merge", "-q", "--no-ff", "-m", "merge side", "side"]);
 }
+
+/// Create `repo` as `scn init` does: its empty root, then `main` there.
+pub async fn init(
+    meta: &dyn scion_store::MetadataStore,
+    objects: &dyn scion_store::ObjectStore,
+    repo: &str,
+) {
+    let root = scion_types::Changeset::repository_root(repo);
+    scion_server::create_changesets(meta, objects, std::slice::from_ref(&root))
+        .await
+        .unwrap();
+    scion_server::move_ref(meta, objects, repo, "main", root.id(), None)
+        .await
+        .unwrap();
+}

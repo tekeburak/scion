@@ -425,7 +425,7 @@ mod tests {
 
     #[tokio::test]
     async fn merge_combines_disjoint_edits_and_line_merges_shared_files() {
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let d = Deriver::new(REPO, &store, &store);
         let mut c = BTreeMap::new();
         c.insert(
@@ -470,7 +470,7 @@ mod tests {
 
     #[tokio::test]
     async fn merge_reports_each_conflict_kind() {
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let d = Deriver::new(REPO, &store, &store);
         let mut c = BTreeMap::new();
         c.insert(p("content"), content_change(&store, b"x\n").await);
@@ -544,7 +544,7 @@ mod tests {
 
     #[tokio::test]
     async fn rebase_replays_changes_and_keeps_copy_from() {
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let d = Deriver::new(REPO, &store, &store);
         let mut c = BTreeMap::new();
         c.insert(p("a"), content_change(&store, b"1\n2\n3\n").await);
@@ -603,7 +603,7 @@ mod tests {
         ) {
             let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
             rt.block_on(async {
-                let store = MemoryStore::new();
+                let store = MemoryStore::with_repo(REPO);
                 let d = Deriver::new(REPO, &store, &store);
                 // Blobs must exist for line merges; tracked() only hashes.
                 let materialise_blobs = |changes: &BTreeMap<RepoPath, FileChange>| {

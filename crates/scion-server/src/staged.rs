@@ -152,6 +152,10 @@ impl ObjectStore for Staged<'_> {
 
 #[async_trait]
 impl MetadataStore for Staged<'_> {
+    async fn create_repo(&self, name: &str) -> Result<()> {
+        self.meta.create_repo(name).await
+    }
+
     async fn put_changesets(&self, batch: &[Changeset]) -> Result<()> {
         self.meta.put_changesets(batch).await
     }

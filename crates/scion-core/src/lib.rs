@@ -359,7 +359,7 @@ mod tests {
 
     #[tokio::test]
     async fn diff_reports_files_not_directories_and_handles_type_changes() {
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let d = Deriver::new(REPO, &store, &store);
         let p = |s: &str| RepoPath::new(s).unwrap();
 
@@ -412,7 +412,7 @@ mod tests {
 
     #[tokio::test]
     async fn diff_skips_equal_subtrees() {
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let mut c = BTreeMap::new();
         for i in 0..50 {
             for j in 0..20 {
@@ -449,7 +449,7 @@ mod tests {
 
     #[tokio::test]
     async fn log_follows_first_parent_without_loading_changesets() {
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let mut ids = Vec::new();
         for i in 0..20 {
             let parents = ids.last().copied().into_iter().collect();
@@ -486,7 +486,7 @@ mod tests {
 
     #[tokio::test]
     async fn path_log_reads_proportional_to_changes_of_that_path() {
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let p = RepoPath::new("hot/file").unwrap();
         let mut ids = Vec::new();
         let mut touched = Vec::new();
@@ -533,7 +533,7 @@ mod tests {
 
     #[tokio::test]
     async fn path_log_over_anchors_equals_every_change() {
-        let store = MemoryStore::new();
+        let store = MemoryStore::with_repo(REPO);
         let p = RepoPath::new("hot/file").unwrap();
         let mut ids = Vec::new();
         let mut touched = Vec::new();
@@ -590,7 +590,7 @@ mod tests {
         fn diff_and_path_log_equal_naive(steps in prop::collection::vec(arb_changes(), 1..8)) {
             let rt = tokio::runtime::Builder::new_current_thread().build().unwrap();
             rt.block_on(async {
-                let store = MemoryStore::new();
+                let store = MemoryStore::with_repo(REPO);
                 let d = Deriver::new(REPO, &store, &store);
                 let mut ids = Vec::new();
                 let mut flats = Vec::new();

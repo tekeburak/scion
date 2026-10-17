@@ -113,19 +113,16 @@ impl PostgresStore {
         Ok(id.map(|(id,)| id))
     }
 
-    /// Look up a repository id, creating the repository if needed. A
-    /// repository row is never deleted, so its id is memoised.
-    async fn ensure_repo(&self, name: &str) -> Result<i64> {
+    /// The id of repository `name`; [`StoreError::RepoNotFound`] if it was
+    /// never created. A repository row is never deleted, so its id is
+    /// memoised.
+    async fn repo(&self, name: &str) -> Result<i64> {
         if let Some(id) = self.repo_ids.get(&name.to_owned()).await {
             return Ok(id);
         }
-        sqlx::query("INSERT INTO repos (name) VALUES ($1) ON CONFLICT (name) DO NOTHING")
-            .bind(name)
-            .execute(&self.pool)
-            .await?;
         let id = Self::repo_id(&self.pool, name)
             .await?
-            .ok_or_else(|| StoreError::Corrupt(format!("repo {name:?} vanished after insert")))?;
+            .ok_or_else(|| StoreError::RepoNotFound(name.to_owned()))?;
         self.repo_ids.insert(name.to_owned(), id, name.len() + 8);
         Ok(id)
     }
@@ -276,11 +273,19 @@ impl<'a> FileChangeColumns<'a> {
 
 #[async_trait]
 impl MetadataStore for PostgresStore {
+    async fn create_repo(&self, name: &str) -> Result<()> {
+        sqlx::query("INSERT INTO repos (name) VALUES ($1) ON CONFLICT (name) DO NOTHING")
+            .bind(name)
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
     async fn put_changesets(&self, batch: &[Changeset]) -> Result<()> {
         let mut repos: HashMap<&str, i64> = HashMap::new();
         for cs in batch {
             if !repos.contains_key(cs.repo.as_str()) {
-                repos.insert(&cs.repo, self.ensure_repo(&cs.repo).await?);
+                repos.insert(&cs.repo, self.repo(&cs.repo).await?);
             }
         }
         let ids: Vec<(i64, ChangesetId)> = batch
@@ -429,7 +434,7 @@ impl MetadataStore for PostgresStore {
         if !is_allowed_ref_name(name) {
             return Err(StoreError::RefNameNotAllowed(name.to_owned()));
         }
-        let repo_id = self.ensure_repo(repo).await?;
+        let repo_id = self.repo(repo).await?;
         let inserted = sqlx::query(
             "INSERT INTO refs (repo, name, target, version) VALUES ($1, $2, $3, 0) \
              ON CONFLICT (repo, name) DO NOTHING",
@@ -491,7 +496,10 @@ impl MetadataStore for PostgresStore {
             });
         }
         match self.get_ref(repo, name).await? {
-            None => Err(StoreError::RefNotFound(name.to_owned())),
+            None => {
+                self.repo(repo).await?;
+                Err(StoreError::RefNotFound(name.to_owned()))
+            }
             Some(state) => Err(StoreError::CasMismatch {
                 expected: expected_version,
                 actual: state.version,
@@ -525,7 +533,7 @@ impl MetadataStore for PostgresStore {
         if pointers.is_empty() {
             return Ok(());
         }
-        let repo_id = self.ensure_repo(repo).await?;
+        let repo_id = self.repo(repo).await?;
         let mut types = Vec::with_capacity(pointers.len());
         let mut versions = Vec::with_capacity(pointers.len());
         let mut css = Vec::with_capacity(pointers.len());
@@ -649,7 +657,7 @@ impl MetadataStore for PostgresStore {
         if done.is_empty() {
             return Ok(());
         }
-        let repo_id = self.ensure_repo(repo).await?;
+        let repo_id = self.repo(repo).await?;
         let shas: Vec<&[u8]> = done.iter().map(|(sha, _)| sha.as_slice()).collect();
         let css: Vec<&[u8]> = done
             .iter()

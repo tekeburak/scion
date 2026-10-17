@@ -11,9 +11,9 @@ use std::sync::Arc;
 use common::{commit, fixture, git, git_with, write};
 use scion_client::{Remote, SparseProfile, checkout};
 use scion_derived::{Deriver, RootTree};
-use scion_ingest::{GIT_SHA, GitRepo, MAIN_REF, ObjectId, import};
-use scion_store::{MemoryStore, MetadataStore};
-use scion_types::ChangesetId;
+use scion_ingest::{GIT_SHA, GitRepo, IngestError, MAIN_REF, ObjectId, import};
+use scion_store::{MemoryStore, MetadataStore, ObjectStore};
+use scion_types::{BlobId, ChangesetId};
 use tokio::net::TcpListener;
 
 const REPO: &str = "mono";
@@ -83,6 +83,7 @@ async fn checkouts_equal_git_trees() {
     fixture(&dir);
 
     let store = Arc::new(MemoryStore::new());
+    common::init(&*store, &*store, REPO).await;
     let git_repo = GitRepo::open(&dir).unwrap();
     let tip = import(&git_repo, "main", REPO, &*store, &*store)
         .await
@@ -137,6 +138,7 @@ async fn reimport_is_a_no_op_and_new_commits_fast_forward() {
     let dir = tmp.path();
     fixture(dir);
     let store = MemoryStore::new();
+    common::init(&store, &store, REPO).await;
     let first = import(&GitRepo::open(dir).unwrap(), "main", REPO, &store, &store)
         .await
         .unwrap();
@@ -162,4 +164,25 @@ async fn reimport_is_a_no_op_and_new_commits_fast_forward() {
     assert_eq!(after.version, before.version + 1);
     let cs = store.get_changeset(REPO, later.tip).await.unwrap().unwrap();
     assert_eq!(cs.parents, vec![first.tip]);
+}
+
+#[tokio::test]
+async fn an_unknown_repository_is_refused_before_anything_is_written() {
+    let tmp = tempfile::tempdir().unwrap();
+    fixture(tmp.path());
+    let store = MemoryStore::new();
+    common::init(&store, &store, REPO).await;
+    let git = GitRepo::open(tmp.path()).unwrap();
+
+    let err = import(&git, "main", "mnoo", &store, &store)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, IngestError::NoRepository(r) if r == "mnoo"),
+        "{err}"
+    );
+    assert!(err.to_string().contains("scn init"), "{err}");
+    let readme = BlobId::hash(b"one\n");
+    assert_eq!(store.has_blobs(&[readme]).await.unwrap(), [false]);
+    assert!(store.ingest_checkpoints("mnoo").await.unwrap().is_empty());
 }

@@ -4,32 +4,30 @@
 //! Requires `--features integration` and the services from
 //! `deploy/docker-compose.yml` (bucket created). Override the defaults with
 //! `SCION_TEST_DATABASE_URL` and `SCION_TEST_S3_{ENDPOINT,BUCKET,ACCESS_KEY,SECRET_KEY}`.
+//! The repository is created with `scn init` and seeded through a working
+//! copy, with no git repository involved.
 //! Each run uses its own repository name, so runs never see each other's
 //! refs or changesets even though they share the database and bucket.
 
 #![cfg(feature = "integration")]
 
-use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use bytes::Bytes;
 use object_store::aws::AmazonS3Builder;
-use scion_store::{MetadataStore, ObjectStorage, ObjectStore, PostgresStore};
-use scion_types::{
-    BlobId, Changeset, ChangesetId, FileChange, FileType, Identity, RepoPath, Timestamp,
-};
+use scion_store::{ObjectStorage, PostgresStore};
+use scion_types::ChangesetId;
 use tokio::net::TcpListener;
 
 fn env_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_owned())
 }
 
-/// `scion-server` on the compose stack, with `repo`'s `main` holding `files`.
-/// Returns the server address and `main`.
-async fn serve(repo: &str, files: &[(&str, &[u8])]) -> (String, ChangesetId) {
+/// `scion-server` on the compose stack, holding no repository of its own.
+/// Returns its address.
+async fn serve() -> String {
     let meta = PostgresStore::connect(&env_or(
         "SCION_TEST_DATABASE_URL",
         "postgres://scion:scion@localhost:5432/scion",
@@ -48,38 +46,6 @@ async fn serve(repo: &str, files: &[(&str, &[u8])]) -> (String, ChangesetId) {
         .expect("valid S3 configuration");
     let objects = ObjectStorage::new(Arc::new(s3));
 
-    let mut changes = BTreeMap::new();
-    for (path, content) in files {
-        objects
-            .put_blob(Bytes::copy_from_slice(content))
-            .await
-            .unwrap();
-        changes.insert(
-            RepoPath::new(*path).unwrap(),
-            FileChange::Tracked {
-                content: BlobId::hash(content),
-                kind: FileType::Regular,
-                size: content.len() as u64,
-                copy_from: None,
-            },
-        );
-    }
-    let root = meta
-        .put_changeset(&Changeset {
-            repo: repo.to_owned(),
-            parents: vec![],
-            author: Identity::new("seed", "seed@example.com"),
-            author_date: Timestamp::new(0, 0),
-            committer: None,
-            committer_date: None,
-            message: "seed".to_owned(),
-            file_changes: changes,
-            extra: BTreeMap::new(),
-        })
-        .await
-        .unwrap();
-    meta.create_ref(repo, "main", root).await.unwrap();
-
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(scion_server::serve(
@@ -87,7 +53,7 @@ async fn serve(repo: &str, files: &[(&str, &[u8])]) -> (String, ChangesetId) {
         Arc::new(meta),
         Arc::new(objects),
     ));
-    (format!("http://{addr}"), root)
+    format!("http://{addr}")
 }
 
 /// Run `scn args` in `dir`; panics unless it succeeds. Returns stdout.
@@ -106,23 +72,59 @@ fn scn(dir: &Path, args: &[&str]) -> String {
     String::from_utf8(out.stdout).unwrap()
 }
 
+/// The id in `committed <id>`.
+fn committed(out: &str) -> ChangesetId {
+    out.trim()
+        .strip_prefix("committed ")
+        .expect(out)
+        .parse()
+        .unwrap()
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn clone_commit_land_on_postgres_and_s3() {
+async fn init_clone_commit_land_on_postgres_and_s3() {
     let nanos = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap()
         .as_nanos();
     let repo = format!("e2e-{}-{nanos}", std::process::id());
-    let (server, root) = serve(
-        &repo,
-        &[
-            ("README", b"one\ntwo\n"),
-            ("srv/api/main.rs", b"fn main() {}\n"),
-            ("srv/web/index.html", b"<html></html>\n"),
-        ],
-    )
-    .await;
+    let server = serve().await;
     let dir = tempfile::tempdir().unwrap();
+
+    // A new repository, seeded through a working copy: no git involved.
+    let out = scn(dir.path(), &["init", &server, &repo]);
+    assert!(
+        out.starts_with(&format!("created {repo} on {server}")),
+        "{out}"
+    );
+    let out = scn(dir.path(), &["clone", &server, &repo, "seed"]);
+    assert!(out.ends_with("(0 files)\n"), "{out}");
+    let seed = dir.path().join("seed");
+    for (path, content) in [
+        ("README", &b"one\ntwo\n"[..]),
+        ("srv/api/main.rs", b"fn main() {}\n"),
+        ("srv/web/index.html", b"<html></html>\n"),
+    ] {
+        std::fs::create_dir_all(seed.join(path).parent().unwrap()).unwrap();
+        std::fs::write(seed.join(path), content).unwrap();
+    }
+    scn(&seed, &["add", "."]);
+    let root = committed(&scn(&seed, &["commit", "-m", "seed"]));
+    assert!(scn(&seed, &["land"]).starts_with(&format!("landed {root} on main")));
+
+    // A misspelled name reaches no repository, and a second `init` is refused.
+    let typo = format!("{repo}x");
+    for args in [
+        &["clone", &server, &typo, "typo"][..],
+        &["init", &server, &repo],
+    ] {
+        let out = Command::new(env!("CARGO_BIN_EXE_scn"))
+            .current_dir(dir.path())
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "scn {args:?} succeeded");
+    }
 
     // Sparse clone: only srv/api and README are fetched.
     let out = scn(
@@ -139,13 +141,7 @@ async fn clone_commit_land_on_postgres_and_s3() {
     std::fs::write(a.join("README"), b"one\ntwo\nthree\n").unwrap();
     std::fs::write(a.join("srv/api/lib.rs"), b"pub fn api() {}\n").unwrap();
     scn(&a, &["add", "srv/api/lib.rs"]);
-    let out = scn(&a, &["commit", "-m", "grow the api"]);
-    let head: ChangesetId = out
-        .trim()
-        .strip_prefix("committed ")
-        .expect(&out)
-        .parse()
-        .unwrap();
+    let head = committed(&scn(&a, &["commit", "-m", "grow the api"]));
     assert_eq!(scn(&a, &["status"]), "");
     assert!(scn(&a, &["land"]).starts_with(&format!("landed {head} on main")));
 

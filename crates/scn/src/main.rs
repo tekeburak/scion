@@ -1,5 +1,8 @@
 //! `scn`: the Scion command-line client.
 //!
+//! Setup: `init` creates an empty repository on a server; `clone` makes a
+//! working copy of one.
+//!
 //! Reading: `clone`, `status`, `log`, `diff`, `blame`. Every history question
 //! is an RPC to `scion-server`; the working copy is only needed for `status`
 //! and for diffing local edits.
@@ -41,6 +44,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Create an empty repository on a server, with `main` at its root.
+    Init {
+        /// Server address, e.g. `http://127.0.0.1:7070`.
+        server: String,
+        /// Repository name.
+        repo: String,
+    },
     /// Create a working copy of a repository at its current `main`.
     Clone {
         /// Server address, e.g. `http://127.0.0.1:7070`.
@@ -266,6 +276,25 @@ fn print_file_diff(
     out.write_all(&unified.to_bytes())
 }
 
+async fn init(out: &mut impl Write, server: &str, repo: &str) -> Result<()> {
+    let mut remote = Remote::connect(server).await?;
+    let root = remote
+        .create_changeset(&Changeset::repository_root(repo))
+        .await?;
+    match remote.create_ref(repo, MAIN_REF, root).await {
+        Ok(_) => {}
+        Err(RemoteError::Rpc(st)) if st.code() == tonic::Code::AlreadyExists => {
+            return Err(format!("repository {repo} already exists on {server}").into());
+        }
+        Err(e) => return Err(e.into()),
+    }
+    writeln!(
+        out,
+        "created {repo} on {server} ({MAIN_REF} at {root}); next: scn clone {server} {repo}"
+    )?;
+    Ok(())
+}
+
 async fn clone(
     out: &mut impl Write,
     server: &str,
@@ -453,6 +482,7 @@ async fn land(out: &mut impl Write) -> Result<()> {
 async fn run(cli: Cli) -> Result<()> {
     let mut out = io::BufWriter::new(io::stdout().lock());
     match cli.command {
+        Command::Init { server, repo } => init(&mut out, &server, &repo).await?,
         Command::Clone {
             server,
             repo,

@@ -166,6 +166,9 @@ impl<'a> CountingMeta<'a> {
 
 #[async_trait]
 impl MetadataStore for CountingMeta<'_> {
+    async fn create_repo(&self, name: &str) -> scion_store::Result<()> {
+        self.inner.create_repo(name).await
+    }
     async fn put_changesets(&self, batch: &[Changeset]) -> scion_store::Result<()> {
         self.inner.put_changesets(batch).await
     }

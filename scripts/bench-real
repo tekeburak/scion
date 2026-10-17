@@ -403,6 +403,7 @@ for run in $(seq 1 "$RUNS"); do
     git -C "$dir/origin.git" config uploadpack.allowFilter true
 
     time_it import git "$run" git -C "$SUBSET" push -q "$dir/origin.git" main
+    "$BIN/scn" init "$SERVER" "$repo" >/dev/null
     time_it import scion "$run" "$BIN/scion-ingest" import "$SUBSET" "$repo" main
 
     time_it clone git "$run" git clone -q --no-local "$dir/origin.git" "$dir/git-full"

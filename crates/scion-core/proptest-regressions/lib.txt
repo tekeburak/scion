@@ -1,7 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc 390c12b896395781c4fb915941cd6655d7c75073bc2fe8bcda77f24f8c128775 # shrinks to steps = [{RepoPath("a1/a0"): Tracked { content: BlobId(2d3adedff11b), kind: Regular, size: 1, copy_from: None }}, {RepoPath("a1"): Tracked { content: BlobId(2d3adedff11b), kind: Regular, size: 1, copy_from: None }}]
