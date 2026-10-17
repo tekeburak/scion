@@ -137,7 +137,11 @@ changeset touched, not the history.
 ### Landing changes
 
 *Planned, Phase 5.* Today `scn land` moves `main` to the current head only when that is a
-fast-forward, with one compare-and-swap; anything else is refused.
+fast-forward, with one compare-and-swap; anything else is refused. `scn update` makes it a
+fast-forward again: the `Rebase` RPC replays the head's first-parent changesets that `main`
+lacks onto `main` through `scion_core::rebase`, creating each through the shared create path,
+and stops at the first conflict with its paths, before the working copy changes. The serial
+land worker will use the same rebase.
 
 There is no CI-gated merge queue and no global repository lock. A change request is landed by a
 **per-repository serial worker** inside `scion-server`: it rebases the request's head onto the

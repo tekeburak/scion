@@ -29,11 +29,13 @@ deliberate deviations from the reference design (trees in S3, canonical BLAKE3, 
 **MVP (Phase 3) done; git import (Phase 6) in progress. Not production-ready: no auth, no cache tiers.**
 
 - **Works today:** `scion-server` serves the object and control gRPC services over Postgres +
-  S3 (`log`, `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`, `move_ref`), and the
-  `scn` CLI can `init` a repository, `clone --sparse`, `status`, `log`, `diff`, `blame`, `add`,
-  `commit` (an anonymous head) and `land` (fast-forward `main`). CI runs that loop, from `init`
-  on, end to end on Postgres + S3 with no git repository involved. Only `scn init` creates a
-  repository, so a misspelled name is refused by every write (6.16).
+  S3 (`log`, `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`, `move_ref`,
+  `rebase`), and the `scn` CLI can `init` a repository, `clone --sparse`, `status`, `log`,
+  `diff`, `blame`, `add`, `commit` (an anonymous head), `land` (fast-forward `main`), `update`
+  (the server rebases the head onto `main`, so it lands as a fast-forward again) and `checkout`
+  any changeset. CI runs that loop, from `init` on, end to end on Postgres + S3 with no git
+  repository involved, two clones landing alternately. Only `scn init` creates a repository, so
+  a misspelled name is refused by every write (6.16, 6.17).
   Deriving a cold history holds a bounded number of changesets, and `scion-server backfill`
   derives a type for a repository's whole history ahead of the first request (6.15).
 - **Git import (Phase 6.1–6.8, 6.11 and 6.14 merged; [how-to](#import-a-git-repository)):**
@@ -49,10 +51,10 @@ deliberate deviations from the reference design (trees in S3, canonical BLAKE3, 
   (first call) and warm; the results are under [Benchmarks](#benchmarks). Clone, `status`,
   warm `log` and `blame` and commit + `land` run at or below git's time; cold, a path `log`
   takes about 7× git's and a `blame` about 3.5×.
-- **Next:** the steps that make the MVP usable by a team on one machine: `scn update` and
-  `scn checkout` (6.17), idempotent writes and a compose service for the server (6.18). After that: change requests and the land worker (Phase 5), IAM (Phase 7), release
-  binaries and a quickstart (Phase 9), the cache and daemon tiers (Phase 4) and virtualized
-  checkouts (Phase 8).
+- **Next:** the last step that makes the MVP usable by a team on one machine: idempotent writes
+  and a compose service for the server (6.18). After that: change requests and the land worker
+  (Phase 5), IAM (Phase 7), release binaries and a quickstart (Phase 9), the cache and daemon
+  tiers (Phase 4) and virtualized checkouts (Phase 8).
 
 Scion is *not* a general replacement for git. Git's distributed, offline-first model is the right
 design for the overwhelming majority of repositories. Scion targets one specific situation: a
@@ -271,7 +273,7 @@ Full details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
 | Storage | `scion-store`: `MetadataStore` / `ObjectStore` traits; memory, Postgres and S3 implementations |
 | Algorithms | `scion-derived` (root tree, path history, blame, skip list), `scion-core` (diff, log, merge-base, merge, rebase), `scion-diff3` |
 | Network | `scion-proto` (gRPC schema), `scion-server` (control plane and object origin) |
-| Client | `scion-client`: `.scn/` layout, index, sparse profile, clone, checkout and commit; `scn`: the CLI |
+| Client | `scion-client`: `.scn/` layout, index, sparse profile, clone, checkout, commit and update; `scn`: the CLI |
 | Import | `scion-ingest`: git → Scion importer (`import`, `verify`), checkpoints and incremental sync |
 
 ## Prior art

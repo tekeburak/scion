@@ -315,3 +315,91 @@ async fn init_clone_commit_land_without_git() {
     let (ok, _, err) = scn_try(dir.path(), &["clone", &server, "frehs"]);
     assert!(!ok && err.contains("frehs"), "{err}");
 }
+
+/// Whether every changeset `scn log -r main` lists has one parent at most.
+fn main_is_linear(wc: &Path) -> bool {
+    !scn(wc, &["log", "-r", "main", "-n", "1000"]).contains("Parents:")
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn two_clones_land_alternately_with_update() {
+    let (server, c0, _) = serve().await;
+    let dir = tempfile::tempdir().unwrap();
+    scn(dir.path(), &["clone", &server, REPO, "a"]);
+    scn(dir.path(), &["clone", &server, REPO, "b"]);
+    let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+
+    for round in 0..3 {
+        // a lands first; b's commit no longer fast-forwards until updated.
+        std::fs::write(a.join(format!("a{round}.txt")), format!("{round}\n")).unwrap();
+        scn(&a, &["add", "."]);
+        let (ok, _, err) = scn_try(&a, &["commit", "-m", &format!("a {round}")]);
+        assert!(ok, "{err}");
+        std::fs::write(b.join(format!("b{round}.txt")), format!("{round}\n")).unwrap();
+        scn(&b, &["add", "."]);
+        let (ok, _, err) = scn_try(&b, &["commit", "-m", &format!("b {round}")]);
+        assert!(ok, "{err}");
+
+        // a may have to catch up with b's previous round first.
+        scn(&a, &["update"]);
+        scn(&a, &["land"]);
+        let (ok, _, err) = scn_try(&b, &["land"]);
+        assert!(!ok && err.contains("fast-forward"), "{err}");
+        let out = scn(&b, &["update"]);
+        assert!(out.contains("(1 changesets rebased)"), "{out}");
+        assert!(
+            b.join(format!("a{round}.txt")).is_file(),
+            "a's file arrived"
+        );
+        assert_eq!(scn(&b, &["status"]), "");
+        assert!(scn(&b, &["land"]).starts_with("landed "));
+        assert!(main_is_linear(&b));
+    }
+    // a catches up without anything to replay.
+    let out = scn(&a, &["update"]);
+    assert!(out.contains("(0 changesets rebased)"), "{out}");
+    assert!(a.join("b2.txt").is_file());
+    assert_eq!(scn(&a, &["update"]).trim_end(), {
+        let head = id_after(&scn(&a, &["log", "-n", "1"]), "changeset ");
+        format!("{head} already contains main")
+    });
+
+    // Local edits are refused; a conflict changes nothing.
+    std::fs::write(a.join("README"), b"one\nA\nthree\n").unwrap();
+    let (ok, _, err) = scn_try(&a, &["update"]);
+    assert!(
+        !ok && err.contains("local changes") && err.contains("README"),
+        "{err}"
+    );
+    let (ok, _, err) = scn_try(&a, &["commit", "-m", "a readme"]);
+    assert!(ok, "{err}");
+    std::fs::write(b.join("README"), b"one\nB\nthree\n").unwrap();
+    let (ok, out, err) = scn_try(&b, &["commit", "-m", "b readme"]);
+    assert!(ok, "{err}");
+    let b_head = id_after(&out, "committed ");
+    scn(&a, &["land"]);
+    let (ok, _, err) = scn_try(&b, &["update"]);
+    assert!(
+        !ok && err.contains("conflicts") && err.contains("\n  README"),
+        "{err}"
+    );
+    assert_eq!(std::fs::read(b.join("README")).unwrap(), b"one\nB\nthree\n");
+    assert_eq!(
+        id_after(&scn(&b, &["log", "-n", "1"]), "changeset "),
+        b_head,
+        "the head did not move"
+    );
+
+    // checkout: refused when dirty, forced, and back.
+    std::fs::write(b.join("b0.txt"), b"edited\n").unwrap();
+    let (ok, _, err) = scn_try(&b, &["checkout", &c0.to_hex()]);
+    assert!(!ok && err.contains("b0.txt"), "{err}");
+    scn(&b, &["checkout", "--force", &c0.to_hex()]);
+    assert!(!b.join("b0.txt").exists() && !b.join("a0.txt").exists());
+    assert_eq!(std::fs::read(b.join("README")).unwrap(), b"one\ntwo\n");
+    assert_eq!(scn(&b, &["status"]), "");
+    scn(&b, &["checkout", &b_head.to_hex()]);
+    assert_eq!(std::fs::read(b.join("b0.txt")).unwrap(), b"0\n");
+    assert_eq!(std::fs::read(b.join("README")).unwrap(), b"one\nB\nthree\n");
+    assert_eq!(scn(&b, &["status"]), "");
+}

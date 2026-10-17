@@ -71,6 +71,7 @@ service ControlService {
   rpc Log(LogRequest) returns (LogResponse);
   rpc PathLog(PathLogRequest) returns (LogResponse);
   rpc MergeBase(MergeBaseRequest) returns (MergeBaseResponse);
+  rpc Rebase(RebaseRequest) returns (RebaseResponse);
   rpc Blame(BlameRequest) returns (BlameResponse);
 }
 
@@ -181,6 +182,29 @@ message MergeBaseResponse {
   optional bytes base = 1;
 }
 
+// Replay `head`'s changesets that `onto` does not contain on top of `onto`,
+// oldest first, and create each: same author, message and extra, parent the
+// previous one, file changes merged three-way against it. A changeset whose
+// changes `onto` already has is dropped. `head` must reach `onto`'s history
+// through first parents and none of the replayed changesets may be a merge
+// (FAILED_PRECONDITION otherwise). Nothing is replayed if `head` already
+// descends from `onto`; `head` is `onto` if `onto` descends from it.
+message RebaseRequest {
+  string repo = 1;
+  bytes head = 2;
+  bytes onto = 3;
+}
+message RebaseResponse {
+  // The rebased head and its root tree; absent on a conflict.
+  optional bytes head = 1;
+  bytes root_tree = 2;
+  // Changesets created by this call.
+  uint32 created = 3;
+  // On a conflict: the changeset that could not be replayed and the paths it
+  // conflicts on, sorted. Nothing after it is replayed.
+  bytes conflicted = 4;
+  repeated string conflicts = 5;
+}
 // Line attribution of the file at `path` in `changeset`. A path that is not a
 // file there is NOT_FOUND.
 message BlameRequest {

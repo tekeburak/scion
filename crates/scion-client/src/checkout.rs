@@ -37,11 +37,11 @@ pub enum CheckoutError {
 }
 
 /// A file the checkout will write.
-struct File {
-    path: RepoPath,
-    id: BlobId,
-    kind: FileType,
-    size: u64,
+pub(crate) struct File {
+    pub(crate) path: RepoPath,
+    pub(crate) id: BlobId,
+    pub(crate) kind: FileType,
+    pub(crate) size: u64,
 }
 
 /// Every file under `root` that `sparse` includes, fetching only the trees
@@ -98,7 +98,11 @@ pub(crate) fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
 }
 
 /// Write one file and return its index entry.
-async fn write_file(root: &Path, file: &File, data: Vec<u8>) -> Result<IndexEntry, CheckoutError> {
+pub(crate) async fn write_file(
+    root: &Path,
+    file: &File,
+    data: Vec<u8>,
+) -> Result<IndexEntry, CheckoutError> {
     let dest = root.join(file.path.as_str());
     let io_err = |e| CheckoutError::Io(dest.clone(), e);
     if let Some(parent) = dest.parent() {

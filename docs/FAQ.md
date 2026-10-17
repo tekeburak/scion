@@ -104,9 +104,6 @@ file version per version of every file the last change touched.
 Beyond missing authentication and cache tiers, these are the gaps a first user hits, each with
 the roadmap step that closes it:
 
-- **No `scn update` or `scn checkout`.** `land` only fast-forwards `main`, so when two clones
-  commit, the second `land` fails with "not a fast-forward" and the only way forward is a fresh
-  clone. Phase 6.17 adds both commands.
 - **Incremental import is for mirror repositories.** A re-run of `scion-ingest import` refuses
   with "the upstream history was rewritten" whenever `main` points at a changeset that did not
   come from that git history, including one made with `scn land`.

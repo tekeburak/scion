@@ -13,7 +13,7 @@ use scion_proto::v1::{
     BlameRequest, BlameResponse, BlameRun, CreateChangesetRequest, CreateChangesetResponse,
     DiffEntry, DiffRequest, DiffResponse, FileEntry, FileType, GetRefRequest, GetRefResponse,
     LogRequest, LogResponse, MergeBaseRequest, MergeBaseResponse, MoveRefRequest, MoveRefResponse,
-    PathLogRequest,
+    PathLogRequest, RebaseRequest, RebaseResponse,
 };
 use scion_store::{MetadataStore, ObjectStore, StoreError, is_allowed_ref_name};
 use scion_types::{BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, RepoPath, TreeId};
@@ -292,6 +292,121 @@ pub async fn move_ref(
     Ok(state.version)
 }
 
+/// What [`rebase`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Rebased {
+    /// Every changeset was replayed: `head` is the new head, with root tree
+    /// `root`, and `created` changesets were created for it.
+    Clean {
+        head: ChangesetId,
+        root: TreeId,
+        created: usize,
+    },
+    /// Replaying `changeset` conflicts on `paths` (sorted); nothing after it
+    /// was replayed.
+    Conflict {
+        changeset: ChangesetId,
+        paths: Vec<RepoPath>,
+    },
+}
+
+/// Replay `head`'s changesets that `onto` does not contain on top of
+/// `onto`, oldest first, through [`scion_core::rebase`], creating each as
+/// `CreateChangeset` does; as the `Rebase` RPC does.
+pub async fn rebase(
+    meta: &dyn MetadataStore,
+    objects: &dyn ObjectStore,
+    repo: &str,
+    head: ChangesetId,
+    onto: ChangesetId,
+) -> Result<Rebased, Status> {
+    let ctx = Deriver::new(repo, meta, objects);
+    let clean = async |head: ChangesetId, created| {
+        let root = ctx.derive::<RootTree>(head).await.map_err(derive_status)?.0;
+        Ok(Rebased::Clean {
+            head,
+            root,
+            created,
+        })
+    };
+    if SkipList::is_ancestor(&ctx, onto, head)
+        .await
+        .map_err(derive_status)?
+    {
+        return clean(head, 0).await;
+    }
+
+    // The stack to replay: `head`'s first parents down to the first changeset
+    // `onto` contains, bounded so a stray `onto` cannot walk the log.
+    let mut stack = Vec::new();
+    let mut cur = head;
+    while !SkipList::is_ancestor(&ctx, cur, onto)
+        .await
+        .map_err(derive_status)?
+    {
+        if stack.len() == limit(MAX_LOG_LIMIT) {
+            return Err(Status::failed_precondition(format!(
+                "more than {MAX_LOG_LIMIT} changesets of {head} are not in {onto}"
+            )));
+        }
+        let cs = meta
+            .get_changeset(repo, cur)
+            .await
+            .map_err(store_status)?
+            .ok_or_else(|| Status::data_loss(format!("indexed changeset {cur} is missing")))?;
+        let parent = match cs.parents[..] {
+            [parent] => parent,
+            [] => {
+                return Err(Status::failed_precondition(format!(
+                    "{head} shares no history with {onto}"
+                )));
+            }
+            _ => {
+                return Err(Status::failed_precondition(format!(
+                    "{cur} is a merge; only a linear stack can be replayed"
+                )));
+            }
+        };
+        stack.push(cs);
+        cur = parent;
+    }
+
+    let mut parent = onto;
+    let mut created = 0;
+    for cs in stack.into_iter().rev() {
+        let id = cs.id();
+        let merged = scion_core::rebase(&ctx, id, parent)
+            .await
+            .map_err(derive_status)?;
+        if !merged.is_clean() {
+            let mut paths: Vec<RepoPath> =
+                merged.conflicts.iter().map(|c| c.path().clone()).collect();
+            paths.sort();
+            paths.dedup();
+            return Ok(Rebased::Conflict {
+                changeset: id,
+                paths,
+            });
+        }
+        // Everything it changed is there already.
+        if merged.changes.is_empty() {
+            continue;
+        }
+        let replayed = Changeset {
+            parents: vec![parent],
+            file_changes: merged.changes,
+            ..cs
+        };
+        let [(new, _)] = create_changesets(meta, objects, &[replayed])
+            .await?
+            .try_into()
+            .expect("one changeset in, one out");
+        parent = new;
+        created += 1;
+    }
+    clean(parent, created).await
+}
+
 #[tonic::async_trait]
 impl ControlService for ControlServer {
     async fn get_ref(
@@ -406,6 +521,33 @@ impl ControlService for ControlServer {
         Ok(Response::new(MergeBaseResponse {
             base: base.map(|id| id.as_bytes().to_vec()),
         }))
+    }
+
+    async fn rebase(
+        &self,
+        request: Request<RebaseRequest>,
+    ) -> Result<Response<RebaseResponse>, Status> {
+        let req = request.into_inner();
+        let head = changeset_id(&req.head, "head")?;
+        let onto = changeset_id(&req.onto, "onto")?;
+        let resp = match rebase(&*self.meta, &*self.objects, &req.repo, head, onto).await? {
+            Rebased::Clean {
+                head,
+                root,
+                created,
+            } => RebaseResponse {
+                head: Some(head.as_bytes().to_vec()),
+                root_tree: root.as_bytes().to_vec(),
+                created: u32::try_from(created).expect("bounded by MAX_LOG_LIMIT"),
+                ..RebaseResponse::default()
+            },
+            Rebased::Conflict { changeset, paths } => RebaseResponse {
+                conflicted: changeset.as_bytes().to_vec(),
+                conflicts: paths.iter().map(|p| p.as_str().to_owned()).collect(),
+                ..RebaseResponse::default()
+            },
+        };
+        Ok(Response::new(resp))
     }
 
     async fn blame(

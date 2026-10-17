@@ -200,9 +200,13 @@ base          = "d41c…"          # last known merge-base with main (a cache)
 
 - `scn commit` creates the changeset on the server (it is immediately addressable by anyone who
   knows the id) and advances `current_head`. No server ref moves.
-- Labels never leave the machine. `scn log`, `diff` and `blame` accept a label wherever they
-  take a changeset; `scn heads` (list labels) and `scn checkout <id|label>` (switch the working
-  copy) are planned and not built yet, so no command creates a label today.
+- Labels never leave the machine. `scn log`, `diff`, `blame`, `checkout` and `update` accept a
+  label wherever they take a changeset; `scn heads` (list labels) is planned and not built yet,
+  so no command creates a label today.
+- `scn checkout <rev>` moves the working copy to any changeset and `current_head` with it.
+  `scn update [rev]` (default `main`) has the server replay `current_head`'s changesets that
+  `rev` does not contain on top of it, then moves the working copy to the result and sets
+  `base` to `rev`. Both touch only the files that differ, and both refuse local edits.
 - Because the object store is append-only and there is no GC, an anonymous head cannot be lost
   by forgetting it; it can always be re-attached by id.
 - Sharing work means sharing an id, or (Phase 5, planned) submitting a change request.

@@ -8,6 +8,7 @@ use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_proto::v1::{
     BlameRequest, CreateChangesetRequest, DiffRequest, GetBlobRequest, GetRefRequest,
     GetTreeRequest, LogRequest, LogResponse, MoveRefRequest, PathLogRequest, PutBlobRequest,
+    RebaseRequest,
 };
 use scion_types::{
     BlobId, Changeset, ChangesetId, Decode, Encode, FileType, RepoPath, Tree, TreeId,
@@ -55,6 +56,18 @@ pub struct DiffEntry {
     pub old: Option<FileEntry>,
     /// `None` for a deleted file.
     pub new: Option<FileEntry>,
+}
+
+/// What the server's `Rebase` did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Rebased {
+    /// The rebased head and how many changesets were created for it.
+    Clean { head: ChangesetId, created: u32 },
+    /// Replaying `changeset` conflicts on `paths`.
+    Conflict {
+        changeset: ChangesetId,
+        paths: Vec<RepoPath>,
+    },
 }
 
 /// Consecutive lines last changed by one changeset.
@@ -224,6 +237,39 @@ impl Remote {
                 })
             })
             .collect()
+    }
+
+    /// Replay `head`'s changesets that `onto` does not contain on top of
+    /// `onto`, on the server.
+    pub async fn rebase(
+        &mut self,
+        repo: &str,
+        head: ChangesetId,
+        onto: ChangesetId,
+    ) -> Result<Rebased, RemoteError> {
+        let resp = self
+            .control
+            .rebase(RebaseRequest {
+                repo: repo.to_owned(),
+                head: head.as_bytes().to_vec(),
+                onto: onto.as_bytes().to_vec(),
+            })
+            .await?
+            .into_inner();
+        if let Some(head) = resp.head {
+            return Ok(Rebased::Clean {
+                head: changeset_id(&head, "rebased head")?,
+                created: resp.created,
+            });
+        }
+        Ok(Rebased::Conflict {
+            changeset: changeset_id(&resp.conflicted, "conflicted changeset")?,
+            paths: resp
+                .conflicts
+                .into_iter()
+                .map(|p| RepoPath::new(p).map_err(|_| RemoteError::Malformed("path")))
+                .collect::<Result<_, _>>()?,
+        })
     }
 
     /// Line attribution of the file at `path` in `changeset`.

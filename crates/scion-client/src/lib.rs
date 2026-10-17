@@ -26,12 +26,16 @@ mod index;
 mod remote;
 mod sparse;
 mod status;
+mod switch;
 mod workspace;
 
 pub use checkout::{CheckoutError, MAIN_REF, checkout, clone};
 pub use commit::{CommitError, commit};
 pub use index::{Index, IndexEntry};
-pub use remote::{BlameRun, DiffEntry, FileEntry, RPC_DEADLINE, Remote, RemoteError, RemoteRef};
+pub use remote::{
+    BlameRun, DiffEntry, FileEntry, RPC_DEADLINE, Rebased, Remote, RemoteError, RemoteRef,
+};
 pub use sparse::{SparseError, SparseProfile};
 pub use status::{FileStatus, StatusError, read_working_file, status};
+pub use switch::{SwitchError, Updated, switch, update};
 pub use workspace::{Config, Head, State, Workspace, WorkspaceError};

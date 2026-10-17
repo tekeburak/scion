@@ -10,7 +10,10 @@
 //! Writing: `add` marks untracked files for the next commit (there are no
 //! ignore files); `commit` creates a changeset on the server and makes it the
 //! working copy's anonymous head; `land` fast-forwards `main` to that head.
-//! There is no branch command: work is shared by changeset id.
+//! `update` has the server rebase that head onto `main` (or another
+//! revision) so it lands as a fast-forward again; `checkout` moves the
+//! working copy to any changeset. There is no branch command: work is shared
+//! by changeset id.
 //!
 //! A revision is `@` (the working copy's current head), a 64-hex changeset
 //! id, a local head label, or a server ref (`main`, `release/*`).
@@ -107,6 +110,22 @@ enum Command {
     },
     /// Fast-forward `main` to the current head.
     Land,
+    /// Rebase the current head onto a revision on the server and move the
+    /// working copy there; refused with local edits, and a conflict changes
+    /// nothing.
+    Update {
+        /// Revision to rebase onto.
+        #[arg(default_value = MAIN_REF)]
+        rev: String,
+    },
+    /// Move the working copy to a revision.
+    Checkout {
+        rev: String,
+        /// Throw away local edits (added files stay, untracked) and replace
+        /// untracked files in the way.
+        #[arg(long)]
+        force: bool,
+    },
 }
 
 /// The path `arg` names relative to the current directory, as a path
@@ -479,6 +498,31 @@ async fn land(out: &mut impl Write) -> Result<()> {
     Ok(())
 }
 
+async fn update(out: &mut impl Write, rev: &str) -> Result<()> {
+    let mut s = Session::open().await?;
+    let onto = s.resolve(rev).await?;
+    let old = s.state.current_head;
+    let done = scion_client::update(&s.ws, &s.remote, onto).await?;
+    if done.head == old {
+        writeln!(out, "{old} already contains {rev}")?;
+    } else {
+        writeln!(
+            out,
+            "updated {old} to {} on {rev} ({} changesets rebased)",
+            done.head, done.created
+        )?;
+    }
+    Ok(())
+}
+
+async fn checkout(out: &mut impl Write, rev: &str, force: bool) -> Result<()> {
+    let mut s = Session::open().await?;
+    let to = s.resolve(rev).await?;
+    scion_client::switch(&s.ws, &s.remote, to, force).await?;
+    writeln!(out, "checked out {to}")?;
+    Ok(())
+}
+
 async fn run(cli: Cli) -> Result<()> {
     let mut out = io::BufWriter::new(io::stdout().lock());
     match cli.command {
@@ -499,6 +543,8 @@ async fn run(cli: Cli) -> Result<()> {
         Command::Add { paths } => add(&mut out, &paths)?,
         Command::Commit { message, author } => commit(&mut out, &message, &author).await?,
         Command::Land => land(&mut out).await?,
+        Command::Update { rev } => update(&mut out, &rev).await?,
+        Command::Checkout { rev, force } => checkout(&mut out, &rev, force).await?,
     }
     out.flush()?;
     Ok(())

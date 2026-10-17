@@ -54,5 +54,5 @@
 <text x="1415.6" y="184" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">Virtual checkouts</text>
 <text x="1415.6" y="202" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">(FUSE / NFS)</text>
 <text x="64" y="260" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#e8edf5" font-weight="400" text-anchor="start">MVP done: scion-server on Postgres + S3, scn clone --sparse, status, log, diff, blame, add, commit, land</text>
-<text x="64" y="286" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#f5b545" font-weight="600" text-anchor="start">in progress: Phase 6 git import (6.1-6.16 merged; next: usable MVP (6.17-6.18)), then 5, 7, 9, 4, 8</text>
+<text x="64" y="286" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#f5b545" font-weight="600" text-anchor="start">in progress: Phase 6 git import (6.1-6.17 merged; next: usable MVP (6.18)), then 5, 7, 9, 4, 8</text>
 </svg>

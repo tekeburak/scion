@@ -23,6 +23,7 @@ tonic-health.workspace = true
 
 [dev-dependencies]
 scion-types.workspace = true
+proptest.workspace = true
 scion-derived = { workspace = true, features = ["test-util"] }
 
 [lints]

@@ -5,7 +5,8 @@
 //! `deploy/docker-compose.yml` (bucket created). Override the defaults with
 //! `SCION_TEST_DATABASE_URL` and `SCION_TEST_S3_{ENDPOINT,BUCKET,ACCESS_KEY,SECRET_KEY}`.
 //! The repository is created with `scn init` and seeded through a working
-//! copy, with no git repository involved.
+//! copy, with no git repository involved; two clones then land alternately
+//! with `scn update` between.
 //! Each run uses its own repository name, so runs never see each other's
 //! refs or changesets even though they share the database and bucket.
 
@@ -178,4 +179,24 @@ async fn init_clone_commit_land_on_postgres_and_s3() {
         b"pub fn api() {}\n"
     );
     assert!(b.join("srv/web/index.html").is_file());
+
+    // Two clones land alternately; `update` replays the loser on the server.
+    // `a` is sparse, so `b`'s files at the root never reach it.
+    for round in 0..2 {
+        std::fs::write(a.join(format!("srv/api/a{round}.rs")), b"// a\n").unwrap();
+        scn(&a, &["add", "srv/api"]);
+        scn(&a, &["commit", "-m", &format!("a {round}")]);
+        std::fs::write(b.join(format!("b{round}.txt")), b"b\n").unwrap();
+        scn(&b, &["add", "."]);
+        scn(&b, &["commit", "-m", &format!("b {round}")]);
+
+        scn(&a, &["update"]);
+        scn(&a, &["land"]);
+        scn(&b, &["update"]);
+        assert!(b.join(format!("srv/api/a{round}.rs")).is_file());
+        assert!(scn(&b, &["land"]).starts_with("landed "));
+        assert!(!a.join(format!("b{round}.txt")).exists());
+    }
+    let log = scn(&b, &["log", "-r", "main", "-n", "1000"]);
+    assert!(!log.contains("Parents:"), "main stays linear: {log}");
 }
