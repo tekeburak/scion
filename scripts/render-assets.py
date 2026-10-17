@@ -454,10 +454,11 @@ def bench_real():
 
 
 def bench_slice(meta):
-    # The README names no other project, so the slice is described by its size and pointed
-    # at the script header that pins it, not by the upstream URL in the CSV.
-    size = meta["repository"].rpartition("(")[2].rstrip(")")
-    return f"the history slice pinned in scripts/bench-real ({size})"
+    # The README names no other project, so the upstream URL in the CSV header is replaced by
+    # a pointer to the scripts/bench-real header that pins it; the range and size stay.
+    _, _, rest = meta["repository"].partition(" ")
+    subdir, _, range_ = rest.partition(", ")
+    return f"{subdir} of the public repository pinned in scripts/bench-real, {range_}"
 
 
 def bench_tools(medians):
@@ -532,7 +533,7 @@ def bench_real_svg():
             b.append(t(round(x_of(ms) + 10, 1), by + 18, f"{ms:,} ms", 15, TEXT if j else MUTED, 600 if j else 400))
         b.append(t(W - 64, y + 36, ratio(scion_ms, git_ms), 19, GREEN if scion_ms <= git_ms else AMBER,
                    700, "end"))
-    b.append(t(64, h - 48, bench_slice(meta)[0].upper() + bench_slice(meta)[1:], 15, MUTED))
+    b.append(t(64, h - 48, bench_slice(meta), 15, MUTED))
     b.append(t(64, h - 24, f"{meta['machine']}; {meta['tools']}", 15, MUTED))
     return svg(h, "Median times of Scion and git on a real repository's history", b)
 
