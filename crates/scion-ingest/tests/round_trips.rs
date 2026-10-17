@@ -22,7 +22,9 @@ use object_store::{
     ObjectStore as Backend, PutMultipartOptions, PutOptions, PutPayload, PutResult,
 };
 use scion_ingest::{GitRepo, import};
-use scion_store::{DerivedPointer, MemoryStore, MetadataStore, ObjectStorage, RefState};
+use scion_store::{
+    ChangeRequest, DerivedPointer, LandOutcome, MemoryStore, MetadataStore, ObjectStorage, RefState,
+};
 use scion_types::{Changeset, ChangesetId};
 
 const REPO: &str = "trips";
@@ -234,6 +236,43 @@ impl MetadataStore for CountingMeta {
     ) -> scion_store::Result<Vec<(Vec<u8>, ChangesetId)>> {
         self.tick();
         self.inner.ingest_checkpoints(repo).await
+    }
+
+    async fn submit_change_request(
+        &self,
+        repo: &str,
+        head: ChangesetId,
+        base: ChangesetId,
+    ) -> scion_store::Result<ChangeRequest> {
+        self.tick();
+        self.inner.submit_change_request(repo, head, base).await
+    }
+
+    async fn get_change_request(
+        &self,
+        repo: &str,
+        id: u64,
+    ) -> scion_store::Result<Option<ChangeRequest>> {
+        self.tick();
+        self.inner.get_change_request(repo, id).await
+    }
+
+    async fn claim_next_change_request(
+        &self,
+        repo: &str,
+    ) -> scion_store::Result<Option<ChangeRequest>> {
+        self.tick();
+        self.inner.claim_next_change_request(repo).await
+    }
+
+    async fn finish_change_request(
+        &self,
+        repo: &str,
+        id: u64,
+        outcome: LandOutcome,
+    ) -> scion_store::Result<ChangeRequest> {
+        self.tick();
+        self.inner.finish_change_request(repo, id, outcome).await
     }
 }
 

@@ -4,7 +4,7 @@
 //! (metadata) and Cloud Storage (objects):
 //!
 //! * [`MetadataStore`]: changesets (the write-ahead log), refs (a single-row
-//!   compare-and-swap each), and derived-data pointers.
+//!   compare-and-swap each), derived-data pointers and change requests.
 //! * [`ObjectStore`]: immutable, content-addressed blobs and trees.
 //!
 //! Implementations:
@@ -50,6 +50,13 @@ pub enum StoreError {
     CasMismatch { expected: u64, actual: u64 },
     #[error("changeset {0} references unknown parent {1}")]
     UnknownParent(ChangesetId, ChangesetId),
+    #[error("change request {0} not found")]
+    ChangeRequestNotFound(u64),
+    #[error("change request {id} is {status}, not landing")]
+    ChangeRequestNotLanding {
+        id: u64,
+        status: ChangeRequestStatus,
+    },
     #[error("stored object is corrupt: {0}")]
     Corrupt(String),
     #[error("backend error: {0}")]
@@ -63,7 +70,95 @@ pub type Result<T> = std::result::Result<T, StoreError>;
 /// pointer)`.
 pub type DerivedPointer = (String, u32, ChangesetId, Vec<u8>);
 
-/// Changesets, refs and derived-data pointers.
+/// Where a change request is: `pending` → `landing` → `landed`,
+/// `needs_rebase` or `rejected`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ChangeRequestStatus {
+    /// Submitted, waiting for the land worker.
+    Pending,
+    /// Claimed by the land worker.
+    Landing,
+    /// On `main` as [`ChangeRequest::landed`].
+    Landed,
+    /// Conflicts with `main` at [`ChangeRequest::conflicts`].
+    NeedsRebase,
+    /// Rebased onto `main`, it would land nothing.
+    Rejected,
+}
+
+impl ChangeRequestStatus {
+    const ALL: [Self; 5] = [
+        Self::Pending,
+        Self::Landing,
+        Self::Landed,
+        Self::NeedsRebase,
+        Self::Rejected,
+    ];
+
+    /// The name used in the schema.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Landing => "landing",
+            Self::Landed => "landed",
+            Self::NeedsRebase => "needs_rebase",
+            Self::Rejected => "rejected",
+        }
+    }
+
+    /// The status [`as_str`](Self::as_str) spells `s`.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|st| st.as_str() == s)
+    }
+}
+
+impl std::fmt::Display for ChangeRequestStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// A request to land `head` on `main`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChangeRequest {
+    /// Assigned at submission; increases in submission order.
+    pub id: u64,
+    /// The changeset to land.
+    pub head: ChangesetId,
+    /// `main`'s changeset when the request was submitted.
+    pub base: ChangesetId,
+    /// Where the request is.
+    pub status: ChangeRequestStatus,
+    /// The changeset `main` moved to; set once `landed`.
+    pub landed: Option<ChangesetId>,
+    /// Paths that conflict with `main`; non-empty only when `needs_rebase`.
+    pub conflicts: Vec<String>,
+}
+
+/// How the land worker finished a request it claimed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LandOutcome {
+    /// `main` moved to this changeset.
+    Landed(ChangesetId),
+    /// The rebase conflicted at these paths.
+    NeedsRebase(Vec<String>),
+    /// The rebase would land nothing.
+    Rejected,
+}
+
+impl LandOutcome {
+    fn status(&self) -> ChangeRequestStatus {
+        match self {
+            Self::Landed(_) => ChangeRequestStatus::Landed,
+            Self::NeedsRebase(_) => ChangeRequestStatus::NeedsRebase,
+            Self::Rejected => ChangeRequestStatus::Rejected,
+        }
+    }
+}
+
+/// Changesets, refs, derived-data pointers and change requests.
 #[async_trait]
 pub trait MetadataStore: Send + Sync {
     /// Create repository `name`; a no-op if it exists. Every other write
@@ -171,6 +266,33 @@ pub trait MetadataStore: Send + Sync {
 
     /// Every git commit imported into `repo` so far, with its changeset.
     async fn ingest_checkpoints(&self, repo: &str) -> Result<Vec<(Vec<u8>, ChangesetId)>>;
+
+    /// Record a `pending` request to land `head`, submitted while `main` was
+    /// at `base`.
+    async fn submit_change_request(
+        &self,
+        repo: &str,
+        head: ChangesetId,
+        base: ChangesetId,
+    ) -> Result<ChangeRequest>;
+
+    /// Read a change request of `repo`.
+    async fn get_change_request(&self, repo: &str, id: u64) -> Result<Option<ChangeRequest>>;
+
+    /// Move the oldest `pending` request of `repo` to `landing` and return
+    /// it; `None` if nothing is pending. Concurrent claims never return the
+    /// same request.
+    async fn claim_next_change_request(&self, repo: &str) -> Result<Option<ChangeRequest>>;
+
+    /// Finish a `landing` request of `repo` with `outcome`. A request in any
+    /// other status is [`StoreError::ChangeRequestNotLanding`] and stays as
+    /// it is.
+    async fn finish_change_request(
+        &self,
+        repo: &str,
+        id: u64,
+        outcome: LandOutcome,
+    ) -> Result<ChangeRequest>;
 }
 
 /// Immutable content-addressed objects.

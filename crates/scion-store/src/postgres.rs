@@ -15,7 +15,10 @@ use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
 use sqlx::{Executor, Postgres};
 
 use crate::recent::Recent;
-use crate::{DerivedPointer, MetadataStore, RefState, Result, StoreError, is_allowed_ref_name};
+use crate::{
+    ChangeRequest, ChangeRequestStatus, DerivedPointer, LandOutcome, MetadataStore, RefState,
+    Result, StoreError, is_allowed_ref_name,
+};
 
 /// Embedded migrations from the repository's `migrations/` directory.
 pub static MIGRATOR: sqlx::migrate::Migrator = sqlx::migrate!("../../migrations");
@@ -273,6 +276,38 @@ impl<'a> FileChangeColumns<'a> {
         }
         Ok(())
     }
+}
+
+/// The `change_requests` columns every query returns, in
+/// [`ChangeRequestRow`] order.
+const CHANGE_REQUEST_COLUMNS: &str =
+    "c.id, c.head_cs, c.base_cs, c.status::text, c.landed_cs, c.conflicts";
+
+type ChangeRequestRow = (
+    i64,
+    Vec<u8>,
+    Vec<u8>,
+    String,
+    Option<Vec<u8>>,
+    Option<Vec<String>>,
+);
+
+fn change_request(
+    (id, head, base, status, landed, conflicts): ChangeRequestRow,
+) -> Result<ChangeRequest> {
+    let cs = |bytes: &[u8]| {
+        ChangesetId::try_from_slice(bytes)
+            .map_err(|e| StoreError::Corrupt(format!("change request {id}: {e}")))
+    };
+    Ok(ChangeRequest {
+        id: to_u64(id)?,
+        head: cs(&head)?,
+        base: cs(&base)?,
+        status: ChangeRequestStatus::parse(&status)
+            .ok_or_else(|| StoreError::Corrupt(format!("change request status {status:?}")))?,
+        landed: landed.as_deref().map(cs).transpose()?,
+        conflicts: conflicts.unwrap_or_default(),
+    })
 }
 
 #[async_trait]
@@ -694,5 +729,89 @@ impl MetadataStore for PostgresStore {
                 Ok((sha, cs))
             })
             .collect()
+    }
+
+    async fn submit_change_request(
+        &self,
+        repo: &str,
+        head: ChangesetId,
+        base: ChangesetId,
+    ) -> Result<ChangeRequest> {
+        let repo_id = self.repo(repo).await?;
+        let row: ChangeRequestRow = sqlx::query_as(&format!(
+            "INSERT INTO change_requests AS c (repo, head_cs, base_cs) VALUES ($1, $2, $3) \
+             RETURNING {CHANGE_REQUEST_COLUMNS}"
+        ))
+        .bind(repo_id)
+        .bind(head.as_bytes().as_slice())
+        .bind(base.as_bytes().as_slice())
+        .fetch_one(&self.pool)
+        .await?;
+        change_request(row)
+    }
+
+    async fn get_change_request(&self, repo: &str, id: u64) -> Result<Option<ChangeRequest>> {
+        let row: Option<ChangeRequestRow> = sqlx::query_as(&format!(
+            "SELECT {CHANGE_REQUEST_COLUMNS} FROM change_requests c JOIN repos r ON r.id = c.repo \
+             WHERE r.name = $1 AND c.id = $2"
+        ))
+        .bind(repo)
+        .bind(to_i64(id)?)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(change_request).transpose()
+    }
+
+    async fn claim_next_change_request(&self, repo: &str) -> Result<Option<ChangeRequest>> {
+        // The oldest pending row through `change_requests_pending`; a row
+        // another claim holds is skipped, never waited on or returned twice.
+        let row: Option<ChangeRequestRow> = sqlx::query_as(&format!(
+            "UPDATE change_requests c SET status = 'landing' \
+             WHERE (c.repo, c.id) = (SELECT p.repo, p.id FROM change_requests p \
+             JOIN repos r ON r.id = p.repo WHERE r.name = $1 AND p.status = 'pending' \
+             ORDER BY p.submitted_at, p.id LIMIT 1 FOR UPDATE OF p SKIP LOCKED) \
+             RETURNING {CHANGE_REQUEST_COLUMNS}"
+        ))
+        .bind(repo)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(change_request).transpose()
+    }
+
+    async fn finish_change_request(
+        &self,
+        repo: &str,
+        id: u64,
+        outcome: LandOutcome,
+    ) -> Result<ChangeRequest> {
+        let status = outcome.status();
+        let (landed, conflicts) = match outcome {
+            LandOutcome::Landed(cs) => (Some(cs.as_bytes().to_vec()), None),
+            LandOutcome::NeedsRebase(paths) => (None, Some(paths)),
+            LandOutcome::Rejected => (None, None),
+        };
+        let row: Option<ChangeRequestRow> = sqlx::query_as(&format!(
+            "UPDATE change_requests c SET status = $3::change_request_status, landed_cs = $4, \
+             conflicts = $5, landed_at = CASE WHEN $4::bytea IS NULL THEN NULL ELSE now() END \
+             FROM repos r WHERE r.id = c.repo AND r.name = $1 AND c.id = $2 \
+             AND c.status = 'landing' RETURNING {CHANGE_REQUEST_COLUMNS}"
+        ))
+        .bind(repo)
+        .bind(to_i64(id)?)
+        .bind(status.as_str())
+        .bind(landed)
+        .bind(conflicts)
+        .fetch_optional(&self.pool)
+        .await?;
+        if let Some(row) = row {
+            return change_request(row);
+        }
+        match self.get_change_request(repo, id).await? {
+            None => Err(StoreError::ChangeRequestNotFound(id)),
+            Some(cr) => Err(StoreError::ChangeRequestNotLanding {
+                id,
+                status: cr.status,
+            }),
+        }
     }
 }
