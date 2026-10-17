@@ -86,11 +86,15 @@ clone, its best case, while `scn` runs them in a sparse clone, its normal case.
 The measurements so far, on the 600-commit slice `scripts/bench-real` imports (4 vCPU, the
 compose Postgres + RustFS stack): import takes about 6× git's push when the objects are already
 in the bucket and about 19× into an empty one, where the object store's write rate is the bound.
-`log` and `blame` are measured twice, cold (the first call for a new repository) and warm. Warm,
-both are at git's time (27 ms against 27 ms for a path `log`, 55 ms against 48 ms for `blame` of
-a 4,738-line file with 44 versions). Cold, a path `log` of 428 changes takes about 750 ms
-against git's 22 ms, one object-store read per change, and that `blame` about 375 ms against
-48 ms. Closing the rest of those gaps is Phase 6.12.
+`log` and `blame` are measured twice, cold (the first call for a new repository) and warm.
+Medians of three runs at commit `c77c55e`: warm `blame` of a 4,738-line file with 44 versions
+takes 15 ms against git's 50–75 ms, and commit + `land` 43–47 ms against 44–57 ms. Warm path
+`log` is within about 3 ms of git: interleaved over 41 runs, 24.7 ms against 21.5 ms. Cold, a path
+`log` of 428 changes takes about 850 ms against git's 25–28 ms, one object-store read per
+change, and that `blame` about 430 ms against 52–67 ms. Git's own times moved between runs on
+the shared machine, so the ranges are the honest figure. Whether the cold rows must reach the
+6.12 criteria (path `log` within 20× git, `blame` within 5×) or the criteria change is an open
+question ([#71](https://github.com/tekeburak/scion/issues/71)).
 
 ## What are the known limits today?
 
