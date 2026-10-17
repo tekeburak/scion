@@ -125,6 +125,85 @@ by one team on one machine before any release work.
   *Accepted when* the quickstart works verbatim on a clean machine with Docker and the
   toolchain, and the import row in the README is the cold one.
 
+## Phase 5: change requests and the land worker
+
+A change request asks the server to land a head on `main`. One serial
+worker per repository inside `scion-server` takes pending requests in submission order,
+rebases each onto the current `main` through `scion_core::rebase` (the same path as the
+`Rebase` RPC), and moves `main` with one compare-and-swap; there is no CI gate, no global
+lock and no blind retry (see "Landing changes" in `docs/ARCHITECTURE.md`). A conflict marks
+the request `needs_rebase` with its paths. Requests live in the existing `change_requests`
+table (invariant 7: every query is scoped by `repo`), which also answers "when did X land"
+(invariant 1). Merges and reverts are server-side, record file changes against the first
+parent only (invariant 8), and add no field to `Changeset` (invariant 4). Throughput is the
+goal: many agents landing at once must not queue behind each other's client round trips.
+
+- **5.1 Change-request store API.** `MetadataStore` gains `submit_change_request`,
+  `get_change_request`, `claim_next_change_request` (oldest `pending` → `landing`, through the
+  `change_requests_pending` index) and `finish_change_request` (`landed` with `landed_cs`, or
+  `needs_rebase` with conflicts, or `rejected` when the rebase would land nothing), on the
+  memory and Postgres
+  stores. *Accepted when* the conformance suite covers every transition on both stores, an
+  illegal transition is refused, and a request of one repository is invisible from another.
+- **5.2 `SubmitChangeRequest` and `GetChangeRequest` RPCs.** Submit validates at the boundary
+  (the head exists in the repository) and records `main`'s current changeset as `base_cs`;
+  Get returns status, `landed_cs` and conflicts. *Accepted when* a server test submits and
+  reads back a request, and an unknown head or repository is NOT_FOUND.
+- **5.3 Serial land worker.** One task per repository with pending requests, woken by a submit
+  and started for every repository with pending or `landing` requests when the server starts.
+  It claims the oldest request, rebases its head onto `main`'s current changeset, creates the
+  rebased changesets through the shared create path, and moves `main` by CAS. A lost CAS
+  happens only when another writer (`MoveRef`, an import) moved `main`, so it rebases onto the
+  new `main`, bounded by how far `main` moved. *Accepted when* 64 non-conflicting requests submitted concurrently
+  all land, `main` stays linear, and each request's `landed_cs` contains its change.
+- **5.4 Conflicts and crash recovery.** A rebase conflict finishes the request `needs_rebase`
+  with the conflicting paths and leaves `main` untouched; a request found `landing` at start
+  resumes, and landing is idempotent because rebased changesets are content-addressed (a
+  repeated rebase recreates the same ids). *Accepted when* a test with two requests editing
+  the same lines lands the first and marks the second with that path, and a test that stops
+  the worker between create and CAS lands that request exactly once after a restart.
+- **5.5 `scn land` through change requests.** `scn land` submits the current head and waits
+  for the outcome, printing the landed changeset or the conflicting paths and the `scn update`
+  that resolves them; `--no-wait` prints the request id and `scn land --status <id>` reads it.
+  A fast-forward still lands in one round trip through the same worker. *Accepted when* the
+  e2e test has two clones land non-overlapping edits at the same time with no `update` between
+  and both land.
+- **5.6 Listing requests.** `ListChangeRequests(repo, status, limit)` and `scn requests
+  [--status <s>] [-n <limit>]` list the newest requests first, through an index on
+  `(repo, submitted_at)`, never a scan. *Accepted when* a store test with 1,000 requests
+  returns the newest `limit` of a status in submission order, and `scn requests` shows id,
+  status, head, landed changeset and age.
+- **5.7 "When did X land".** `FindLanding(repo, changeset)` returns the request that landed a
+  changeset (as its head or as its rebased `landed_cs`), with the time, through an
+  index on `(repo, landed_cs)` and `(repo, head_cs)` added in a new migration; `scn log
+  --landed` shows the request id and time on each line. *Accepted when* the lookup is one
+  indexed query (a test with 1,000 landed requests checks the plan) and a rebased change is
+  found from both its original and its landed id.
+- **5.8 Server-side merge.** A `Merge` RPC creates a two-parent changeset from `ours` and
+  `theirs` through `scion_core::merge`, with file changes against `ours` only (invariant 8),
+  or returns the conflicting paths without creating anything; `scn merge <rev>` merges a
+  revision (e.g. a `release/*` fix) into the working head. *Accepted when* the e2e test merges
+  a `release/1` change into a head that then lands on `main`, and `blame` of the merged file
+  attributes the release lines to their release changeset.
+- **5.9 Conflict markers on `update`.** `scn update --conflicts` writes three-way conflict
+  markers (from `scion-diff3`) into each conflicting file of the working copy instead of
+  refusing, records the rebase target, and the next `scn commit` creates the resolved
+  changeset on top of it. *Accepted when* a test with a same-line edit pair resolves through
+  markers and `land`s, and plain `scn update` keeps refusing without touching the working copy.
+- **5.10 Server-side revert.** A `Revert` RPC creates a changeset on a head that undoes one
+  changeset's file changes (refused with the paths changed since), and `scn revert <rev>`
+  makes it the working copy's head. *Accepted when* reverting a landed changeset and landing
+  the revert restores the previous tree id exactly.
+- **5.11 Concurrent-land benchmark.** `scripts/bench-real` gains `land, 16 writers`: 16 clones
+  each commit and land one non-overlapping edit at once, against 16 git clones running the
+  usual fetch-rebase-push retry loop, recording total time, p50 and p99 per land. *Accepted
+  when* the README shows the row and Scion's total for 16 writers is below git's.
+- **5.12 Docs.** `docs/ARCHITECTURE.md` "Landing changes" loses its *planned* mark and
+  describes the worker, request states, recovery and `FindLanding`; the README gets a "Land
+  with change requests" how-to and the status and roadmap figures show Phase 5 done. *Accepted
+  when* following the how-to on the compose stack lands two concurrent changes and
+  `scripts/render-assets.py --check` passes.
+
 ## Phase 9: release and onboarding
 
 Steps are added when the phase starts (after Phase 7, so a released server has
