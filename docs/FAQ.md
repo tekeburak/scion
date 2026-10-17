@@ -86,8 +86,9 @@ The comparison favours git where it can: git runs `status`, `log`, `blame` and `
 clone, its best case, while `scn` runs them in a sparse clone, its normal case.
 
 The measurements so far, on the 600-commit slice `scripts/bench-real` imports (4 vCPU, the
-compose Postgres + RustFS stack): import takes about 6× git's push when the objects are already
-in the bucket and about 19× into an empty one, where the object store's write rate is the bound.
+compose Postgres + RustFS stack): import takes 7,919 ms against git's 1,463 ms (5.4×) in the
+README table, where the objects are already in the bucket; into an empty bucket the runs in #62 and #63
+measured about 19×, where the object store's write rate is the bound.
 `log` and `blame` are measured twice, cold (the first call for a new repository) and warm.
 Medians of three runs at commit `a0c0c7e` (the README table): warm `blame` of a 4,738-line
 file with 44 versions takes 11 ms against git's 59 ms, warm path `log` 24 ms against 24 ms, and

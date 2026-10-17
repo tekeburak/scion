@@ -159,12 +159,15 @@ forward them and never decide access themselves. Authorization is repo- and dire
 
 Every phase-6+ benchmark runs the same workloads against git and against public
 implementations of the same reference design, on the same machine. Scion is expected to be at
-least as fast on each workload except import, and a regression against any of them is a bug.
-Import is held to at most ten times git's time (Phase 6.11): git writes local packfiles, Scion
-writes one immutable object per blob and tree to a remote object store. The workloads cover
-import, full and sparse checkout, status, one-file commit, land, log and blame; the results go
-into a table in `README.md` (Phase 6.13, not published yet) and the measurement script
-(`scripts/bench-real`) stays in the repository.
+least as fast on each workload except import and the cold (first-call) `log` and `blame`, and a
+regression against any of them is a bug. Import is held to at most ten times git's time
+(Phase 6.11): git writes local packfiles, Scion writes one immutable object per blob and tree
+to a remote object store. A cold `log` or `blame` pays one object-store read per pointer hop,
+so Phase 6.12 holds a cold path `log` within 20× git and a cold `blame` within 5×. The
+workloads cover import, full and sparse checkout, status, one-file commit, land, log and blame;
+the results are the Benchmarks table and chart in `README.md` (Phase 6.13), rendered from
+`docs/bench-real.csv`, and the measurement script (`scripts/bench-real`) stays in the
+repository.
 
 ### Ingestion dependency
 
