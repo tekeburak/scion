@@ -108,13 +108,21 @@ change writes one history object however deep the file is.
 Every history entry also names the node its last change replaced (its directory's node at
 that changeset's first parent), carried along unchanged while the entry is. A path's log is
 therefore one lookup at the head and then one object read per change to that path, with no
-metadata read. `Blame` does not read its parents' values, so deriving it skips the ancestor
-walk that other types need. A changeset's blame node holds the files it changed; each is
-attributed along its own version chain, found through those same pointers (or `copy_from`),
-back to the newest version whose blame is stored or to the file's creation, with one round
-trip per version and the versions' contents read concurrently. Only the requested changeset's
-node is stored, so a cold blame costs the versions of the files that changeset touched, not
-the history.
+metadata read. Those reads need not wait on each other: an entry also counts the changes
+before it on its chain and names the node holding the change at the last multiple of 16 below
+it (its anchor, computed from the previous entry without a read). A log follows the anchors
+and walks the segments between them concurrently, so a thousand changes cost about 80 reads in
+sequence rather than a thousand.
+
+`Blame` does not read its parents' values, so deriving it skips the ancestor walk that other
+types need. A changeset's blame node holds the files it changed; each is attributed along its
+own version chain, found through those same pointers (or `copy_from`), back to the newest
+version whose blame is stored or to the file's creation. The chain's changesets and stored
+blame pointers are read in batches of one metadata query each, the versions' contents
+concurrently, and the line diffs between consecutive versions (a histogram diff) on the
+blocking pool in parallel; only applying them to the attribution runs in order. Only the
+requested changeset's node is stored, so a cold blame costs the versions of the files that
+changeset touched, not the history.
 
 ### Landing changes
 

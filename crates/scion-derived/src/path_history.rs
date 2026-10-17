@@ -24,14 +24,20 @@
 //! the head and then one node read per change ([`HistoryEntry::previous`]),
 //! so a path's log costs O(depth + changes to that path) object reads and no
 //! metadata read, never a scan of the changeset log.
+//!
+//! Those reads need not wait on each other: an entry also counts the changes
+//! before it on its chain (its height) and names the node holding the change
+//! at the last multiple of [`ANCHOR_STEP`] below it. [`HistoryEntry::chain`]
+//! follows the anchors and walks the segments between them concurrently, so
+//! `n` changes cost about `n / ANCHOR_STEP + ANCHOR_STEP` reads in sequence.
 
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures_util::{StreamExt, TryStreamExt, stream};
+use futures_util::{Stream, StreamExt, TryStreamExt, stream};
 use scion_store::ObjectStore;
-use scion_types::canonical::{Reader, Writer};
+use scion_types::canonical::{CanonicalError, Reader, Writer};
 use scion_types::{
     BlobId, Changeset, ChangesetId, PathComponent, RepoPath, Tree, TreeEntry, TreeId,
 };
@@ -42,6 +48,13 @@ use crate::{Derivable, DeriveError, Deriver, Result, RootTree};
 /// A page is closed once its nodes' encodings reach this many bytes. Small
 /// enough that a page stays in the object store's memo of small blobs.
 const PAGE_BYTES: usize = 16 << 10;
+
+/// Heights at multiples of this are anchors: every entry names the node
+/// holding the newest anchor below it on its chain.
+pub const ANCHOR_STEP: u64 = 16;
+
+/// Segments of a chain walked at once by [`HistoryEntry::chain`].
+const SEGMENTS: usize = 32;
 
 /// A stored history node: the page (blob) holding it and its index there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -54,39 +67,84 @@ pub struct NodeAt {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct PathHistory(pub NodeAt);
 
+/// The change that last touched a tree entry, and where its chain goes on.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Change {
+    /// The most recent first-parent ancestor that changed the entry.
+    pub last_changed: ChangesetId,
+    /// The history node of the entry's directory at
+    /// `first_parent(last_changed)`, the node `last_changed` rewrote; `None`
+    /// when the directory did not exist there.
+    pub replaced: Option<NodeAt>,
+    /// Changes to the entry before this one: 0 for the change that created it.
+    pub height: u64,
+    /// The node of the entry's directory holding the change at
+    /// [`Change::anchor_height`]; `None` at height 0.
+    pub anchor: Option<NodeAt>,
+}
+
+impl Change {
+    /// `last_changed` changing an entry whose previous change, found in the
+    /// node `replaced`, was `before`.
+    fn after(
+        last_changed: ChangesetId,
+        replaced: Option<NodeAt>,
+        before: Option<&HistoryEntry>,
+    ) -> Self {
+        let Some(before) = before.map(HistoryEntry::change) else {
+            return Self {
+                last_changed,
+                replaced,
+                height: 0,
+                anchor: None,
+            };
+        };
+        Self {
+            last_changed,
+            replaced,
+            height: before.height + 1,
+            anchor: if before.height % ANCHOR_STEP == 0 {
+                replaced
+            } else {
+                before.anchor
+            },
+        }
+    }
+
+    /// The height of the change `anchor` holds: the largest multiple of
+    /// [`ANCHOR_STEP`] below this one's.
+    #[must_use]
+    pub fn anchor_height(&self) -> Option<u64> {
+        (self.height > 0).then(|| (self.height - 1) / ANCHOR_STEP * ANCHOR_STEP)
+    }
+}
+
 /// History of one tree entry.
-///
-/// `replaced` is the history node of the entry's directory at
-/// `first_parent(last_changed)`, the node `last_changed` rewrote; `None` when
-/// the directory did not exist there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HistoryEntry {
-    File {
-        last_changed: ChangesetId,
-        replaced: Option<NodeAt>,
-    },
-    Dir {
-        last_changed: ChangesetId,
-        replaced: Option<NodeAt>,
-        node: NodeAt,
-    },
+    File(Change),
+    Dir { change: Change, node: NodeAt },
 }
 
 impl HistoryEntry {
+    /// The entry's last change.
+    #[must_use]
+    pub fn change(&self) -> &Change {
+        match self {
+            Self::File(change) | Self::Dir { change, .. } => change,
+        }
+    }
+
     /// The most recent first-parent ancestor that changed this entry.
     #[must_use]
     pub fn last_changed(&self) -> ChangesetId {
-        match self {
-            Self::File { last_changed, .. } | Self::Dir { last_changed, .. } => *last_changed,
-        }
+        self.change().last_changed
     }
 
     /// The node this entry's last change replaced.
     #[must_use]
     pub fn replaced(&self) -> Option<NodeAt> {
-        match self {
-            Self::File { replaced, .. } | Self::Dir { replaced, .. } => *replaced,
-        }
+        self.change().replaced
     }
 
     /// The entry `name` (this entry's own name) had at
@@ -102,6 +160,81 @@ impl HistoryEntry {
         };
         HistoryNode::entry(objects, at, name).await
     }
+
+    /// The entry `name` has at its anchor, checked to be at the anchor's
+    /// height; `None` at height 0. One node read.
+    async fn anchored(
+        &self,
+        objects: &dyn ObjectStore,
+        name: &PathComponent,
+    ) -> Result<Option<Self>> {
+        let (Some(at), Some(height)) = (self.change().anchor, self.change().anchor_height()) else {
+            return Ok(None);
+        };
+        match HistoryNode::entry(objects, at, name).await? {
+            Some(entry) if entry.change().height == height => Ok(Some(entry)),
+            _ => Err(DeriveError::CorruptObject(at.page)),
+        }
+    }
+
+    /// This entry and the earlier changes to it, newest first: the entries
+    /// at heights `self.height` down to `lowest`, each `previous` of the one
+    /// before. The anchors are read one after another, and the segment below
+    /// each is walked as soon as the anchor is known.
+    pub fn chain<'a>(
+        self,
+        objects: &'a dyn ObjectStore,
+        name: &'a PathComponent,
+        lowest: u64,
+    ) -> impl Stream<Item = Result<Self>> + Send + 'a {
+        let starts = stream::try_unfold(Some(self), move |start| async move {
+            let Some(start) = start else {
+                return Ok(None);
+            };
+            let next = match start.change().anchor_height() {
+                Some(height) if height >= lowest => start.anchored(objects, name).await?,
+                _ => None,
+            };
+            Ok(Some((start, next)))
+        });
+        starts
+            .map_ok(move |start| start.segment(objects, name, lowest))
+            .try_buffered(SEGMENTS)
+            .map_ok(|segment| stream::iter(segment.into_iter().map(Ok)))
+            .try_flatten()
+    }
+
+    /// This entry and the ones before it down to its anchor (exclusive) or
+    /// `lowest` (inclusive), newest first.
+    async fn segment(
+        self,
+        objects: &dyn ObjectStore,
+        name: &PathComponent,
+        lowest: u64,
+    ) -> Result<Vec<Self>> {
+        let stop = self
+            .change()
+            .anchor_height()
+            .map_or(0, |height| height + 1)
+            .max(lowest);
+        let mut out = vec![self];
+        let mut entry = self;
+        while entry.change().height > stop {
+            match entry.previous(objects, name).await? {
+                Some(before) if before.change().height + 1 == entry.change().height => {
+                    out.push(before);
+                    entry = before;
+                }
+                _ => {
+                    return Err(DeriveError::CorruptPointer {
+                        ty: PathHistory::NAME,
+                        cs: entry.last_changed(),
+                    });
+                }
+            }
+        }
+        Ok(out)
+    }
 }
 
 /// One directory's worth of history entries.
@@ -115,11 +248,7 @@ pub struct HistoryNode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PageEntry {
     Stored(HistoryEntry),
-    Here {
-        last_changed: ChangesetId,
-        replaced: Option<NodeAt>,
-        index: u32,
-    },
+    Here { change: Change, index: u32 },
 }
 
 type PageNode = BTreeMap<PathComponent, PageEntry>;
@@ -133,10 +262,26 @@ fn write_node_at(w: &mut Writer, at: &NodeAt) {
     w.u64(u64::from(at.index));
 }
 
-fn read_node_at(r: &mut Reader<'_>) -> Option<NodeAt> {
-    Some(NodeAt {
-        page: BlobId::from_bytes(r.id().ok()?),
-        index: u32::try_from(r.u64().ok()?).ok()?,
+fn read_node_at(r: &mut Reader<'_>) -> std::result::Result<NodeAt, CanonicalError> {
+    Ok(NodeAt {
+        page: BlobId::from_bytes(r.id()?),
+        index: u32::try_from(r.u64()?).map_err(|_| CanonicalError::LengthOverflow)?,
+    })
+}
+
+fn write_change(w: &mut Writer, change: &Change) {
+    w.id(change.last_changed.as_bytes());
+    w.opt(change.replaced.as_ref(), write_node_at);
+    w.u64(change.height);
+    w.opt(change.anchor.as_ref(), write_node_at);
+}
+
+fn read_change(r: &mut Reader<'_>) -> Option<Change> {
+    Some(Change {
+        last_changed: ChangesetId::from_bytes(r.id().ok()?),
+        replaced: r.opt(read_node_at).ok()?,
+        height: r.u64().ok()?,
+        anchor: r.opt(read_node_at).ok()?,
     })
 }
 
@@ -145,27 +290,15 @@ fn encode_page(nodes: &[PageNode]) -> Vec<u8> {
     w.seq(nodes.iter(), |w, node| {
         w.seq(node.iter(), |w, (name, entry)| {
             w.str(name.as_str());
-            let (tag, last_changed, replaced) = match entry {
-                PageEntry::Stored(HistoryEntry::File {
-                    last_changed,
-                    replaced,
-                }) => (ENTRY_FILE, last_changed, replaced),
-                PageEntry::Stored(HistoryEntry::Dir {
-                    last_changed,
-                    replaced,
-                    ..
-                }) => (ENTRY_DIR, last_changed, replaced),
-                PageEntry::Here {
-                    last_changed,
-                    replaced,
-                    ..
-                } => (ENTRY_DIR_HERE, last_changed, replaced),
+            let (tag, change) = match entry {
+                PageEntry::Stored(HistoryEntry::File(change)) => (ENTRY_FILE, change),
+                PageEntry::Stored(HistoryEntry::Dir { change, .. }) => (ENTRY_DIR, change),
+                PageEntry::Here { change, .. } => (ENTRY_DIR_HERE, change),
             };
             w.u8(tag);
-            w.id(last_changed.as_bytes());
-            w.opt(replaced.as_ref(), write_node_at);
+            write_change(w, change);
             match entry {
-                PageEntry::Stored(HistoryEntry::File { .. }) => {}
+                PageEntry::Stored(HistoryEntry::File(_)) => {}
                 PageEntry::Stored(HistoryEntry::Dir { node, .. }) => write_node_at(w, node),
                 PageEntry::Here { index, .. } => w.u64(u64::from(*index)),
             }
@@ -192,21 +325,12 @@ fn walk_node(
         for _ in 0..r.seq_len().ok()? {
             let name = r.bytes().ok()?;
             let tag = r.u8().ok()?;
-            let last_changed = ChangesetId::from_bytes(r.id().ok()?);
-            let replaced = match r.u8().ok()? {
-                0 => None,
-                1 => Some(read_node_at(&mut r)?),
-                _ => return None,
-            };
+            let change = read_change(&mut r)?;
             let entry = match tag {
-                ENTRY_FILE => HistoryEntry::File {
-                    last_changed,
-                    replaced,
-                },
+                ENTRY_FILE => HistoryEntry::File(change),
                 ENTRY_DIR => HistoryEntry::Dir {
-                    last_changed,
-                    replaced,
-                    node: read_node_at(&mut r)?,
+                    change,
+                    node: read_node_at(&mut r).ok()?,
                 },
                 ENTRY_DIR_HERE => {
                     let index = u32::try_from(r.u64().ok()?).ok()?;
@@ -215,8 +339,7 @@ fn walk_node(
                         return None;
                     }
                     HistoryEntry::Dir {
-                        last_changed,
-                        replaced,
+                        change,
                         node: NodeAt { page, index },
                     }
                 }
@@ -298,8 +421,7 @@ enum Built {
 /// An entry of a node being written; `dir` is set for a directory.
 struct NewEntry {
     name: PathComponent,
-    last_changed: ChangesetId,
-    replaced: Option<NodeAt>,
+    change: Change,
     dir: Option<Built>,
 }
 
@@ -316,32 +438,18 @@ impl Pages {
     fn push(&mut self, entries: Vec<NewEntry>) -> Built {
         let page = self.closed.len();
         let mut node = PageNode::new();
-        for NewEntry {
-            name,
-            last_changed,
-            replaced,
-            dir,
-        } in entries
-        {
-            self.open_bytes += name.as_str().len() + 104;
+        for NewEntry { name, change, dir } in entries {
+            self.open_bytes += name.as_str().len() + 153;
             let entry = match dir {
-                None => PageEntry::Stored(HistoryEntry::File {
-                    last_changed,
-                    replaced,
-                }),
-                Some(Built::Stored(at)) => PageEntry::Stored(HistoryEntry::Dir {
-                    last_changed,
-                    replaced,
-                    node: at,
-                }),
-                Some(Built::New { page: p, index }) if p == page => PageEntry::Here {
-                    last_changed,
-                    replaced,
-                    index,
-                },
+                None => PageEntry::Stored(HistoryEntry::File(change)),
+                Some(Built::Stored(at)) => {
+                    PageEntry::Stored(HistoryEntry::Dir { change, node: at })
+                }
+                Some(Built::New { page: p, index }) if p == page => {
+                    PageEntry::Here { change, index }
+                }
                 Some(Built::New { page: p, index }) => PageEntry::Stored(HistoryEntry::Dir {
-                    last_changed,
-                    replaced,
+                    change,
                     node: NodeAt {
                         page: self.closed[p].0,
                         index,
@@ -381,7 +489,7 @@ impl Pages {
 #[async_trait]
 impl Derivable for PathHistory {
     const NAME: &'static str = "path_history";
-    const VERSION: u32 = 3;
+    const VERSION: u32 = 4;
 
     async fn derive(ctx: &Deriver<'_>, cs: &Changeset, parents: &[Self]) -> Result<Self> {
         let cs_id = cs.id();
@@ -460,13 +568,12 @@ async fn rebuild(
                 .get(name)
                 .ok_or(DeriveError::CorruptObject(old.expect("old exists").1.page))?;
             let dir = match unchanged {
-                HistoryEntry::File { .. } => None,
+                HistoryEntry::File(_) => None,
                 HistoryEntry::Dir { node, .. } => Some(Built::Stored(*node)),
             };
             entries.push(NewEntry {
                 name: name.clone(),
-                last_changed: unchanged.last_changed(),
-                replaced: unchanged.replaced(),
+                change: *unchanged.change(),
                 dir,
             });
             continue;
@@ -485,8 +592,11 @@ async fn rebuild(
         };
         entries.push(NewEntry {
             name: name.clone(),
-            last_changed: cs,
-            replaced: old.map(|(_, history)| history),
+            change: Change::after(
+                cs,
+                old.map(|(_, history)| history),
+                old_history.entries.get(name),
+            ),
             dir,
         });
     }
@@ -593,25 +703,32 @@ mod tests {
             index: 1,
         });
         let name = |s| PathComponent::new(s).unwrap();
-        let file = HistoryEntry::File {
+        let first = Change {
             last_changed: a,
             replaced: None,
+            height: 0,
+            anchor: None,
         };
+        let later = Change {
+            last_changed: b,
+            replaced: before,
+            height: 20,
+            anchor: Some(elsewhere),
+        };
+        let file = HistoryEntry::File(first);
         let child = PageNode::from([(name("f"), PageEntry::Stored(file))]);
         let parent = PageNode::from([
             (
                 name("d"),
                 PageEntry::Here {
-                    last_changed: b,
-                    replaced: before,
+                    change: later,
                     index: 0,
                 },
             ),
             (
                 name("e"),
                 PageEntry::Stored(HistoryEntry::Dir {
-                    last_changed: a,
-                    replaced: before,
+                    change: later,
                     node: elsewhere,
                 }),
             ),
@@ -627,8 +744,7 @@ mod tests {
         assert_eq!(
             parent.entries[&name("d")],
             HistoryEntry::Dir {
-                last_changed: b,
-                replaced: before,
+                change: later,
                 node: NodeAt { page, index: 0 },
             },
             "a child in the same page is named by the page being read"
@@ -636,8 +752,7 @@ mod tests {
         assert_eq!(
             parent.entries[&name("e")],
             HistoryEntry::Dir {
-                last_changed: a,
-                replaced: before,
+                change: later,
                 node: elsewhere,
             }
         );
@@ -646,8 +761,7 @@ mod tests {
         let forward = encode_page(&[PageNode::from([(
             name("d"),
             PageEntry::Here {
-                last_changed: b,
-                replaced: None,
+                change: first,
                 index: 0,
             },
         )])]);

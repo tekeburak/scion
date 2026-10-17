@@ -46,7 +46,7 @@ Postgres + S3, and `scn` can `clone --sparse`, `status`, `log`, `diff`, `blame`,
 `commit` (an anonymous head) and `land` (fast-forward `main` only; server-side rebase is
 Phase 5). Git import (Phase 6) works and a benchmark script runs it against git on a real
 repository; its results are not published yet. A cold `blame` or path `log` (the first call
-for a revision) is still several times slower than git (Phase 6.12).
+for a revision) takes several times git's time; the 6.12 criteria bound how many.
 The README status section tracks this.
 
 ## Can I bring an existing git repository?
@@ -88,14 +88,13 @@ The measurements so far, on the 600-commit slice `scripts/bench-real` imports (4
 compose Postgres + RustFS stack): import takes about 6× git's push when the objects are already
 in the bucket and about 19× into an empty one, where the object store's write rate is the bound.
 `log` and `blame` are measured twice, cold (the first call for a new repository) and warm.
-Medians of three runs at commit `c77c55e`: warm `blame` of a 4,738-line file with 44 versions
-takes 15 ms against git's 50–75 ms, and commit + `land` 43–47 ms against 44–57 ms. Warm path
-`log` is within about 3 ms of git: interleaved over 41 runs, 24.7 ms against 21.5 ms. Cold, a path
-`log` of 428 changes takes about 850 ms against git's 25–28 ms, one object-store read per
-change, and that `blame` about 430 ms against 52–67 ms. Git's own times moved between runs on
-the shared machine, so the ranges are the honest figure. Whether the cold rows must reach the
-6.12 criteria (path `log` within 20× git, `blame` within 5×) or the criteria change is an open
-question ([#71](https://github.com/tekeburak/scion/issues/71)).
+Medians of three runs with Phase 6.12: warm `blame` of a 4,738-line file with 44 versions takes
+11 ms against git's 58 ms, warm path `log` 22 ms against 25 ms, and commit + `land` 32 ms
+against 41 ms. Cold, a path `log` of 428 changes takes 186 ms against git's 24 ms (8×; the
+criterion is 20×), because its anchors let the object reads overlap, and that `blame` 196 ms
+against 53 ms (4×; the criterion is 5×), because its metadata reads are batched and its diffs
+run in parallel. A cold blame is still a few hundred object reads, one history node and one
+file version per version of every file the last change touched.
 
 ## What are the known limits today?
 
@@ -116,8 +115,8 @@ the roadmap step that closes it:
   reads fail. Phase 6.18 documents this in the quickstart.
 - **Concurrent creation of the same changeset** can return a spurious error to one of the
   callers; Phase 6.18 makes the write idempotent.
-- **Cold `blame` and path `log`** are several times slower than git (see above); Phase 6.12
-  and 6.15 work on them.
+- **Cold `blame` and path `log`** take several times git's time (see above); Phase 6.15
+  bounds the derivation behind them.
 
 ## Why Postgres and S3?
 

@@ -30,6 +30,10 @@ const BLOB_MEMO_BYTES: usize = 64 << 20;
 /// Blobs at most this large are memoised: derived nodes and source files,
 /// not large assets.
 const SMALL_BLOB_BYTES: usize = 64 << 10;
+/// Stored blobs at most this large are decompressed and checked on the
+/// reading task; larger ones on the blocking pool, so a request that reads
+/// many source files at once uses every core.
+const INLINE_DECODE_BYTES: usize = 16 << 10;
 /// Bytes of blob ids known to be stored.
 const PRESENT_MEMO_BYTES: usize = 8 << 20;
 
@@ -68,6 +72,17 @@ fn compress(data: &[u8]) -> Result<Vec<u8>> {
 
 fn decompress(data: &[u8]) -> Result<Vec<u8>> {
     zstd::decode_all(data).map_err(|e| StoreError::Corrupt(format!("zstd: {e}")))
+}
+
+/// The blob `id` from its stored (compressed) bytes, checked against its id.
+fn decode_blob(id: BlobId, compressed: &[u8]) -> Result<Bytes> {
+    let data = decompress(compressed)?;
+    if BlobId::hash(&data) != id {
+        return Err(StoreError::Corrupt(format!(
+            "blob {id} does not match its content"
+        )));
+    }
+    Ok(Bytes::from(data))
 }
 
 impl ObjectStorage {
@@ -154,15 +169,18 @@ impl ObjectStore for ObjectStorage {
         if let Some(bytes) = self.blobs.get(&id).await {
             return Ok(Some(bytes));
         }
-        let Some(data) = self.get_raw(&blob_key(id)).await? else {
-            return Ok(None);
+        let compressed = match self.backend.get(&blob_key(id)).await {
+            Ok(res) => res.bytes().await?,
+            Err(object_store::Error::NotFound { .. }) => return Ok(None),
+            Err(e) => return Err(e.into()),
         };
-        if BlobId::hash(&data) != id {
-            return Err(StoreError::Corrupt(format!(
-                "blob {id} does not match its content"
-            )));
-        }
-        let bytes = Bytes::from(data);
+        let bytes = if compressed.len() <= INLINE_DECODE_BYTES {
+            decode_blob(id, &compressed)?
+        } else {
+            tokio::task::spawn_blocking(move || decode_blob(id, &compressed))
+                .await
+                .unwrap_or_else(|e| std::panic::resume_unwind(e.into_panic()))?
+        };
         self.remember_blob(id, &bytes);
         Ok(Some(bytes))
     }

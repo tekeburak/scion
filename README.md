@@ -41,11 +41,10 @@ deliberate deviations from the reference design (trees in S3, canonical BLAKE3, 
 - **Real-repository benchmark (Phase 6.9–6.10 merged):** `scripts/bench-real` rebuilds a
   pinned slice of a real repository's history and times import, clone, sparse clone, `status`,
   `log`, `blame` and `land` against git on Postgres + S3, writing a CSV, with `log` and `blame`
-  measured cold (first call) and warm. Results are not published yet. Warm `blame` and
-  commit + `land` run at or below git's time and warm `log` within a few milliseconds of it;
-  cold `log` and `blame` are still about 30× and 7× git's (Phase 6.12).
-- **Next:** bounded cold `log` and `blame` (Phase 6.12), the results as a table and chart in
-  this README (6.13), an import how-to (6.14), then the steps that make the MVP usable by a
+  measured cold (first call) and warm. Results are not published yet. Warm `log` and `blame`
+  and commit + `land` run at or below git's time; cold, a path `log` takes about 8× git's and a
+  `blame` about 4× (Phase 6.12).
+- **Next:** the benchmark results as a table and chart in this README (6.13), an import how-to (6.14), then the steps that make the MVP usable by a
   team on one machine: bounded derivation with `backfill` (6.15), `scn init` (6.16),
   `scn update` and `scn checkout` (6.17), idempotent writes and a compose service for the
   server (6.18). After that: change requests and the land worker (Phase 5), IAM (Phase 7),

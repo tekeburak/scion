@@ -13,14 +13,14 @@ scion-store.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
 thiserror.workspace = true
-diffy.workspace = true
+imara-diff.workspace = true
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
+tokio.workspace = true
 
 proptest = { workspace = true, optional = true }
 
 [dev-dependencies]
 proptest.workspace = true
-tokio.workspace = true
 
 [features]
 default = []

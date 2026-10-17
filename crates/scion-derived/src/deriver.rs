@@ -77,6 +77,28 @@ impl<'a> Deriver<'a> {
         }
     }
 
+    /// [`fetch`](Self::fetch) for each of `ids`, in one metadata read.
+    pub async fn fetch_many<D: Derivable>(&self, ids: &[ChangesetId]) -> Result<Vec<Option<D>>> {
+        let pointers = self
+            .meta
+            .get_derived_many(self.repo, D::NAME, D::VERSION, ids)
+            .await?;
+        ids.iter()
+            .zip(pointers)
+            .map(|(cs, pointer)| match pointer {
+                None => Ok(None),
+                Some(bytes) => {
+                    D::from_pointer(&bytes)
+                        .map(Some)
+                        .ok_or(DeriveError::CorruptPointer {
+                            ty: D::NAME,
+                            cs: *cs,
+                        })
+                }
+            })
+            .collect()
+    }
+
     /// Return the value for `target`, deriving it and any underived ancestors.
     ///
     /// Ancestors are visited in post-order so every parent is derived before

@@ -91,6 +91,18 @@ pub async fn changesets<S: MetadataStore>(s: &S) {
         s.put_changesets(&[changeset(vec![unknown], "batched orphan")]).await,
         Err(StoreError::UnknownParent(_, p)) if p == unknown
     ));
+    assert_eq!(
+        s.get_changesets(REPO, &[merge.id(), unknown, root_id, merge.id()])
+            .await
+            .unwrap(),
+        [Some(merge.clone()), None, Some(root), Some(merge)],
+        "in order, repeats and unknown ids included"
+    );
+    assert_eq!(
+        s.get_changesets("other-repo", &[root_id]).await.unwrap(),
+        [None],
+        "repo-scoped"
+    );
 }
 
 /// Refs: policy, create-once, CAS semantics, listing.
@@ -184,6 +196,21 @@ pub async fn derived<S: MetadataStore>(s: &S) {
     assert!(
         s.get_derived(REPO, "blame", 1, cs).await.unwrap().is_none(),
         "typed"
+    );
+    let unknown = ChangesetId::from_bytes([5; 32]);
+    assert_eq!(
+        s.get_derived_many(REPO, "root_tree", 1, &[other, unknown, cs])
+            .await
+            .unwrap(),
+        [Some(vec![1]), None, Some(vec![9, 9])],
+        "in order"
+    );
+    assert_eq!(
+        s.get_derived_many("other-repo", "root_tree", 1, &[cs])
+            .await
+            .unwrap(),
+        [None],
+        "repo-scoped"
     );
 }
 

@@ -21,6 +21,7 @@ mod merge;
 
 pub use merge::{Conflict, Side, ThreeWay, merge, rebase};
 
+use futures_util::TryStreamExt;
 use scion_derived::{Deriver, PathHistory, RootTree, SkipList};
 use scion_store::ObjectStore;
 use scion_types::{
@@ -229,8 +230,10 @@ pub async fn log(ctx: &Deriver<'_>, head: ChangesetId, limit: usize) -> Result<V
 
 /// Up to `limit` changesets on the first-parent chain of `head` that changed
 /// `path` (a file, or anything beneath a directory), newest first. One
-/// `PathHistory` lookup at `head`, then each step is one history-node read
-/// ([`scion_derived::HistoryEntry::previous`]) and no metadata read.
+/// `PathHistory` lookup at `head`, then history-node reads only
+/// ([`scion_derived::HistoryEntry::chain`]), about
+/// `limit / ANCHOR_STEP + ANCHOR_STEP` of them in sequence, and no metadata
+/// read.
 ///
 /// Scope: the path's *current* existence. The walk stops at the changeset
 /// that created the path as it exists at `head`; a path absent at `head`,
@@ -243,21 +246,20 @@ pub async fn path_log(
     path: &RepoPath,
     limit: usize,
 ) -> Result<Vec<ChangesetId>> {
-    let mut out = Vec::new();
     if limit == 0 {
-        return Ok(out);
+        return Ok(Vec::new());
     }
     let name = path.file_name();
     let history = ctx.derive::<PathHistory>(head).await?;
-    let mut entry = history.lookup(ctx.objects, path).await?;
-    while let Some(e) = entry {
-        out.push(e.last_changed());
-        if out.len() == limit {
-            break;
-        }
-        entry = e.previous(ctx.objects, &name).await?;
-    }
-    Ok(out)
+    let Some(entry) = history.lookup(ctx.objects, path).await? else {
+        return Ok(Vec::new());
+    };
+    let lowest = (entry.change().height + 1).saturating_sub(limit as u64);
+    entry
+        .chain(ctx.objects, &name, lowest)
+        .map_ok(|e| e.last_changed())
+        .try_collect()
+        .await
 }
 
 #[cfg(test)]
@@ -265,6 +267,7 @@ mod tests {
     use std::collections::BTreeMap;
 
     use proptest::prelude::*;
+    use scion_derived::ANCHOR_STEP;
     use scion_derived::test_util::{
         Counting, CountingMeta, Flat, REPO, arb_changes, changeset, materialize, tracked,
     };
@@ -526,6 +529,57 @@ mod tests {
                 .unwrap(),
             []
         );
+    }
+
+    #[tokio::test]
+    async fn path_log_over_anchors_equals_every_change() {
+        let store = MemoryStore::new();
+        let p = RepoPath::new("hot/file").unwrap();
+        let mut ids = Vec::new();
+        let mut touched = Vec::new();
+        for i in 0..300 {
+            let parents = ids.last().copied().into_iter().collect();
+            let mut c = BTreeMap::new();
+            let hit = i % 3 != 1;
+            if hit {
+                c.insert(p.clone(), tracked(format!("v{i}").as_bytes()));
+            } else {
+                c.insert(RepoPath::new(format!("hot/g{i}")).unwrap(), tracked(b"x"));
+            }
+            let id = store
+                .put_changeset(&changeset(parents, c, &i.to_string()))
+                .await
+                .unwrap();
+            if hit {
+                touched.push(id);
+            }
+            ids.push(id);
+        }
+        let head = ids[299];
+        Deriver::new(REPO, &store, &store)
+            .derive::<PathHistory>(head)
+            .await
+            .unwrap();
+        touched.reverse();
+        let dir: Vec<_> = ids.iter().rev().copied().collect();
+
+        let objects = Counting::new(&store);
+        let d = Deriver::new(REPO, &store, &objects);
+        assert_eq!(path_log(&d, head, &p, 1000).await.unwrap(), touched);
+        // The lookup, one read per change, and one per anchor.
+        let n = touched.len();
+        assert!(objects.blob_gets() <= 2 + n + n / usize::try_from(ANCHOR_STEP).unwrap());
+        for limit in [1, 15, 16, 17, 33, 199, 200, 201] {
+            assert_eq!(
+                path_log(&d, head, &p, limit).await.unwrap(),
+                touched[..limit.min(n)],
+                "limit {limit}"
+            );
+        }
+        // A directory changes in every changeset.
+        let hot = RepoPath::new("hot").unwrap();
+        assert_eq!(path_log(&d, head, &hot, 1000).await.unwrap(), dir);
+        assert_eq!(path_log(&d, head, &hot, 48).await.unwrap(), dir[..48]);
     }
 
     // ---- property tests: random chains ≡ naive -------------------------

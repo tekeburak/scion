@@ -13,6 +13,7 @@ scion-store.workspace = true
 scion-derived.workspace = true
 scion-diff3.workspace = true
 bytes.workspace = true
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 
 [dev-dependencies]
 scion-derived = { workspace = true, features = ["test-util"] }

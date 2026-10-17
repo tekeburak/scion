@@ -25,7 +25,7 @@ use scion_types::{BlobId, ChangesetId, TreeId};
 
 pub use blame::{Blame, BlameNode, FileBlame};
 pub use deriver::{Derivable, Deriver};
-pub use path_history::{HistoryEntry, HistoryNode, NodeAt, PathHistory};
+pub use path_history::{ANCHOR_STEP, Change, HistoryEntry, HistoryNode, NodeAt, PathHistory};
 pub use root_tree::RootTree;
 pub use skip_list::SkipList;
 

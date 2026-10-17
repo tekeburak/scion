@@ -33,6 +33,7 @@ scion-client = { path = "crates/scion-client", version = "0.0.1" }
 
 # Diff / merge
 diffy = "0.5.2"
+imara-diff = { version = "0.2", default-features = false }
 
 # Hashing / encoding
 blake3 = "1.5"

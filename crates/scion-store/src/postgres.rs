@@ -371,6 +371,48 @@ impl MetadataStore for PostgresStore {
         Ok(Some(cs))
     }
 
+    async fn get_changesets(
+        &self,
+        repo: &str,
+        ids: &[ChangesetId],
+    ) -> Result<Vec<Option<Changeset>>> {
+        let mut out = Vec::with_capacity(ids.len());
+        let mut missing = Vec::new();
+        for id in ids {
+            let cs = self.changesets.get(&(repo.to_owned(), *id)).await;
+            if cs.is_none() {
+                missing.push(id.as_bytes().to_vec());
+            }
+            out.push(cs);
+        }
+        if missing.is_empty() {
+            return Ok(out);
+        }
+        let rows: Vec<(Vec<u8>,)> = sqlx::query_as(
+            "SELECT c.canonical FROM changesets c JOIN repos r ON r.id = c.repo \
+             WHERE r.name = $1 AND c.id = ANY($2)",
+        )
+        .bind(repo)
+        .bind(&missing)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut found = HashMap::new();
+        for (canonical,) in rows {
+            let cs = Changeset::decode(&canonical)
+                .map_err(|e| StoreError::Corrupt(format!("changeset: {e}")))?;
+            let id = cs.id();
+            self.changesets
+                .insert((repo.to_owned(), id), cs.clone(), canonical.len());
+            found.insert(id, cs);
+        }
+        for (slot, id) in out.iter_mut().zip(ids) {
+            if slot.is_none() {
+                *slot = found.get(id).cloned();
+            }
+        }
+        Ok(out)
+    }
+
     async fn generation(&self, repo: &str, id: ChangesetId) -> Result<Option<u64>> {
         let row: Option<(i64,)> = sqlx::query_as(
             "SELECT c.generation FROM changesets c JOIN repos r ON r.id = c.repo \
@@ -548,6 +590,55 @@ impl MetadataStore for PostgresStore {
             self.derived.insert(key, pointer.clone(), weight);
         }
         Ok(row.map(|(p,)| p))
+    }
+
+    async fn get_derived_many(
+        &self,
+        repo: &str,
+        ty: &str,
+        version: u32,
+        ids: &[ChangesetId],
+    ) -> Result<Vec<Option<Vec<u8>>>> {
+        let key = |cs: ChangesetId| (repo.to_owned(), ty.to_owned(), version, cs);
+        let mut out = Vec::with_capacity(ids.len());
+        let mut missing = Vec::new();
+        for id in ids {
+            let pointer = self.derived.get(&key(*id)).await;
+            if pointer.is_none() {
+                missing.push(id.as_bytes().to_vec());
+            }
+            out.push(pointer);
+        }
+        if missing.is_empty() {
+            return Ok(out);
+        }
+        let rows: Vec<(Vec<u8>, Vec<u8>)> = sqlx::query_as(
+            "SELECT d.changeset_id, d.pointer FROM derived d JOIN repos r ON r.id = d.repo \
+             WHERE r.name = $1 AND d.type = $2 AND d.version = $3 AND d.changeset_id = ANY($4)",
+        )
+        .bind(repo)
+        .bind(ty)
+        .bind(
+            i32::try_from(version)
+                .map_err(|_| StoreError::Corrupt("derived version overflow".into()))?,
+        )
+        .bind(&missing)
+        .fetch_all(&self.pool)
+        .await?;
+        let mut found = HashMap::new();
+        for (cs, pointer) in rows {
+            let cs = ChangesetId::try_from_slice(&cs)
+                .map_err(|e| StoreError::Corrupt(format!("changeset id: {e}")))?;
+            let weight = pointer.len() + ty.len() + repo.len() + 40;
+            self.derived.insert(key(cs), pointer.clone(), weight);
+            found.insert(cs, pointer);
+        }
+        for (slot, id) in out.iter_mut().zip(ids) {
+            if slot.is_none() {
+                *slot = found.get(id).cloned();
+            }
+        }
+        Ok(out)
     }
 
     async fn put_ingest_checkpoints(

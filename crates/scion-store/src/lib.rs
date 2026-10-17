@@ -77,6 +77,20 @@ pub trait MetadataStore: Send + Sync {
     /// Fetch a changeset by id.
     async fn get_changeset(&self, repo: &str, id: ChangesetId) -> Result<Option<Changeset>>;
 
+    /// Fetch changesets by id, in the order of `ids`; one round trip where
+    /// the backend allows.
+    async fn get_changesets(
+        &self,
+        repo: &str,
+        ids: &[ChangesetId],
+    ) -> Result<Vec<Option<Changeset>>> {
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            out.push(self.get_changeset(repo, *id).await?);
+        }
+        Ok(out)
+    }
+
     /// The generation number of a changeset (`max(parent gen) + 1`, roots are
     /// 0), or `None` if unknown.
     async fn generation(&self, repo: &str, id: ChangesetId) -> Result<Option<u64>>;
@@ -124,6 +138,22 @@ pub trait MetadataStore: Send + Sync {
         version: u32,
         cs: ChangesetId,
     ) -> Result<Option<Vec<u8>>>;
+
+    /// Read the derived-data pointers of type `ty` at `version` for `ids`, in
+    /// their order; one round trip where the backend allows.
+    async fn get_derived_many(
+        &self,
+        repo: &str,
+        ty: &str,
+        version: u32,
+        ids: &[ChangesetId],
+    ) -> Result<Vec<Option<Vec<u8>>>> {
+        let mut out = Vec::with_capacity(ids.len());
+        for id in ids {
+            out.push(self.get_derived(repo, ty, version, *id).await?);
+        }
+        Ok(out)
+    }
 
     /// Record that each git commit `(git_sha, cs)` was imported as `cs`.
     /// Idempotent: the first record of a sha wins.
