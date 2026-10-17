@@ -46,13 +46,13 @@ ROADMAP = [
     ("5", "Change requests, land worker", "planned"),
     ("7", "IAM, fuzzing, simulation", "planned"),
     ("9", "Release and onboarding", "planned"),
-    ("4", "Cache and daemon tiers", "planned"),
+    ("4", "Cache + daemon tiers", "planned"),
     ("8", "Virtual checkouts (FUSE / NFS)", "planned"),
 ]
 # Phases run in the order listed: git import comes right after the MVP so real repositories
 # can be tested and benchmarked.
 STATUS_DONE = "MVP done: scion-server on Postgres + S3, scn clone --sparse, status, log, diff, blame, add, commit, land"
-STATUS_NEXT = "in progress: Phase 6 git import (6.1-6.11 merged; next: log/blame/land as fast as git, publish results), then 5, 7, 9, 4, 8"
+STATUS_NEXT = "in progress: Phase 6 git import (6.1-6.11 merged; next: cold log/blame (6.12), publish results (6.13)), then 5, 7, 9, 4, 8"
 
 
 def t(x, y, s, size=20, fill=TEXT, weight=400, anchor="start", mono=False, extra=""):

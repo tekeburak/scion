@@ -74,11 +74,12 @@ rewrites only the directories on the changed paths: one changed file at depth fo
 
 ## Is it faster than git?
 
-Not measured on a real repository yet. The README's benchmark table is synthetic: generated
-files, an in-memory store and no cache tier. The real-repository comparison
-(`scripts/bench-real`) runs, but its results are not published until Phase 6.13. The targets
-are set in `docs/ROADMAP.md`: `log`, `blame` and `land` at least as fast as git (6.12), and
-import within ten times git's time (6.11). Import is not expected to match git, because Scion
+Partly, once warm. The README's benchmark table is synthetic: generated files, an in-memory
+store and no cache tier. The real-repository comparison (`scripts/bench-real`) runs, and the
+figures below come from it, but its table and chart arrive with Phase 6.13. The targets are
+set in `docs/ROADMAP.md`: import within ten times git's time (6.11); warm `log` and `blame` and
+commit + `land` at or below git's time, cold `blame` within 5× git and cold path `log` within
+20× (6.12). Import is not expected to match git, because Scion
 writes every blob and tree as its own object to a remote store while git writes local packfiles.
 The comparison favours git where it can: git runs `status`, `log`, `blame` and `land` in a full
 clone, its best case, while `scn` runs them in a sparse clone, its normal case.
