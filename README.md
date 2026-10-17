@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://github.com/tekeburak/scion/actions/workflows/ci.yml"><img src="https://github.com/tekeburak/scion/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="LICENSE"><img src="docs/assets/badge-license.svg" alt="license: Apache-2.0"></a>
-  <a href="#status"><img src="docs/assets/badge-status.svg" alt="status: MVP, Phase 6 in progress"></a>
+  <a href="#status"><img src="docs/assets/badge-status.svg" alt="status: MVP, Phase 5 next"></a>
 </p>
 
 <p align="center"><b>A server-authoritative source control system for one very large monorepo whose
@@ -23,10 +23,10 @@ deliberate deviations from the reference design (trees in S3, canonical BLAKE3, 
 ## Status
 
 <p align="center">
-  <img src="docs/assets/roadmap.svg" width="800" alt="Phases 0 to 3 done; Phase 6 in progress; then Phases 5, 7, 9, 4 and 8 planned in that order">
+  <img src="docs/assets/roadmap.svg" width="800" alt="Phases 0 to 3 and 6 done; then Phases 5, 7, 9, 4 and 8 planned in that order">
 </p>
 
-**MVP (Phase 3) done; git import (Phase 6) in progress. Not production-ready: no auth, no cache tiers.**
+**MVP (Phase 3) and git import (Phase 6) done; change requests (Phase 5) next. Not production-ready: no auth, no cache tiers.**
 
 - **Works today:** `scion-server` serves the object and control gRPC services over Postgres +
   S3 (`log`, `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`, `move_ref`,
@@ -38,23 +38,25 @@ deliberate deviations from the reference design (trees in S3, canonical BLAKE3, 
   a misspelled name is refused by every write (6.16, 6.17).
   Deriving a cold history holds a bounded number of changesets, and `scion-server backfill`
   derives a type for a repository's whole history ahead of the first request (6.15).
-- **Git import (Phase 6.1–6.8, 6.11 and 6.14 merged; [how-to](#import-a-git-repository)):**
+  Storing the same changesets from two writers at once is a no-op for the second, and the
+  compose stack runs `scion-server` itself, so the [quickstart](#quickstart) needs nothing but
+  Docker and the toolchain (6.18).
+- **Git import (Phase 6 done; [how-to](#import-a-git-repository)):**
   `scion-ingest import <git-dir> <repo> [<rev>]` turns a git history into changesets
   (first-parent file changes, renames and copies as `copy_from`, the git sha kept in `extra`),
   resumes from checkpoints, syncs incrementally and refuses a rewritten upstream; `scion-ingest
-  verify` compares every imported tree with `git ls-tree`. Changesets are created in batches, so
-  importing the benchmark's 600-commit slice takes about 6× git's push when its objects are
-  already in the bucket and about 19× into an empty bucket.
-- **Real-repository benchmark (Phase 6.9–6.13 merged):** `scripts/bench-real` rebuilds a
-  pinned slice of a real repository's history and times import, clone, sparse clone, `status`,
-  `log`, `blame` and `land` against git on Postgres + S3, with `log` and `blame` measured cold
-  (first call) and warm; the results are under [Benchmarks](#benchmarks). Clone, `status`,
-  warm `log` and `blame` and commit + `land` run at or below git's time; cold, a path `log`
-  takes about 7× git's and a `blame` about 3.5×.
-- **Next:** the last step that makes the MVP usable by a team on one machine: idempotent writes
-  and a compose service for the server (6.18). After that: change requests and the land worker
-  (Phase 5), IAM (Phase 7), release binaries and a quickstart (Phase 9), the cache and daemon
-  tiers (Phase 4) and virtualized checkouts (Phase 8).
+  verify` compares every imported tree with `git ls-tree`. Changesets are created in batches;
+  importing the benchmark's 600-commit slice takes about 15× git's push into an empty bucket
+  (cold) and about 5× when its objects are already there (warm).
+- **Real-repository benchmark:** `scripts/bench-real` rebuilds a
+  pinned slice of a real repository's history and times import (cold and warm), clone, sparse
+  clone, `status`, `log`, `blame` and `land` against git on Postgres + S3, with `log` and
+  `blame` measured cold (first call) and warm; the results are under [Benchmarks](#benchmarks).
+  Clone, `status`, warm `log` and `blame` and commit + `land` run at or below git's time;
+  cold, a path `log` takes about 9× git's and a `blame` about 4×.
+- **Next:** change requests and the land worker (Phase 5), IAM (Phase 7), release binaries
+  and a five-minute quickstart (Phase 9), the cache and daemon tiers (Phase 4) and virtualized
+  checkouts (Phase 8).
 
 Scion is *not* a general replacement for git. Git's distributed, offline-first model is the right
 design for the overwhelming majority of repositories. Scion targets one specific situation: a
@@ -67,6 +69,34 @@ This is an independent open-source project inspired by the design described in A
 engineering post [*Redesigning source control at Anthropic*](https://www.anthropic.com/engineering/redesigning-source-control).
 It is not affiliated with or endorsed by Anthropic. The name may change before the first release.
 
+## Quickstart
+
+On a machine with Docker (with compose) and the Rust toolchain, from a checkout of this
+repository; no git repository is involved:
+
+```sh
+# Postgres, S3 (RustFS) and scion-server on 127.0.0.1:7420; the first run builds the server
+docker compose -f deploy/docker-compose.yml up -d --wait
+cargo install --locked --path crates/scn   # scion-proto's build needs protoc on PATH
+
+scn init http://127.0.0.1:7420 demo        # an empty repository with main at its root
+scn clone http://127.0.0.1:7420 demo
+cd demo
+echo hello >hello.txt
+scn add hello.txt
+scn commit -m "add hello" --author "Ada <ada@example.com>"   # or set SCN_AUTHOR
+scn land                                   # main fast-forwards to the new changeset
+scn log
+```
+
+A second clone that lands first makes your `land` refuse; `scn update` rebases your head onto
+the new `main` on the server and `land` is a fast-forward again. After a code change, rebuild
+the server with `docker compose -f deploy/docker-compose.yml up -d --wait --build`.
+`docker compose -f deploy/docker-compose.yml down -v` deletes every repository; the next `up`
+starts a new server with it. A `scion-server` run outside compose must be restarted after
+`down -v` too: it keeps an in-memory memo of the objects the bucket holds, and that memo
+outlives the bucket.
+
 ## Import a git repository
 
 `scion-ingest` copies a git history into Scion: one changeset per commit, file changes
@@ -77,12 +107,12 @@ are in [Ingestion](docs/ARCHITECTURE.md#ingestion). On the local compose stack, 
 of this repository:
 
 ```sh
-# Postgres on :5432 and S3 (RustFS) on :9000, then the three binaries
+# Postgres on :5432, S3 (RustFS) on :9000 and scion-server on :7420, then the clients
 docker compose -f deploy/docker-compose.yml up -d --wait
-cargo build --release -p scion-server -p scion-ingest -p scn
+cargo build --release -p scion-ingest -p scn
 export PATH=$PWD/target/release:$PATH
 
-# scion-ingest and scion-server work on the stores directly
+# scion-ingest works on the stores directly
 export DATABASE_URL=postgres://scion:scion@127.0.0.1:5432/scion
 export AWS_ENDPOINT=http://127.0.0.1:9000 AWS_ALLOW_HTTP=true AWS_BUCKET=scion-objects
 export AWS_ACCESS_KEY_ID=scion AWS_SECRET_ACCESS_KEY=scionscion AWS_REGION=us-east-1
@@ -97,8 +127,6 @@ git -C demo add -A && git -C demo commit -qm "add notes"
 git -C demo mv notes.txt README.txt && printf 'four\n' >>demo/README.txt
 git -C demo commit -qam "rename notes, add a line"
 
-SCION_LISTEN=127.0.0.1:7420 scion-server &   # prints "listening" once it accepts clones
-sleep 2
 scn init http://127.0.0.1:7420 demo  # an empty repository; import never creates one
 
 scion-ingest import demo demo main   # git dir, Scion repository, git revision
@@ -146,8 +174,10 @@ standard library only); edit the script, not the SVGs.
 
 [`scripts/bench-real`](scripts/bench-real) rebuilds 600 first-parent commits of a real
 project's `library/` directory as a linear history. It imports that history into git and into
-Scion on the compose stack (Postgres + an S3-compatible server, with `scion-server` on
-loopback), then times each workload with both tools. git runs its history workloads in a full
+Scion on the compose stack (Postgres + an S3-compatible server, with a `scion-server` of its
+own on loopback, one fresh bucket and server per run), then times each workload with both
+tools. Import is timed twice: cold, into the run's empty bucket, and warm, into a second
+repository on the same bucket. git runs its history workloads in a full
 clone, its best case. `scn` runs them in a sparse clone of `core/`, its normal case. Every
 checkout is compared byte for byte outside the timers. `log` and `blame` are timed twice:
 cold (the first call after import, with nothing cached on the server) and warm.
@@ -160,19 +190,20 @@ cold (the first call after import, with nothing cached on the server) and warm.
 <!-- bench-real:start (scripts/render-assets.py writes this table) -->
 | Workload | git, ms | scion, ms | scion / git |
 | --- | ---: | ---: | ---: |
-| import | 1,463 | 7,919 | 5.4× |
-| clone | 1,691 | 564 | 0.33× |
-| sparse clone | 547 | 70 | 0.13× |
-| status | 226 | 10 | 0.04× |
-| path log, cold | 27 | 199 | 7.4× |
-| path log, warm | 24 | 24 | 1.0× |
-| blame, cold | 57 | 197 | 3.5× |
-| blame, warm | 59 | 11 | 0.19× |
-| commit + land | 45 | 34 | 0.76× |
+| import, cold | 1,531 | 23,354 | 15.3× |
+| import, warm | 1,585 | 8,415 | 5.3× |
+| clone | 2,056 | 1,046 | 0.51× |
+| sparse clone | 646 | 75 | 0.12× |
+| status | 292 | 11 | 0.04× |
+| path log, cold | 28 | 244 | 8.7× |
+| path log, warm | 29 | 26 | 0.90× |
+| blame, cold | 54 | 215 | 4.0× |
+| blame, warm | 74 | 11 | 0.15× |
+| commit + land | 44 | 44 | 1.0× |
 
 Repository: library/ of the public repository pinned in scripts/bench-real, first-parent commits since 2026-01-01 up to 91e9c2688eb23af9a5b77f056156e756550c7c99 (600 commits, 2330 files at the tip).  
 Machine: Linux 6.18.44-fc-v139 x86_64; Intel(R) Xeon(R) Processor @ 2.10GHz; 4 cpus; 15 GiB.  
-Run: git version 2.43.0; scion a0c0c7e; 3 runs; 2026-10-17T13:25:51Z.  
+Run: git version 2.43.0; scion ba08ff9; 3 runs; 2026-10-17T18:45:34Z.  
 Other implementations of the design: not measured in this run.
 <!-- bench-real:end -->
 
@@ -180,9 +211,9 @@ Read these numbers with their limits:
 
 - **Import** writes one immutable object per blob, tree and history page to a remote object
   store, where git writes a local packfile. The 6.11 criterion is ten times git, not parity.
-  The script reuses one bucket across runs, so this row imports objects that are already
-  stored (warm). Into an empty bucket it is about three times slower; Phase 6.18 measures
-  that cold case separately.
+  The figure to quote is the cold row, 15× git: into an empty bucket the object store's
+  write rate is the bound, and the cold import does not meet the criterion yet. Warm, with
+  the objects already stored, it is 5× git.
 - **Cold `log` and `blame`** pay one object-store round trip per pointer hop, which git's
   local packfile never does. The 6.12 criteria bound them at 20× and 5× git.
 - One machine, three runs, shared cloud VM: medians move by several milliseconds between
@@ -259,8 +290,7 @@ Full details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
   always online.
 - **Planned, not built:** the cache and daemon tiers (Phase 4), change
   requests and the serial land worker (Phase 5), and IAM (Phase 7). Git import (Phase 6) is
-  in progress: the importer works and the real-repository benchmark results are under
-  [Benchmarks](#benchmarks).
+  done, and the real-repository benchmark results are under [Benchmarks](#benchmarks).
 - **Out of scope for now:** git wire compatibility, offline operation, Windows, a review UI,
   garbage collection, large-file chunking (there is a per-blob size limit) and ignore files. See
   [`docs/FAQ.md`](docs/FAQ.md#what-is-scion-not-a-good-fit-for).
@@ -292,7 +322,7 @@ Full details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
 | 1 | Postgres metadata store, S3-compatible object store | done |
 | 2 | Derived data (trees, path history, blame, skip lists), diff / merge-base / rebase / merge | done |
 | 3 | `scion-server` (gRPC) + `scn` CLI — the MVP | done |
-| 6 | git → Scion ingestion, benchmarks on a real repository, `scn init` / `update` / `checkout`, bounded cold derivation | in progress |
+| 6 | git → Scion ingestion, benchmarks on a real repository, `scn init` / `update` / `checkout`, bounded cold derivation | done |
 | 5 | Server-side rebase/merge UX, change requests, serial land worker | post-MVP |
 | 7 | IAM (GitHub device-flow login, service principals, repo + directory ACLs), fuzzing, hermetic simulation | post-MVP |
 | 9 | Release and onboarding: versioned binaries, server image, production compose profile, five-minute quickstart | post-MVP |
@@ -314,8 +344,9 @@ phase's single-PR steps go into `docs/ROADMAP.md` when the phase starts.
 cargo test --workspace
 cargo clippy --workspace --all-targets -- -D warnings
 
-# local storage backends (Postgres + an S3-compatible server) for integration tests
-docker compose -f deploy/docker-compose.yml up -d
+# local storage backends (Postgres + an S3-compatible server) for integration tests; the
+# tests run their own server, so the compose scion-server service is not needed
+docker compose -f deploy/docker-compose.yml up -d --wait postgres rustfs bucket-init
 cargo test -p scion-store --features integration
 cargo test -p scn --features integration --test e2e_stack   # scn + scion-server end to end
 

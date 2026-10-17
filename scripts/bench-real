@@ -4,9 +4,10 @@
 #   scripts/bench-real [runs=3] [out=target/bench-real/results.csv]
 #
 # Needs git, protoc, openssl, Docker (with compose) and the Rust toolchain pinned
-# by rust-toolchain.toml. It starts deploy/docker-compose.yml, builds the release
-# binaries, runs scion-server on loopback over Postgres + S3, and leaves the
-# stack running (reset it with `docker compose -f deploy/docker-compose.yml down -v`).
+# by rust-toolchain.toml. It starts Postgres and S3 from deploy/docker-compose.yml,
+# builds the release binaries, runs its own scion-server on loopback per run, and
+# leaves the stack running (reset it with
+# `docker compose -f deploy/docker-compose.yml down -v`).
 #
 # Two other public implementations of the same reference design run the same
 # workloads on the same slice when their clone URLs are given (see "Performance
@@ -28,11 +29,15 @@
 # and message kept and submodule entries dropped. It is built once and cached
 # under target/bench-real/. Git and Scion then start from that same repository.
 #
-# Each run uses a fresh bare git repository and a fresh Scion repository name,
-# so every Scion run is cold (derived data included). Workloads:
+# Each run uses a fresh bare git repository, a fresh bucket, a fresh Scion
+# repository name and a scion-server started for it, so every Scion run is cold
+# (objects, derived data and the server's memory included). Workloads:
 #
-#   import       git: push the history into an empty bare repository;
-#                scn: scion-ingest import
+#   import cold  git: push the history into an empty bare repository;
+#                scn: scion-ingest import into the run's empty bucket
+#   import warm  the same again into a second repository: git into another empty
+#                bare repository, scn into the same bucket, whose objects are
+#                then already stored
 #   clone        git clone --no-local; scn clone
 #   sparse clone git clone --filter=blob:none --sparse + sparse-checkout set;
 #                scn clone --sparse
@@ -77,7 +82,7 @@ BIN=$ROOT/target/release
 COMPOSE=(docker compose -f "$ROOT/deploy/docker-compose.yml")
 
 export DATABASE_URL=postgres://scion:scion@127.0.0.1:5432/scion
-export AWS_ENDPOINT=http://127.0.0.1:9000 AWS_ALLOW_HTTP=true AWS_BUCKET=scion-objects
+export AWS_ENDPOINT=http://127.0.0.1:9000 AWS_ALLOW_HTTP=true
 export AWS_ACCESS_KEY_ID=scion AWS_SECRET_ACCESS_KEY=scionscion AWS_REGION=us-east-1
 export SCN_AUTHOR="Bench <bench@example.com>"
 # Hermetic git: no user or system config, fixed identity.
@@ -291,7 +296,7 @@ TOML
 impl_a_run() {
     local run=$1 dir=$2 a=$IMPL_A/target/release
     start_impl_a "bench-a-$stamp-$run"
-    time_it import impl-a "$run" "$a/scion-import" --git "$SUBSET" --ref main --target-ref main
+    time_it "import cold" impl-a "$run" "$a/scion-import" --git "$SUBSET" --ref main --target-ref main
     time_it clone impl-a "$run" "$a/scion" checkout main "$dir/a-full"
     same_checkout "$dir/git-full" "$dir/a-full" .scion
     time_it "sparse clone" impl-a "$run" "$a/scion" checkout main "$dir/a-sparse" --sparse "$SPARSE"
@@ -323,7 +328,8 @@ impl_b_run() {
         { cat "$WORK/impl-b-server.log" >&2; exit 1; }
     # It imports one tree as a parentless snapshot, not a history: load the
     # tip outside the timers so the other workloads have something to read.
-    unsupported import impl-b "$run"
+    unsupported "import cold" impl-b "$run"
+    unsupported "import warm" impl-b "$run"
     mkdir -p "$dir/b-tip"
     git -C "$SUBSET" archive main | tar -x -C "$dir/b-tip"
     "$cli" --server "http://127.0.0.1:$port" import "$dir/b-tip" -m import >/dev/null
@@ -359,7 +365,8 @@ mkdir -p "$WORK" "$(dirname "$OUT")"
 [ -d "$SUBSET" ] || build_subset
 
 say "starting Postgres and S3"
-"${COMPOSE[@]}" up -d --wait >"$WORK/compose.log" 2>&1 || { cat "$WORK/compose.log" >&2; exit 1; }
+"${COMPOSE[@]}" up -d --wait postgres rustfs bucket-init >"$WORK/compose.log" 2>&1 ||
+    { cat "$WORK/compose.log" >&2; exit 1; }
 say "building release binaries"
 (cd "$ROOT" && cargo build -q --release -p scion-server -p scion-ingest -p scn)
 IMPL_A=$WORK/impl-a-${IMPL_A_COMMIT:0:12}
@@ -369,17 +376,27 @@ else say "impl-a skipped: BENCH_IMPL_A_URL is not set"; fi
 if [ -n "$IMPL_B_URL" ]; then build_impl "$IMPL_B_URL" "$IMPL_B_COMMIT" "$IMPL_B"
 else say "impl-b skipped: BENCH_IMPL_B_URL is not set"; fi
 
-port=$(( (RANDOM % 20000) + 30000 ))
-SCION_LISTEN=127.0.0.1:$port "$BIN/scion-server" 2>"$WORK/server.log" &
-server_pid=$!
-impl_a_pid="" impl_b_pid=""
+# Starts scion-server on an empty bucket $1, which scion-ingest then uses too:
+# the server memoizes what the bucket holds, so a new bucket gets a new server.
+start_server() {
+    local port=$(( (RANDOM % 20000) + 30000 ))
+    "${COMPOSE[@]}" run --rm --no-deps --entrypoint aws bucket-init \
+        --endpoint-url http://rustfs:9000 s3 mb "s3://$1" >/dev/null 2>&1
+    export AWS_BUCKET=$1
+    SCION_LISTEN=127.0.0.1:$port "$BIN/scion-server" 2>"$WORK/server.log" &
+    server_pid=$!
+    SERVER=http://127.0.0.1:$port
+    for _ in $(seq 1 50); do
+        grep -q listening "$WORK/server.log" && return 0
+        kill -0 "$server_pid" || break
+        sleep 0.2
+    done
+    cat "$WORK/server.log" >&2
+    exit 1
+}
+
+server_pid="" impl_a_pid="" impl_b_pid=""
 trap 'kill $server_pid $impl_a_pid $impl_b_pid 2>/dev/null || true; [ -z "$IMPL_A_URL" ] || docker rm -f "$CRDB" >/dev/null 2>&1 || true' EXIT
-SERVER=http://127.0.0.1:$port
-for _ in $(seq 1 50); do
-    grep -q listening "$WORK/server.log" && break
-    kill -0 $server_pid || { cat "$WORK/server.log" >&2; exit 1; }
-    sleep 0.2
-done
 
 commits=$(git -C "$SUBSET" rev-list --count main)
 files=$(git -C "$SUBSET" ls-tree -r main | wc -l | tr -d ' ')
@@ -401,10 +418,15 @@ for run in $(seq 1 "$RUNS"); do
     mkdir -p "$dir"
     git init -q --bare "$dir/origin.git"
     git -C "$dir/origin.git" config uploadpack.allowFilter true
+    git init -q --bare "$dir/warm.git"
+    start_server "$repo"
 
-    time_it import git "$run" git -C "$SUBSET" push -q "$dir/origin.git" main
+    time_it "import cold" git "$run" git -C "$SUBSET" push -q "$dir/origin.git" main
     "$BIN/scn" init "$SERVER" "$repo" >/dev/null
-    time_it import scion "$run" "$BIN/scion-ingest" import "$SUBSET" "$repo" main
+    time_it "import cold" scion "$run" "$BIN/scion-ingest" import "$SUBSET" "$repo" main
+    time_it "import warm" git "$run" git -C "$SUBSET" push -q "$dir/warm.git" main
+    "$BIN/scn" init "$SERVER" "$repo-warm" >/dev/null
+    time_it "import warm" scion "$run" "$BIN/scion-ingest" import "$SUBSET" "$repo-warm" main
 
     time_it clone git "$run" git clone -q --no-local "$dir/origin.git" "$dir/git-full"
     time_it clone scion "$run" "$BIN/scn" clone "$SERVER" "$repo" "$dir/scn-full"
@@ -440,6 +462,8 @@ for run in $(seq 1 "$RUNS"); do
         git -C '$dir/git-full' push -q origin HEAD:main"
     time_it land scion "$run" sh -c "cd '$dir/scn-sparse' && '$BIN/scn' commit -m 'bench edit' && '$BIN/scn' land"
 
+    kill "$server_pid" 2>/dev/null || true
+    wait "$server_pid" 2>/dev/null || true
     rm -rf "$dir"
 done
 

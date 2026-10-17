@@ -166,6 +166,9 @@ async fn insert_changesets(
                 .push_bind(*generation)
                 .push_bind(canonical.clone());
         });
+        // A concurrent writer of the same changeset may commit between our
+        // read and this insert; content addressing makes its row ours.
+        insert.push(" ON CONFLICT (repo, id) DO NOTHING");
         insert.build().execute(&mut **tx).await?;
     }
 
@@ -188,7 +191,8 @@ async fn insert_changesets(
         "INSERT INTO file_changes (repo, changeset_id, path, change_kind, blob_id, file_type, \
          size, copy_from_path, copy_from_cs) \
          SELECT * FROM UNNEST($1::bigint[], $2::bytea[], $3::text[], $4::smallint[], \
-         $5::bytea[], $6::smallint[], $7::bigint[], $8::text[], $9::bytea[])",
+         $5::bytea[], $6::smallint[], $7::bigint[], $8::text[], $9::bytea[]) \
+         ON CONFLICT (repo, changeset_id, path) DO NOTHING",
     )
     .bind(&cols.repos)
     .bind(&cols.changesets)

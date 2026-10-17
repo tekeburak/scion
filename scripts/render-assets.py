@@ -51,7 +51,7 @@ ROADMAP = [
     ("1", "Data model, Postgres + S3 stores", "done"),
     ("2", "Derived data, diff, merge, rebase", "done"),
     ("3", "scion-server + scn CLI (MVP)", "done"),
-    ("6", "git import, usable MVP", "active"),
+    ("6", "git import, usable MVP", "done"),
     ("5", "Change requests, land worker", "planned"),
     ("7", "IAM, fuzzing, simulation", "planned"),
     ("9", "Release and onboarding", "planned"),
@@ -60,8 +60,8 @@ ROADMAP = [
 ]
 # Phases run in the order listed: git import comes right after the MVP so real repositories
 # can be tested and benchmarked.
-STATUS_DONE = "MVP done: scion-server on Postgres + S3, scn clone --sparse, status, log, diff, blame, add, commit, land"
-STATUS_NEXT = "in progress: Phase 6 git import (6.1-6.17 merged; next: usable MVP (6.18)), then 5, 7, 9, 4, 8"
+STATUS_DONE = "Usable MVP done: git import, scn init, clone --sparse, status, log, blame, commit, land, update"
+STATUS_NEXT = "next: Phase 5 change requests and the land worker, then 7, 9, 4, 8"
 
 
 def t(x, y, s, size=20, fill=TEXT, weight=400, anchor="start", mono=False, extra=""):
@@ -420,7 +420,8 @@ def roadmap_svg():
 
 # Workloads in the order scripts/bench-real runs them, with the label shown for each.
 BENCH_WORKLOADS = [
-    ("import", "import"),
+    ("import cold", "import, cold"),
+    ("import warm", "import, warm"),
     ("clone", "clone"),
     ("sparse clone", "sparse clone"),
     ("status", "status"),
@@ -568,7 +569,7 @@ FIGURES = {
     "commit-cost.svg": commit_cost_svg,
     "roadmap.svg": roadmap_svg,
     "bench-real.svg": bench_real_svg,
-    "badge-status.svg": lambda: badge_svg("status", "MVP \u00b7 Phase 6 in progress", "#c27c0e"),
+    "badge-status.svg": lambda: badge_svg("status", "MVP \u00b7 Phase 5 next", "#c27c0e"),
     "badge-license.svg": lambda: badge_svg("license", "Apache-2.0", "#2b7bb9"),
 }
 

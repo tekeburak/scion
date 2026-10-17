@@ -1,12 +1,14 @@
-# Local development stack: metadata DB (Postgres) + object store (RustFS, S3-compatible).
+# Local development stack: metadata DB (Postgres) + object store (RustFS, S3-compatible)
+# + scion-server built from this checkout, listening on loopback only.
 #
 # Usage:
-#   docker compose -f deploy/docker-compose.yml up -d
+#   docker compose -f deploy/docker-compose.yml up -d --wait   # scn init http://127.0.0.1:7420 <repo>
 #   cargo test -p scion-store --features integration
 #   cargo test -p scn --features integration --test e2e_stack
 #
-# The end-to-end test runs scion-server in-process against these backends and drives
-# the real `scn` binary. scion-cache / scion-daemon services arrive in Phase 4.
+# The tests and scripts/bench-real run their own scion-server against the backends and
+# need only `postgres rustfs bucket-init`. scion-cache / scion-daemon services arrive in
+# Phase 4.
 
 services:
   postgres:
@@ -61,6 +63,33 @@ services:
         aws --endpoint-url http://rustfs:9000 s3 mb s3://scion-objects 2>/dev/null || true;
         aws --endpoint-url http://rustfs:9000 s3 ls
       "
+
+  # Rebuild after pulling changes: docker compose -f deploy/docker-compose.yml up -d --build
+  scion-server:
+    build:
+      context: ..
+      dockerfile: deploy/scion-server.Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+      bucket-init:
+        condition: service_completed_successfully
+    environment:
+      DATABASE_URL: postgres://scion:scion@postgres:5432/scion
+      AWS_ENDPOINT: http://rustfs:9000
+      AWS_ALLOW_HTTP: "true"
+      AWS_BUCKET: scion-objects
+      AWS_ACCESS_KEY_ID: scion
+      AWS_SECRET_ACCESS_KEY: scionscion
+      AWS_REGION: us-east-1
+      SCION_LISTEN: 0.0.0.0:7420
+    ports:
+      - "127.0.0.1:7420:7420"
+    healthcheck:
+      test: ["CMD", "bash", "-c", ": </dev/tcp/127.0.0.1/7420"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
 
 volumes:
   pgdata:

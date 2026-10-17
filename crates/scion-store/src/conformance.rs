@@ -135,6 +135,34 @@ pub async fn changesets<S: MetadataStore>(s: &S) {
     );
 }
 
+/// Two writers storing the same batch at once both succeed and leave one
+/// copy: the importer and a client may upload the same history concurrently.
+pub async fn concurrent_changesets<S: MetadataStore>(s: &S) {
+    s.create_repo(REPO).await.unwrap();
+    let mut parent = s.put_changeset(&changeset(vec![], "root")).await.unwrap();
+    // Several rounds, so the two writers overlap in at least one of them.
+    for round in 0..8 {
+        let mut batch = Vec::new();
+        for i in 0..4 {
+            let cs = changeset(vec![parent], &format!("round {round} child {i}"));
+            parent = cs.id();
+            batch.push(cs);
+        }
+        let (a, b) = tokio::join!(s.put_changesets(&batch), s.put_changesets(&batch));
+        a.unwrap();
+        b.unwrap();
+        let ids: Vec<ChangesetId> = batch.iter().map(Changeset::id).collect();
+        assert_eq!(
+            s.get_changesets(REPO, &ids).await.unwrap(),
+            batch.into_iter().map(Some).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            s.generation(REPO, parent).await.unwrap(),
+            Some(4 * round + 4)
+        );
+    }
+}
+
 /// Refs: policy, create-once, CAS semantics, listing.
 pub async fn refs<S: MetadataStore>(s: &S) {
     s.create_repo(REPO).await.unwrap();
@@ -328,6 +356,10 @@ macro_rules! conformance_tests {
                 $crate::conformance::changesets(&$ctor.await).await;
             }
             #[tokio::test]
+            async fn concurrent_changesets() {
+                $crate::conformance::concurrent_changesets(&$ctor.await).await;
+            }
+            #[tokio::test]
             async fn refs() {
                 $crate::conformance::refs(&$ctor.await).await;
             }
@@ -363,6 +395,10 @@ macro_rules! metadata_conformance_tests {
             #[tokio::test]
             async fn changesets() {
                 $crate::conformance::changesets(&$ctor.await).await;
+            }
+            #[tokio::test]
+            async fn concurrent_changesets() {
+                $crate::conformance::concurrent_changesets(&$ctor.await).await;
             }
             #[tokio::test]
             async fn refs() {

@@ -1,77 +1,85 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="958" viewBox="0 0 1600 958" role="img" aria-label="Median times of Scion and git on a real repository's history">
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1032" viewBox="0 0 1600 1032" role="img" aria-label="Median times of Scion and git on a real repository's history">
 <title>Median times of Scion and git on a real repository's history</title>
 <defs><marker id="a-teal" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#2dd4bf"/></marker><marker id="a-amber" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f5b545"/></marker><marker id="a-violet" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#a78bfa"/></marker><marker id="a-muted" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#93a1b8"/></marker><linearGradient id="glow" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#16213a"/><stop offset="1" stop-color="#0d1321"/></linearGradient></defs>
-<rect x="0" y="0" width="1600" height="958" rx="24" fill="url(#glow)"/>
+<rect x="0" y="0" width="1600" height="1032" rx="24" fill="url(#glow)"/>
 <text x="64" y="72" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="34" fill="#e8edf5" font-weight="700" text-anchor="start">Scion and git on a real repository's history</text>
 <text x="64" y="108" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#93a1b8" font-weight="400" text-anchor="start">Median milliseconds, log scale; lower is better. Cold is the first call for a newly imported repository.</text>
 <rect x="64" y="132" width="18" height="18" rx="4" fill="#3a4660" stroke="#93a1b8" stroke-width="2"/>
 <text x="92" y="147" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#e8edf5" font-weight="400" text-anchor="start">git</text>
 <rect x="160" y="132" width="18" height="18" rx="4" fill="#1d5f58" stroke="#2dd4bf" stroke-width="2"/>
 <text x="188" y="147" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#e8edf5" font-weight="400" text-anchor="start">scion</text>
-<line x1="330.0" y1="180" x2="330.0" y2="854" stroke="#2a3650" stroke-width="1"/>
-<text x="330.0" y="878" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">1 ms</text>
-<line x1="592.5" y1="180" x2="592.5" y2="854" stroke="#2a3650" stroke-width="1"/>
-<text x="592.5" y="878" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">10 ms</text>
-<line x1="855.0" y1="180" x2="855.0" y2="854" stroke="#2a3650" stroke-width="1"/>
-<text x="855.0" y="878" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">100 ms</text>
-<line x1="1117.5" y1="180" x2="1117.5" y2="854" stroke="#2a3650" stroke-width="1"/>
-<text x="1117.5" y="878" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">1,000 ms</text>
-<line x1="1380.0" y1="180" x2="1380.0" y2="854" stroke="#2a3650" stroke-width="1"/>
-<text x="1380.0" y="878" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">10,000 ms</text>
-<text x="64" y="232" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="600" text-anchor="start">import</text>
-<rect x="330" y="200" width="830.9" height="24" rx="5" fill="#3a4660" stroke="#93a1b8" stroke-width="1.5"/>
-<text x="1170.9" y="218" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">1,463 ms</text>
-<rect x="330" y="230" width="1023.4" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
-<text x="1363.4" y="248" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">7,919 ms</text>
-<text x="1536" y="232" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#f5b545" font-weight="700" text-anchor="end">5.4×</text>
-<text x="64" y="306" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="600" text-anchor="start">clone</text>
-<rect x="330" y="274" width="847.4" height="24" rx="5" fill="#3a4660" stroke="#93a1b8" stroke-width="1.5"/>
-<text x="1187.4" y="292" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">1,691 ms</text>
-<rect x="330" y="304" width="722.2" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
-<text x="1062.2" y="322" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">564 ms</text>
-<text x="1536" y="306" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#4ade80" font-weight="700" text-anchor="end">0.33×</text>
-<text x="64" y="380" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="600" text-anchor="start">sparse clone</text>
-<rect x="330" y="348" width="718.7" height="24" rx="5" fill="#3a4660" stroke="#93a1b8" stroke-width="1.5"/>
-<text x="1058.7" y="366" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">547 ms</text>
-<rect x="330" y="378" width="484.3" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
-<text x="824.3" y="396" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">70 ms</text>
-<text x="1536" y="380" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#4ade80" font-weight="700" text-anchor="end">0.13×</text>
-<text x="64" y="454" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="600" text-anchor="start">status</text>
-<rect x="330" y="422" width="618.0" height="24" rx="5" fill="#3a4660" stroke="#93a1b8" stroke-width="1.5"/>
-<text x="958.0" y="440" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">226 ms</text>
-<rect x="330" y="452" width="262.5" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
-<text x="602.5" y="470" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">10 ms</text>
-<text x="1536" y="454" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#4ade80" font-weight="700" text-anchor="end">0.04×</text>
-<text x="64" y="528" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="600" text-anchor="start">path log, cold</text>
-<rect x="330" y="496" width="375.7" height="24" rx="5" fill="#3a4660" stroke="#93a1b8" stroke-width="1.5"/>
-<text x="715.7" y="514" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">27 ms</text>
-<rect x="330" y="526" width="603.4" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
-<text x="943.4" y="544" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">199 ms</text>
-<text x="1536" y="528" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#f5b545" font-weight="700" text-anchor="end">7.4×</text>
-<text x="64" y="602" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="600" text-anchor="start">path log, warm</text>
-<rect x="330" y="570" width="362.3" height="24" rx="5" fill="#3a4660" stroke="#93a1b8" stroke-width="1.5"/>
-<text x="702.3" y="588" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">24 ms</text>
-<rect x="330" y="600" width="362.3" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
-<text x="702.3" y="618" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">24 ms</text>
-<text x="1536" y="602" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#4ade80" font-weight="700" text-anchor="end">1.0×</text>
-<text x="64" y="676" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="600" text-anchor="start">blame, cold</text>
-<rect x="330" y="644" width="460.9" height="24" rx="5" fill="#3a4660" stroke="#93a1b8" stroke-width="1.5"/>
-<text x="800.9" y="662" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">57 ms</text>
-<rect x="330" y="674" width="602.3" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
-<text x="942.3" y="692" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">197 ms</text>
-<text x="1536" y="676" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#f5b545" font-weight="700" text-anchor="end">3.5×</text>
-<text x="64" y="750" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="600" text-anchor="start">blame, warm</text>
-<rect x="330" y="718" width="464.8" height="24" rx="5" fill="#3a4660" stroke="#93a1b8" stroke-width="1.5"/>
-<text x="804.8" y="736" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">59 ms</text>
-<rect x="330" y="748" width="273.4" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
-<text x="613.4" y="766" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">11 ms</text>
-<text x="1536" y="750" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#4ade80" font-weight="700" text-anchor="end">0.19×</text>
-<text x="64" y="824" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="600" text-anchor="start">commit + land</text>
-<rect x="330" y="792" width="434.0" height="24" rx="5" fill="#3a4660" stroke="#93a1b8" stroke-width="1.5"/>
-<text x="774.0" y="810" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">45 ms</text>
-<rect x="330" y="822" width="402.0" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
-<text x="742.0" y="840" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">34 ms</text>
-<text x="1536" y="824" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#4ade80" font-weight="700" text-anchor="end">0.76×</text>
-<text x="64" y="910" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">library/ of the public repository pinned in scripts/bench-real, first-parent commits since 2026-01-01 up to 91e9c2688eb23af9a5b77f056156e756550c7c99 (600 commits, 2330 files at the tip)</text>
-<text x="64" y="934" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">Linux 6.18.44-fc-v139 x86_64; Intel(R) Xeon(R) Processor @ 2.10GHz; 4 cpus; 15 GiB; git version 2.43.0; scion a0c0c7e; 3 runs; 2026-10-17T13:25:51Z</text>
+<line x1="330.0" y1="180" x2="330.0" y2="928" stroke="#2a3650" stroke-width="1"/>
+<text x="330.0" y="952" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">1 ms</text>
+<line x1="540.0" y1="180" x2="540.0" y2="928" stroke="#2a3650" stroke-width="1"/>
+<text x="540.0" y="952" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">10 ms</text>
+<line x1="750.0" y1="180" x2="750.0" y2="928" stroke="#2a3650" stroke-width="1"/>
+<text x="750.0" y="952" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">100 ms</text>
+<line x1="960.0" y1="180" x2="960.0" y2="928" stroke="#2a3650" stroke-width="1"/>
+<text x="960.0" y="952" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">1,000 ms</text>
+<line x1="1170.0" y1="180" x2="1170.0" y2="928" stroke="#2a3650" stroke-width="1"/>
+<text x="1170.0" y="952" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">10,000 ms</text>
+<line x1="1380.0" y1="180" x2="1380.0" y2="928" stroke="#2a3650" stroke-width="1"/>
+<text x="1380.0" y="952" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">100,000 ms</text>
+<text x="64" y="232" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="600" text-anchor="start">import, cold</text>
+<rect x="330" y="200" width="668.8" height="24" rx="5" fill="#3a4660" stroke="#93a1b8" stroke-width="1.5"/>
+<text x="1008.8" y="218" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">1,531 ms</text>
+<rect x="330" y="230" width="917.4" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="1257.4" y="248" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">23,354 ms</text>
+<text x="1536" y="232" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#f5b545" font-weight="700" text-anchor="end">15.3×</text>
+<text x="64" y="306" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="600" text-anchor="start">import, warm</text>
+<rect x="330" y="274" width="672.0" height="24" rx="5" fill="#3a4660" stroke="#93a1b8" stroke-width="1.5"/>
+<text x="1012.0" y="292" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">1,585 ms</text>
+<rect x="330" y="304" width="824.3" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="1164.3" y="322" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">8,415 ms</text>
+<text x="1536" y="306" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#f5b545" font-weight="700" text-anchor="end">5.3×</text>
+<text x="64" y="380" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="600" text-anchor="start">clone</text>
+<rect x="330" y="348" width="695.7" height="24" rx="5" fill="#3a4660" stroke="#93a1b8" stroke-width="1.5"/>
+<text x="1035.7" y="366" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">2,056 ms</text>
+<rect x="330" y="378" width="634.1" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="974.1" y="396" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">1,046 ms</text>
+<text x="1536" y="380" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#4ade80" font-weight="700" text-anchor="end">0.51×</text>
+<text x="64" y="454" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="600" text-anchor="start">sparse clone</text>
+<rect x="330" y="422" width="590.1" height="24" rx="5" fill="#3a4660" stroke="#93a1b8" stroke-width="1.5"/>
+<text x="930.1" y="440" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">646 ms</text>
+<rect x="330" y="452" width="393.8" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="733.8" y="470" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">75 ms</text>
+<text x="1536" y="454" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#4ade80" font-weight="700" text-anchor="end">0.12×</text>
+<text x="64" y="528" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="600" text-anchor="start">status</text>
+<rect x="330" y="496" width="517.7" height="24" rx="5" fill="#3a4660" stroke="#93a1b8" stroke-width="1.5"/>
+<text x="857.7" y="514" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">292 ms</text>
+<rect x="330" y="526" width="218.7" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="558.7" y="544" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">11 ms</text>
+<text x="1536" y="528" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#4ade80" font-weight="700" text-anchor="end">0.04×</text>
+<text x="64" y="602" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="600" text-anchor="start">path log, cold</text>
+<rect x="330" y="570" width="303.9" height="24" rx="5" fill="#3a4660" stroke="#93a1b8" stroke-width="1.5"/>
+<text x="643.9" y="588" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">28 ms</text>
+<rect x="330" y="600" width="501.4" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="841.4" y="618" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">244 ms</text>
+<text x="1536" y="602" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#f5b545" font-weight="700" text-anchor="end">8.7×</text>
+<text x="64" y="676" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="600" text-anchor="start">path log, warm</text>
+<rect x="330" y="644" width="307.1" height="24" rx="5" fill="#3a4660" stroke="#93a1b8" stroke-width="1.5"/>
+<text x="647.1" y="662" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">29 ms</text>
+<rect x="330" y="674" width="297.1" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="637.1" y="692" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">26 ms</text>
+<text x="1536" y="676" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#4ade80" font-weight="700" text-anchor="end">0.90×</text>
+<text x="64" y="750" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="600" text-anchor="start">blame, cold</text>
+<rect x="330" y="718" width="363.8" height="24" rx="5" fill="#3a4660" stroke="#93a1b8" stroke-width="1.5"/>
+<text x="703.8" y="736" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">54 ms</text>
+<rect x="330" y="748" width="489.8" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="829.8" y="766" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">215 ms</text>
+<text x="1536" y="750" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#f5b545" font-weight="700" text-anchor="end">4.0×</text>
+<text x="64" y="824" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="600" text-anchor="start">blame, warm</text>
+<rect x="330" y="792" width="392.5" height="24" rx="5" fill="#3a4660" stroke="#93a1b8" stroke-width="1.5"/>
+<text x="732.5" y="810" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">74 ms</text>
+<rect x="330" y="822" width="218.7" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="558.7" y="840" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">11 ms</text>
+<text x="1536" y="824" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#4ade80" font-weight="700" text-anchor="end">0.15×</text>
+<text x="64" y="898" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="600" text-anchor="start">commit + land</text>
+<rect x="330" y="866" width="345.1" height="24" rx="5" fill="#3a4660" stroke="#93a1b8" stroke-width="1.5"/>
+<text x="685.1" y="884" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">44 ms</text>
+<rect x="330" y="896" width="345.1" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
+<text x="685.1" y="914" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">44 ms</text>
+<text x="1536" y="898" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#4ade80" font-weight="700" text-anchor="end">1.0×</text>
+<text x="64" y="984" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">library/ of the public repository pinned in scripts/bench-real, first-parent commits since 2026-01-01 up to 91e9c2688eb23af9a5b77f056156e756550c7c99 (600 commits, 2330 files at the tip)</text>
+<text x="64" y="1008" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">Linux 6.18.44-fc-v139 x86_64; Intel(R) Xeon(R) Processor @ 2.10GHz; 4 cpus; 15 GiB; git version 2.43.0; scion ba08ff9; 3 runs; 2026-10-17T18:45:34Z</text>
 </svg>

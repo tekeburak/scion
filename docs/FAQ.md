@@ -87,15 +87,16 @@ The comparison favours git where it can: git runs `status`, `log`, `blame` and `
 clone, its best case, while `scn` runs them in a sparse clone, its normal case.
 
 The measurements so far, on the 600-commit slice `scripts/bench-real` imports (4 vCPU, the
-compose Postgres + RustFS stack): import takes 7,919 ms against git's 1,463 ms (5.4×) in the
-README table, where the objects are already in the bucket; into an empty bucket the runs in #62 and #63
-measured about 19×, where the object store's write rate is the bound.
+compose Postgres + RustFS stack, one fresh bucket per run): a cold import, into an empty
+bucket, takes 23,354 ms against git's 1,531 ms (15×), where the object store's write rate is
+the bound and the 10× criterion is not met yet; a warm import, with the objects already
+stored, takes 8,415 ms against 1,585 ms (5.3×). The README quotes the cold row.
 `log` and `blame` are measured twice, cold (the first call for a new repository) and warm.
-Medians of three runs at commit `a0c0c7e` (the README table): warm `blame` of a 4,738-line
-file with 44 versions takes 11 ms against git's 59 ms, warm path `log` 24 ms against 24 ms, and
-commit + `land` 34 ms against 45 ms. Cold, a path `log` of 428 changes takes 199 ms against
-git's 27 ms (7.4×; the criterion is 20×), because its anchors let the object reads overlap, and
-that `blame` 197 ms against 57 ms (3.5×; the criterion is 5×), because its metadata reads are
+Medians of three runs at commit `ba08ff9` plus Phase 6.18 (the README table): warm `blame` of
+a 4,738-line file with 44 versions takes 11 ms against git's 74 ms, warm path `log` 26 ms
+against 29 ms, and commit + `land` 44 ms against 44 ms. Cold, a path `log` of 428 changes takes
+244 ms against git's 28 ms (8.7×; the criterion is 20×), because its anchors let the object
+reads overlap, and that `blame` 215 ms against 54 ms (4.0×; the criterion is 5×), because its metadata reads are
 batched and its diffs run in parallel. A cold blame is still a few hundred object reads, one history node and one
 file version per version of every file the last change touched.
 
@@ -107,11 +108,10 @@ the roadmap step that closes it:
 - **Incremental import is for mirror repositories.** A re-run of `scion-ingest import` refuses
   with "the upstream history was rewritten" whenever `main` points at a changeset that did not
   come from that git history, including one made with `scn land`.
-- **Restart `scion-server` after `docker compose ... down -v`.** The server remembers which
-  blobs the bucket already holds; after the bucket is wiped it skips uploading them, and later
-  reads fail. Phase 6.18 documents this in the quickstart.
-- **Concurrent creation of the same changeset** can return a spurious error to one of the
-  callers; Phase 6.18 makes the write idempotent.
+- **Restart a `scion-server` run outside compose after `docker compose ... down -v`.** The
+  server remembers which blobs the bucket already holds; after the bucket is wiped it skips
+  uploading them, and later reads fail. The compose service is recreated by `down -v` and has
+  no such problem.
 - **The first request after a derived type's `VERSION` bump derives that type for the whole
   history.** Memory stays bounded, but on the 600-commit benchmark slice the first path `log`
   after a `path_history` bump takes about 14 s of the 30 s RPC deadline; run
