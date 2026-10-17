@@ -4,22 +4,31 @@
 Standard library only, no randomness, no timestamps: running it twice produces identical
 bytes, so a diff in docs/assets/ always means the figure changed on purpose.
 
-    python3 scripts/render-assets.py            # writes docs/assets/*.svg
-    python3 scripts/render-assets.py --check    # exits 1 if any file is out of date
+    python3 scripts/render-assets.py            # writes docs/assets/*.svg and the README table
+    python3 scripts/render-assets.py --check    # exits 1 if any of them is out of date
 
 Every figure is a schematic of what docs/ARCHITECTURE.md and docs/DATA_MODEL.md describe.
-The only numbers drawn come from the fixture a test asserts on (see `changeset_svg` and
-`commit_cost_svg`). Update ROADMAP below
+The numbers drawn come from the fixture a test asserts on (see `changeset_svg` and
+`commit_cost_svg`) or from docs/bench-real.csv, the output of one `scripts/bench-real` run
+(see `bench_real_svg` and `bench_real_table`, which also fills the README between its
+bench-real markers). Update ROADMAP below
 when a phase changes status; nothing else here should need touching for that.
 """
 
 from __future__ import annotations
 
+import csv
+import math
 import sys
 from pathlib import Path
 from xml.sax.saxutils import escape
 
-OUT = Path(__file__).resolve().parent.parent / "docs" / "assets"
+ROOT = Path(__file__).resolve().parent.parent
+OUT = ROOT / "docs" / "assets"
+BENCH_CSV = ROOT / "docs" / "bench-real.csv"
+README = ROOT / "README.md"
+TABLE_START = "<!-- bench-real:start (scripts/render-assets.py writes this table) -->"
+TABLE_END = "<!-- bench-real:end -->"
 W = 1600
 
 # One palette for every figure. Dark card on a transparent page, so it reads on both of
@@ -52,7 +61,7 @@ ROADMAP = [
 # Phases run in the order listed: git import comes right after the MVP so real repositories
 # can be tested and benchmarked.
 STATUS_DONE = "MVP done: scion-server on Postgres + S3, scn clone --sparse, status, log, diff, blame, add, commit, land"
-STATUS_NEXT = "in progress: Phase 6 git import (6.1-6.12 merged; next: publish results (6.13), import how-to (6.14)), then 5, 7, 9, 4, 8"
+STATUS_NEXT = "in progress: Phase 6 git import (6.1-6.13 merged; next: import how-to (6.14), usable MVP (6.15-6.18)), then 5, 7, 9, 4, 8"
 
 
 def t(x, y, s, size=20, fill=TEXT, weight=400, anchor="start", mono=False, extra=""):
@@ -409,6 +418,123 @@ def roadmap_svg():
     return svg(h, "Scion roadmap status by phase", b)
 
 
+# Workloads in the order scripts/bench-real runs them, with the label shown for each.
+BENCH_WORKLOADS = [
+    ("import", "import"),
+    ("clone", "clone"),
+    ("sparse clone", "sparse clone"),
+    ("status", "status"),
+    ("log cold", "path log, cold"),
+    ("log warm", "path log, warm"),
+    ("blame cold", "blame, cold"),
+    ("blame warm", "blame, warm"),
+    ("land", "commit + land"),
+]
+
+
+def bench_real():
+    """`(meta, medians)` from BENCH_CSV: the `# key: value` header lines, and the median
+    milliseconds of the `ok` samples per `(workload, tool)` (the lower middle sample, as the
+    script's own summary takes it); `"unsupported"` where a tool could not run a workload."""
+    meta, samples, medians = {}, {}, {}
+    lines = BENCH_CSV.read_text(encoding="utf-8").splitlines()
+    for line in lines:
+        if line.startswith("# "):
+            key, _, value = line[2:].partition(": ")
+            meta[key] = value
+    for row in csv.DictReader(line for line in lines if not line.startswith("#")):
+        key = (row["workload"], row["tool"])
+        if row["result"] == "ok":
+            samples.setdefault(key, []).append(int(row["ms"]))
+        elif row["result"] == "unsupported":
+            medians[key] = "unsupported"
+    for key, ms in samples.items():
+        medians[key] = sorted(ms)[(len(ms) - 1) // 2]
+    return meta, medians
+
+
+def bench_tools(medians):
+    # git and scion first, then any other implementation the run measured.
+    others = sorted({tool for _, tool in medians} - {"git", "scion"})
+    return ["git", "scion"] + others
+
+
+def ratio(ms, git_ms):
+    r = ms / git_ms
+    return f"{r:.2f}\u00d7" if r < 1 else f"{r:.1f}\u00d7"
+
+
+def bench_real_table():
+    meta, medians = bench_real()
+    tools = bench_tools(medians)
+    head = ["Workload"] + [f"{tool}, ms" for tool in tools] + ["scion / git"]
+    out = ["| " + " | ".join(head) + " |", "| --- |" + " ---: |" * (len(head) - 1)]
+    for key, label in BENCH_WORKLOADS:
+        cells = [label]
+        for tool in tools:
+            v = medians.get((key, tool), "not measured")
+            cells.append(f"{v:,}" if isinstance(v, int) else v)
+        git_ms, scion_ms = medians.get((key, "git")), medians.get((key, "scion"))
+        both = isinstance(git_ms, int) and isinstance(scion_ms, int)
+        cells.append(ratio(scion_ms, git_ms) if both else "")
+        out.append("| " + " | ".join(cells) + " |")
+    note = [
+        "",
+        f"Repository: {meta['repository']}.  ",
+        f"Machine: {meta['machine']}.  ",
+        f"Run: {meta['tools']}.",
+    ]
+    if len(tools) == 2:
+        note[-1] += "  "
+        note.append("Other implementations of the design: not measured in this run.")
+    return "\n".join(out + note)
+
+
+def bench_real_svg():
+    meta, medians = bench_real()
+    rows = [(label, medians.get((key, "git")), medians.get((key, "scion")))
+            for key, label in BENCH_WORKLOADS]
+    rows = [(label, g, sc) for label, g, sc in rows if isinstance(g, int) and isinstance(sc, int)]
+    lo, hi = 1, 10 ** math.ceil(math.log10(max(max(g, sc) for _, g, sc in rows)))
+    left, right = 330, W - 220
+    def x_of(ms):
+        return round(left + (right - left) * math.log10(max(ms, lo)) / math.log10(hi), 1)
+    top, row_h = 196, 74
+    h = top + row_h * len(rows) + 96
+    b = []
+    b.append(t(64, 72, "Scion and git on a real repository's history", 34, TEXT, 700))
+    b.append(t(64, 108, "Median milliseconds, log scale; lower is better. "
+                        "Cold is the first call for a newly imported repository.", 19, MUTED))
+    b.append(box(64, 132, 18, 18, stroke=MUTED, fill="#3a4660", r=4))
+    b.append(t(92, 147, "git", 16, TEXT))
+    b.append(box(160, 132, 18, 18, stroke=TEAL, fill="#1d5f58", r=4))
+    b.append(t(188, 147, "scion", 16, TEXT))
+    decade = lo
+    while decade <= hi:
+        x = x_of(decade)
+        b.append(f'<line x1="{x}" y1="{top - 16}" x2="{x}" y2="{top + row_h * len(rows) - 8}" '
+                 f'stroke="{LINE}" stroke-width="1"/>')
+        b.append(t(x, top + row_h * len(rows) + 16, f"{decade:,} ms", 14, MUTED, anchor="middle"))
+        decade *= 10
+    for i, (label, git_ms, scion_ms) in enumerate(rows):
+        y = top + i * row_h
+        b.append(t(64, y + 36, label, 19, TEXT, 600))
+        for j, (ms, stroke, fill) in enumerate(((git_ms, MUTED, "#3a4660"), (scion_ms, TEAL, "#1d5f58"))):
+            by = y + 4 + j * 30
+            b.append(box(left, by, round(x_of(ms) - left, 1), 24, stroke=stroke, fill=fill, r=5, sw=1.5))
+            b.append(t(round(x_of(ms) + 10, 1), by + 18, f"{ms:,} ms", 15, TEXT if j else MUTED, 600 if j else 400))
+        b.append(t(W - 64, y + 36, ratio(scion_ms, git_ms), 19, GREEN if scion_ms <= git_ms else AMBER,
+                   700, "end"))
+    b.append(t(64, h - 48, f"{meta['repository']}", 15, MUTED))
+    b.append(t(64, h - 24, f"{meta['machine']}; {meta['tools']}", 15, MUTED))
+    return svg(h, "Median times of Scion and git on a real repository's history", b)
+
+
+def readme_with_table(readme):
+    start, end = readme.index(TABLE_START) + len(TABLE_START), readme.index(TABLE_END)
+    return readme[:start] + "\n" + bench_real_table() + "\n" + readme[end:]
+
+
 def badge_svg(label, value, color):
     # Flat badge in the same shape as GitHub's own workflow badge, so the row lines up.
     # Width is estimated at 6.6 px per character of 11 px Verdana; generous padding absorbs
@@ -433,6 +559,7 @@ FIGURES = {
     "changeset.svg": changeset_svg,
     "commit-cost.svg": commit_cost_svg,
     "roadmap.svg": roadmap_svg,
+    "bench-real.svg": bench_real_svg,
     "badge-status.svg": lambda: badge_svg("status", "MVP \u00b7 Phase 6 in progress", "#c27c0e"),
     "badge-license.svg": lambda: badge_svg("license", "Apache-2.0", "#2b7bb9"),
 }
@@ -450,6 +577,13 @@ def main() -> int:
                 stale.append(name)
         else:
             path.write_text(data, encoding="utf-8")
+    readme = README.read_text(encoding="utf-8")
+    table = readme_with_table(readme)
+    if check:
+        if table != readme:
+            stale.append("README.md (bench-real table)")
+    else:
+        README.write_text(table, encoding="utf-8")
     if stale:
         print("out of date, run scripts/render-assets.py: " + ", ".join(stale), file=sys.stderr)
         return 1

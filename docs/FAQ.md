@@ -45,7 +45,7 @@ The MVP (Phase 3) is done: `scion-server` serves the object and control gRPC ser
 Postgres + S3, and `scn` can `clone --sparse`, `status`, `log`, `diff`, `blame`, `add`,
 `commit` (an anonymous head) and `land` (fast-forward `main` only; server-side rebase is
 Phase 5). Git import (Phase 6) works and a benchmark script runs it against git on a real
-repository; its results are not published yet. A cold `blame` or path `log` (the first call
+repository; the README's Benchmarks section shows the results. A cold `blame` or path `log` (the first call
 for a revision) takes several times git's time; the 6.12 criteria bound how many.
 The README status section tracks this.
 
@@ -74,9 +74,10 @@ rewrites only the directories on the changed paths: one changed file at depth fo
 
 ## Is it faster than git?
 
-Partly, once warm. The README's benchmark table is synthetic: generated files, an in-memory
-store and no cache tier. The real-repository comparison (`scripts/bench-real`) runs, and the
-figures below come from it, but its table and chart arrive with Phase 6.13. The targets are
+Partly, once warm. The README's Benchmarks section has two parts. The real-repository
+comparison (`scripts/bench-real`, rendered from `docs/bench-real.csv`) is where the figures
+below come from. The synthetic table uses generated files, an in-memory store and no cache
+tier. The targets are
 set in `docs/ROADMAP.md`: import within ten times git's time (6.11); warm `log` and `blame` and
 commit + `land` at or below git's time, cold `blame` within 5× git and cold path `log` within
 20× (6.12). Import is not expected to match git, because Scion
@@ -88,12 +89,12 @@ The measurements so far, on the 600-commit slice `scripts/bench-real` imports (4
 compose Postgres + RustFS stack): import takes about 6× git's push when the objects are already
 in the bucket and about 19× into an empty one, where the object store's write rate is the bound.
 `log` and `blame` are measured twice, cold (the first call for a new repository) and warm.
-Medians of three runs with Phase 6.12: warm `blame` of a 4,738-line file with 44 versions takes
-11 ms against git's 58 ms, warm path `log` 22 ms against 25 ms, and commit + `land` 32 ms
-against 41 ms. Cold, a path `log` of 428 changes takes 186 ms against git's 24 ms (8×; the
-criterion is 20×), because its anchors let the object reads overlap, and that `blame` 196 ms
-against 53 ms (4×; the criterion is 5×), because its metadata reads are batched and its diffs
-run in parallel. A cold blame is still a few hundred object reads, one history node and one
+Medians of three runs at commit `a0c0c7e` (the README table): warm `blame` of a 4,738-line
+file with 44 versions takes 11 ms against git's 59 ms, warm path `log` 24 ms against 24 ms, and
+commit + `land` 34 ms against 45 ms. Cold, a path `log` of 428 changes takes 199 ms against
+git's 27 ms (7.4×; the criterion is 20×), because its anchors let the object reads overlap, and
+that `blame` 197 ms against 57 ms (3.5×; the criterion is 5×), because its metadata reads are
+batched and its diffs run in parallel. A cold blame is still a few hundred object reads, one history node and one
 file version per version of every file the last change touched.
 
 ## What are the known limits today?
