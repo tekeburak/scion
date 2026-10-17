@@ -42,9 +42,13 @@ changing any id or any client.
 
 Not for real work: there is no authentication (Phase 7) and no cache tier yet (Phase 4).
 The MVP (Phase 3) is done: `scion-server` serves the object and control gRPC services over
-Postgres + S3, and `scn` can `clone --sparse`, `status`, `log`, `diff`, `blame`, `add`,
-`commit` (an anonymous head) and `land` (fast-forward `main` only; server-side rebase is
-Phase 5). Git import (Phase 6) works and a benchmark script runs it against git on a real
+Postgres + S3. `scn` can `init` a repository, `clone --sparse`, `status`, `log`, `diff`,
+`blame`, `add`, `commit` (an anonymous head), `land` (a fast-forward of `main`), `update`
+(the server rebases the head onto `main`, so `land` is a fast-forward again) and `checkout`
+any changeset. The README [quickstart](../README.md#quickstart) runs that loop on the compose
+stack with only Docker and the Rust toolchain installed. Change requests and the serial land
+worker, which land concurrent heads without a manual `update`, are Phase 5.
+Git import (Phase 6) works and a benchmark script runs it against git on a real
 repository; the README's Benchmarks section shows the results. A cold `blame` or path `log` (the first call
 for a revision) takes several times git's time; the 6.12 criteria bound how many.
 The README status section tracks this.
