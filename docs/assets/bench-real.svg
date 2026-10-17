@@ -72,6 +72,6 @@
 <rect x="330" y="822" width="402.0" height="24" rx="5" fill="#1d5f58" stroke="#2dd4bf" stroke-width="1.5"/>
 <text x="742.0" y="840" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#e8edf5" font-weight="600" text-anchor="start">34 ms</text>
 <text x="1536" y="824" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#4ade80" font-weight="700" text-anchor="end">0.76×</text>
-<text x="64" y="910" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">https://github.com/rust-lang/rust.git library/, first-parent commits since 2026-01-01 up to 91e9c2688eb23af9a5b77f056156e756550c7c99 (600 commits, 2330 files at the tip)</text>
+<text x="64" y="910" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">The history slice pinned in scripts/bench-real (600 commits, 2330 files at the tip)</text>
 <text x="64" y="934" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="400" text-anchor="start">Linux 6.18.44-fc-v139 x86_64; Intel(R) Xeon(R) Processor @ 2.10GHz; 4 cpus; 15 GiB; git version 2.43.0; scion a0c0c7e; 3 runs; 2026-10-17T13:25:51Z</text>
 </svg>

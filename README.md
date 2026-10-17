@@ -120,7 +120,7 @@ cold (the first call after import, with nothing cached on the server) and warm.
 | blame, warm | 59 | 11 | 0.19× |
 | commit + land | 45 | 34 | 0.76× |
 
-Repository: https://github.com/rust-lang/rust.git library/, first-parent commits since 2026-01-01 up to 91e9c2688eb23af9a5b77f056156e756550c7c99 (600 commits, 2330 files at the tip).  
+Repository: the history slice pinned in scripts/bench-real (600 commits, 2330 files at the tip).  
 Machine: Linux 6.18.44-fc-v139 x86_64; Intel(R) Xeon(R) Processor @ 2.10GHz; 4 cpus; 15 GiB.  
 Run: git version 2.43.0; scion a0c0c7e; 3 runs; 2026-10-17T13:25:51Z.  
 Other implementations of the design: not measured in this run.
