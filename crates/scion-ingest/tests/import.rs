@@ -184,5 +184,5 @@ async fn an_unknown_repository_is_refused_before_anything_is_written() {
     assert!(err.to_string().contains("scn init"), "{err}");
     let readme = BlobId::hash(b"one\n");
     assert_eq!(store.has_blobs(&[readme]).await.unwrap(), [false]);
-    assert!(store.ingest_checkpoints("mnoo").await.unwrap().is_empty());
+    assert_eq!(store.ingest_checkpoints("mnoo").await.unwrap(), vec![]);
 }
