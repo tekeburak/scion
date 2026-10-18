@@ -136,7 +136,7 @@ changeset touched, not the history.
 
 ### Landing changes
 
-*In progress, Phase 5.* Change requests are landed end to end (5.1–5.5).
+*In progress, Phase 5.* Change requests are landed end to end and listed (5.1–5.6).
 
 **What `scn` does.** `scn land` submits the current head as a change request and waits for
 the outcome in the same call: the server holds the reply until the land worker finishes the
@@ -153,7 +153,10 @@ the working copy changes.
 
 **Change requests on the server.** There is no CI-gated merge queue and no global repository
 lock. `SubmitChangeRequest(repo, head)` records the request with `main`'s current changeset as
-its base and returns at once, or, when asked to wait, once the worker has finished it; `GetChangeRequest(repo, id)` reads it back. A request moves
+its base and returns at once, or, when asked to wait, once the worker has finished it; `GetChangeRequest(repo, id)` reads it back.
+`ListChangeRequests(repo, status, limit)` returns the newest requests, of one status or of
+any, by walking an index on `(repo, submitted_at)` or `(repo, status, submitted_at)`
+backwards for `limit` rows; `scn requests` prints them. A request moves
 through these states, stored in the `change_requests` table and scoped by `repo`:
 
 | State | Meaning |
@@ -177,8 +180,7 @@ That is idempotent because rebased changesets are content-addressed: a request s
 its CAS recreates the same ids, and one stopped after it finds `main` already holding its
 change and is recorded `landed`.
 
-Listing requests, "when did X land" (`FindLanding`), server-side merge and revert are
-*planned* (5.6–5.10). Testing happens post-merge and pre-deploy.
+"When did X land" (`FindLanding`), server-side merge and revert are *planned* (5.7–5.10). Testing happens post-merge and pre-deploy.
 
 ### Snapshots and seeding
 

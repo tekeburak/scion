@@ -2,6 +2,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::RwLock;
+use std::time::SystemTime;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -226,6 +227,7 @@ impl MetadataStore for MemoryStore {
             status: ChangeRequestStatus::Pending,
             landed: None,
             conflicts: Vec::new(),
+            submitted_at: SystemTime::now(),
         };
         m.change_requests
             .entry(repo.to_owned())
@@ -240,6 +242,27 @@ impl MetadataStore for MemoryStore {
             .get(repo)
             .and_then(|r| r.get(&id))
             .cloned())
+    }
+
+    async fn list_change_requests(
+        &self,
+        repo: &str,
+        status: Option<ChangeRequestStatus>,
+        limit: u32,
+    ) -> Result<Vec<ChangeRequest>> {
+        let m = self.meta.read().expect("poisoned");
+        m.check_repo(repo)?;
+        Ok(m.change_requests
+            .get(repo)
+            .map(|r| {
+                r.values()
+                    .rev()
+                    .filter(|cr| status.is_none_or(|st| cr.status == st))
+                    .take(limit as usize)
+                    .cloned()
+                    .collect()
+            })
+            .unwrap_or_default())
     }
 
     async fn claim_next_change_request(&self, repo: &str) -> Result<Option<ChangeRequest>> {

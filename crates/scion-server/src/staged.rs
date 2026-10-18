@@ -18,7 +18,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use futures_util::{StreamExt, TryStreamExt, stream};
 use scion_store::{
-    ChangeRequest, DerivedPointer, LandOutcome, MetadataStore, ObjectStore, RefState, Result,
+    ChangeRequest, ChangeRequestStatus, DerivedPointer, LandOutcome, MetadataStore, ObjectStore,
+    RefState, Result,
 };
 use scion_types::{BlobId, Changeset, ChangesetId, Tree, TreeId};
 
@@ -252,6 +253,15 @@ impl MetadataStore for Staged<'_> {
 
     async fn get_change_request(&self, repo: &str, id: u64) -> Result<Option<ChangeRequest>> {
         self.meta.get_change_request(repo, id).await
+    }
+
+    async fn list_change_requests(
+        &self,
+        repo: &str,
+        status: Option<ChangeRequestStatus>,
+        limit: u32,
+    ) -> Result<Vec<ChangeRequest>> {
+        self.meta.list_change_requests(repo, status, limit).await
     }
 
     async fn claim_next_change_request(&self, repo: &str) -> Result<Option<ChangeRequest>> {

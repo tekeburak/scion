@@ -11,7 +11,8 @@
 //! ignore files); `commit` creates a changeset on the server and makes it the
 //! working copy's anonymous head; `land` submits that head as a change
 //! request, which the server rebases onto `main` and lands, and moves the
-//! working copy to the landed changeset. `update` has the server rebase the
+//! working copy to the landed changeset; `requests` lists the repository's
+//! change requests, newest first. `update` has the server rebase the
 //! head onto `main` (or another revision) ahead of landing, which a conflict
 //! needs; `checkout` moves the working copy to any changeset. There is no branch command: work is shared
 //! by changeset id.
@@ -25,12 +26,12 @@ use std::borrow::Cow;
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, Subcommand};
 use scion_client::{
-    Config, FileStatus, MAIN_REF, Remote, RemoteChangeRequest, RemoteError, RequestStatus,
-    SparseProfile, State, SwitchError, Workspace, read_working_file, status,
+    ChangeRequestStatus, Config, FileStatus, MAIN_REF, Remote, RemoteChangeRequest, RemoteError,
+    RequestStatus, SparseProfile, State, SwitchError, Workspace, read_working_file, status,
 };
 use scion_types::{Changeset, ChangesetId, FileChange, FileType, Identity, RepoPath, Timestamp};
 
@@ -119,6 +120,15 @@ enum Command {
         #[arg(long, value_name = "ID")]
         status: Option<u64>,
     },
+    /// List the repository's change requests, newest first.
+    Requests {
+        /// Only requests in this status.
+        #[arg(long, value_enum)]
+        status: Option<StatusArg>,
+        /// Most requests to show.
+        #[arg(short = 'n', long, default_value_t = 20)]
+        limit: u32,
+    },
     /// Rebase the current head onto a revision on the server and move the
     /// working copy there; refused with local edits, and a conflict changes
     /// nothing.
@@ -135,6 +145,29 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
+}
+
+/// A change-request status, as `scn requests --status` spells it.
+#[derive(Clone, Copy, clap::ValueEnum)]
+enum StatusArg {
+    Pending,
+    Landing,
+    Landed,
+    #[value(alias = "needs_rebase")]
+    NeedsRebase,
+    Rejected,
+}
+
+impl From<StatusArg> for ChangeRequestStatus {
+    fn from(s: StatusArg) -> Self {
+        match s {
+            StatusArg::Pending => Self::Pending,
+            StatusArg::Landing => Self::Landing,
+            StatusArg::Landed => Self::Landed,
+            StatusArg::NeedsRebase => Self::NeedsRebase,
+            StatusArg::Rejected => Self::Rejected,
+        }
+    }
 }
 
 /// The path `arg` names relative to the current directory, as a path
@@ -589,6 +622,57 @@ async fn land_status(out: &mut impl Write, id: u64) -> Result<()> {
     Ok(())
 }
 
+/// How long ago, in the largest whole unit: `42s`, `5m`, `3h`, `12d`.
+fn format_age(age: Duration) -> String {
+    let secs = age.as_secs();
+    match secs {
+        0..60 => format!("{secs}s"),
+        60..3600 => format!("{}m", secs / 60),
+        3600..86_400 => format!("{}h", secs / 3600),
+        _ => format!("{}d", secs / 86_400),
+    }
+}
+
+async fn requests(out: &mut impl Write, status: Option<StatusArg>, limit: u32) -> Result<()> {
+    let mut s = Session::open().await?;
+    let repo = s.config.repo.clone();
+    let listed = s
+        .remote
+        .list_change_requests(&repo, status.map(Into::into), limit)
+        .await?;
+    if listed.is_empty() {
+        writeln!(out, "no change requests")?;
+        return Ok(());
+    }
+    let now = SystemTime::now();
+    let short = |cs: ChangesetId| cs.to_string()[..SHORT_ID].to_owned();
+    let width = listed.iter().map(|cr| cr.id.to_string().len()).max();
+    let width = width.unwrap_or(0).max("ID".len());
+    writeln!(
+        out,
+        "{:>width$}  {:<12}  {:<SHORT_ID$}  {:<SHORT_ID$}  AGE",
+        "ID", "STATUS", "HEAD", "LANDED"
+    )?;
+    for cr in &listed {
+        let (status, landed) = match &cr.status {
+            RequestStatus::Pending => ("pending", None),
+            RequestStatus::Landing => ("landing", None),
+            RequestStatus::Landed(cs) => ("landed", Some(*cs)),
+            RequestStatus::NeedsRebase(_) => ("needs-rebase", None),
+            RequestStatus::Rejected => ("rejected", None),
+        };
+        let landed = landed.map_or_else(|| "-".to_owned(), short);
+        let age = format_age(now.duration_since(cr.submitted_at).unwrap_or_default());
+        writeln!(
+            out,
+            "{:>width$}  {status:<12}  {}  {landed:<SHORT_ID$}  {age}",
+            cr.id,
+            short(cr.head)
+        )?;
+    }
+    Ok(())
+}
+
 async fn update(out: &mut impl Write, rev: &str) -> Result<()> {
     let mut s = Session::open().await?;
     let onto = s.resolve(rev).await?;
@@ -637,6 +721,7 @@ async fn run(cli: Cli) -> Result<()> {
             status: Some(id), ..
         } => land_status(&mut out, id).await?,
         Command::Land { no_wait, .. } => land(&mut out, no_wait).await?,
+        Command::Requests { status, limit } => requests(&mut out, status, limit).await?,
         Command::Update { rev } => update(&mut out, &rev).await?,
         Command::Checkout { rev, force } => checkout(&mut out, &rev, force).await?,
     }
@@ -674,6 +759,22 @@ mod tests {
             format_date(Timestamp::new(951_782_400, -330)),
             "2000-02-28 18:30:00 -0530"
         );
+    }
+
+    #[test]
+    fn formats_ages_in_the_largest_whole_unit() {
+        for (secs, want) in [
+            (0, "0s"),
+            (59, "59s"),
+            (60, "1m"),
+            (3599, "59m"),
+            (3600, "1h"),
+            (86_399, "23h"),
+            (86_400, "1d"),
+            (40 * 86_400, "40d"),
+        ] {
+            assert_eq!(format_age(Duration::from_secs(secs)), want);
+        }
     }
 
     #[test]

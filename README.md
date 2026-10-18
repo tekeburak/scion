@@ -72,7 +72,8 @@ What works today:
 - **`scn`**, the CLI: `init` a repository, `clone --sparse`, `status`, `log`, `diff`, `blame`,
   `add`, `commit` (an anonymous head), `land` (submits the head as a change request; the
   server rebases it onto `main` and lands it, or names the conflicting paths), `update` (the
-  server rebases your head onto `main`) and `checkout` of any changeset. Two clones landing
+  server rebases your head onto `main`), `requests` (the repository's change requests, newest
+  first, by status) and `checkout` of any changeset. Two clones landing
   at the same time, with no `update` in between, is the CI end-to-end test.
 - **`scion-ingest`**: imports a git history into Scion (one changeset per commit, renames and
   copies kept for `blame`, the git sha kept in the changeset), resumes from checkpoints, syncs
@@ -105,7 +106,8 @@ If another clone landed first, the server rebases your change onto the new `main
 it, and your working copy moves to the landed changeset. Only a change that edits the same
 lines is refused: `scn land` names the conflicting paths and `main` is untouched. `scn land
 --no-wait` returns the request id at once and `scn land --status <id>` reads its outcome
-later. After a code change, rebuild
+later; `scn requests` lists the newest requests with their status, head, landed changeset and
+age (`--status needs-rebase` shows only the conflicted ones). After a code change, rebuild
 the server with `docker compose -f deploy/docker-compose.yml up -d --wait --build`.
 `docker compose -f deploy/docker-compose.yml down -v` deletes every repository; the next `up`
 starts a new server with it. A `scion-server` run outside compose must be restarted after
@@ -248,7 +250,7 @@ Read these numbers with their limits:
 
 ## What's next
 
-In order: listing change requests, "when did this land", server-side merge and revert, and
+In order: "when did this land", server-side merge and revert, and
 conflict markers on `update`, with a benchmark of many writers landing at once; then access
 control (GitHub device-flow login, service principals, repository
 and directory ACLs) together with fuzzing and a hermetic simulation; released binaries, a

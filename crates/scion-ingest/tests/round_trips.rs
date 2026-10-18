@@ -23,7 +23,8 @@ use object_store::{
 };
 use scion_ingest::{GitRepo, import};
 use scion_store::{
-    ChangeRequest, DerivedPointer, LandOutcome, MemoryStore, MetadataStore, ObjectStorage, RefState,
+    ChangeRequest, ChangeRequestStatus, DerivedPointer, LandOutcome, MemoryStore, MetadataStore,
+    ObjectStorage, RefState,
 };
 use scion_types::{Changeset, ChangesetId};
 
@@ -255,6 +256,16 @@ impl MetadataStore for CountingMeta {
     ) -> scion_store::Result<Option<ChangeRequest>> {
         self.tick();
         self.inner.get_change_request(repo, id).await
+    }
+
+    async fn list_change_requests(
+        &self,
+        repo: &str,
+        status: Option<ChangeRequestStatus>,
+        limit: u32,
+    ) -> scion_store::Result<Vec<ChangeRequest>> {
+        self.tick();
+        self.inner.list_change_requests(repo, status, limit).await
     }
 
     async fn claim_next_change_request(

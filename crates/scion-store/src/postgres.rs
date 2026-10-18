@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use scion_types::{Changeset, ChangesetId, Decode, Encode, FileChange};
@@ -280,8 +281,10 @@ impl<'a> FileChangeColumns<'a> {
 
 /// The `change_requests` columns every query returns, in
 /// [`ChangeRequestRow`] order.
-const CHANGE_REQUEST_COLUMNS: &str =
-    "c.id, c.head_cs, c.base_cs, c.status::text, c.landed_cs, c.conflicts";
+/// `submitted_at` comes back in microseconds since the Unix epoch, its
+/// precision.
+const CHANGE_REQUEST_COLUMNS: &str = "c.id, c.head_cs, c.base_cs, c.status::text, c.landed_cs, \
+     c.conflicts, (EXTRACT(EPOCH FROM c.submitted_at) * 1000000)::bigint";
 
 type ChangeRequestRow = (
     i64,
@@ -290,10 +293,11 @@ type ChangeRequestRow = (
     String,
     Option<Vec<u8>>,
     Option<Vec<String>>,
+    i64,
 );
 
 fn change_request(
-    (id, head, base, status, landed, conflicts): ChangeRequestRow,
+    (id, head, base, status, landed, conflicts, submitted_us): ChangeRequestRow,
 ) -> Result<ChangeRequest> {
     let cs = |bytes: &[u8]| {
         ChangesetId::try_from_slice(bytes)
@@ -307,6 +311,7 @@ fn change_request(
             .ok_or_else(|| StoreError::Corrupt(format!("change request status {status:?}")))?,
         landed: landed.as_deref().map(cs).transpose()?,
         conflicts: conflicts.unwrap_or_default(),
+        submitted_at: UNIX_EPOCH + Duration::from_micros(to_u64(submitted_us)?),
     })
 }
 
@@ -762,8 +767,45 @@ impl MetadataStore for PostgresStore {
         row.map(change_request).transpose()
     }
 
+    async fn list_change_requests(
+        &self,
+        repo: &str,
+        status: Option<ChangeRequestStatus>,
+        limit: u32,
+    ) -> Result<Vec<ChangeRequest>> {
+        // Backwards through `change_requests_status` with a status, else
+        // `change_requests_submitted`; either stops after `limit` rows. The
+        // repository id and two statements keep the planner on that walk,
+        // with no join or optional filter to plan around.
+        const ORDER: &str = "ORDER BY c.submitted_at DESC, c.id DESC";
+        let from =
+            format!("SELECT {CHANGE_REQUEST_COLUMNS} FROM change_requests c WHERE c.repo = $1");
+        let repo = self.repo(repo).await?;
+        let limit = i64::from(limit);
+        let rows: Vec<ChangeRequestRow> = match status {
+            Some(status) => {
+                sqlx::query_as(&format!(
+                    "{from} AND c.status = $2::change_request_status {ORDER} LIMIT $3"
+                ))
+                .bind(repo)
+                .bind(status.as_str())
+                .bind(limit)
+                .fetch_all(&self.pool)
+                .await?
+            }
+            None => {
+                sqlx::query_as(&format!("{from} {ORDER} LIMIT $2"))
+                    .bind(repo)
+                    .bind(limit)
+                    .fetch_all(&self.pool)
+                    .await?
+            }
+        };
+        rows.into_iter().map(change_request).collect()
+    }
+
     async fn claim_next_change_request(&self, repo: &str) -> Result<Option<ChangeRequest>> {
-        // The oldest pending row through `change_requests_open`; a row
+        // The oldest pending row through `change_requests_status`; a row
         // another claim holds is skipped, never waited on or returned twice.
         let row: Option<ChangeRequestRow> = sqlx::query_as(&format!(
             "UPDATE change_requests c SET status = 'landing' \
@@ -827,7 +869,7 @@ impl MetadataStore for PostgresStore {
     }
 
     async fn repos_with_open_change_requests(&self) -> Result<Vec<String>> {
-        // Through `change_requests_open`, which holds only these rows.
+        // Through `change_requests_status`, one probe per status.
         let rows: Vec<(String,)> = sqlx::query_as(
             "SELECT r.name FROM repos r WHERE EXISTS (SELECT 1 FROM change_requests c \
              WHERE c.repo = r.id AND c.status IN ('pending', 'landing')) ORDER BY r.name",

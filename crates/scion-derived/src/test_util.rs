@@ -8,7 +8,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use proptest::prelude::*;
 use scion_store::{
-    ChangeRequest, DerivedPointer, LandOutcome, MemoryStore, MetadataStore, ObjectStore, RefState,
+    ChangeRequest, ChangeRequestStatus, DerivedPointer, LandOutcome, MemoryStore, MetadataStore,
+    ObjectStore, RefState,
 };
 use scion_types::{
     BlobId, Changeset, ChangesetId, FileChange, FileType, Identity, RepoPath, Timestamp, Tree,
@@ -256,6 +257,15 @@ impl MetadataStore for CountingMeta<'_> {
         id: u64,
     ) -> scion_store::Result<Option<ChangeRequest>> {
         self.inner.get_change_request(repo, id).await
+    }
+
+    async fn list_change_requests(
+        &self,
+        repo: &str,
+        status: Option<ChangeRequestStatus>,
+        limit: u32,
+    ) -> scion_store::Result<Vec<ChangeRequest>> {
+        self.inner.list_change_requests(repo, status, limit).await
     }
 
     async fn claim_next_change_request(

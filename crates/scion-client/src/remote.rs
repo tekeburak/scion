@@ -1,19 +1,22 @@
 //! The connection to the server. In the MVP both planes go to `scion-server`
 //! directly; the object plane moves to the nearest cache tier in Phase 4.
 
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use scion_proto::v1::control_service_client::ControlServiceClient;
 use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_proto::v1::{
-    BlameRequest, ChangeRequestStatus, CreateChangesetRequest, DiffRequest, GetBlobRequest,
-    GetChangeRequestRequest, GetRefRequest, GetTreeRequest, LogRequest, LogResponse,
+    BlameRequest, CreateChangesetRequest, DiffRequest, GetBlobRequest, GetChangeRequestRequest,
+    GetRefRequest, GetTreeRequest, ListChangeRequestsRequest, LogRequest, LogResponse,
     MoveRefRequest, PathLogRequest, PutBlobRequest, RebaseRequest, SubmitChangeRequestRequest,
 };
 use scion_types::{
     BlobId, Changeset, ChangesetId, Decode, Encode, FileType, RepoPath, Tree, TreeId,
 };
 use tonic::transport::{Channel, Endpoint};
+
+/// The status filter of [`Remote::list_change_requests`].
+pub use scion_proto::v1::ChangeRequestStatus;
 
 /// Deadline the client attaches to every RPC.
 pub const RPC_DEADLINE: Duration = Duration::from_secs(30);
@@ -107,6 +110,7 @@ pub struct RemoteChangeRequest {
     /// `main`'s changeset when the request was submitted.
     pub base: ChangesetId,
     pub status: RequestStatus,
+    pub submitted_at: SystemTime,
 }
 
 fn change_request(cr: scion_proto::v1::ChangeRequest) -> Result<RemoteChangeRequest, RemoteError> {
@@ -133,6 +137,7 @@ fn change_request(cr: scion_proto::v1::ChangeRequest) -> Result<RemoteChangeRequ
         head: changeset_id(&cr.head, "change request head")?,
         base: changeset_id(&cr.base, "change request base")?,
         status,
+        submitted_at: UNIX_EPOCH + Duration::from_micros(cr.submitted_unix_micros),
     })
 }
 
@@ -463,5 +468,25 @@ impl Remote {
             .await?
             .into_inner();
         change_request(resp)
+    }
+
+    /// The newest `limit` change requests of `repo`, only those in `status`
+    /// if given, newest first.
+    pub async fn list_change_requests(
+        &mut self,
+        repo: &str,
+        status: Option<ChangeRequestStatus>,
+        limit: u32,
+    ) -> Result<Vec<RemoteChangeRequest>, RemoteError> {
+        let resp = self
+            .control
+            .list_change_requests(ListChangeRequestsRequest {
+                repo: repo.to_owned(),
+                status: status.unwrap_or(ChangeRequestStatus::Unspecified).into(),
+                limit,
+            })
+            .await?
+            .into_inner();
+        resp.requests.into_iter().map(change_request).collect()
     }
 }

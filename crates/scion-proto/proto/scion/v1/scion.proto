@@ -75,6 +75,7 @@ service ControlService {
   rpc Blame(BlameRequest) returns (BlameResponse);
   rpc SubmitChangeRequest(SubmitChangeRequestRequest) returns (ChangeRequest);
   rpc GetChangeRequest(GetChangeRequestRequest) returns (ChangeRequest);
+  rpc ListChangeRequests(ListChangeRequestsRequest) returns (ListChangeRequestsResponse);
 }
 
 // Server refs are only `main` and `release/*`. An unknown ref is NOT_FOUND.
@@ -244,6 +245,20 @@ message GetChangeRequestRequest {
   bool wait = 3;
 }
 
+// The newest requests of a repository, newest first. An unknown repository
+// is NOT_FOUND.
+message ListChangeRequestsRequest {
+  string repo = 1;
+  // Only requests in this status; UNSPECIFIED lists every status.
+  ChangeRequestStatus status = 2;
+  // Most requests to return; clamped to the server's maximum (1000).
+  uint32 limit = 3;
+}
+
+message ListChangeRequestsResponse {
+  repeated ChangeRequest requests = 1;
+}
+
 enum ChangeRequestStatus {
   CHANGE_REQUEST_STATUS_UNSPECIFIED = 0;
   // Waiting for the land worker.
@@ -268,4 +283,6 @@ message ChangeRequest {
   optional bytes landed = 5;
   // Conflicting paths, sorted; non-empty only when NEEDS_REBASE.
   repeated string conflicts = 6;
+  // When the request was submitted, in microseconds since the Unix epoch.
+  uint64 submitted_unix_micros = 7;
 }

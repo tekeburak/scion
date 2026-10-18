@@ -203,6 +203,7 @@ async fn add_commit_land_end_to_end() {
 
     let (ok, _, err) = scn_try(&a, &["commit", "-m", "empty"]);
     assert!(!ok && err.contains("nothing to commit"), "{err}");
+    assert_eq!(scn(&a, &["requests"]), "no change requests\n");
 
     // Edit, delete, create; only added files join the commit.
     std::fs::write(a.join("README"), b"one\ntwo\nthree\nfour\n").unwrap();
@@ -253,6 +254,36 @@ async fn add_commit_land_end_to_end() {
         "{err}"
     );
     assert!(!scn(&b, &["log", "-r", "main", "-n", "1"]).contains(&c3.to_hex()));
+
+    // Every request shows, newest first: the conflict, the empty land, the
+    // landed one.
+    let short = |cs: ChangesetId| cs.to_hex()[..12].to_owned();
+    let rows: Vec<Vec<String>> = scn(&a, &["requests"])
+        .lines()
+        .map(|l| l.split_whitespace().map(str::to_owned).collect())
+        .collect();
+    assert_eq!(rows[0], ["ID", "STATUS", "HEAD", "LANDED", "AGE"]);
+    let cols = |row: &[String]| row[1..4].to_vec();
+    assert_eq!(
+        rows[1..].iter().map(|r| cols(r)).collect::<Vec<_>>(),
+        [
+            ["needs-rebase".to_owned(), short(c3), "-".to_owned()],
+            ["rejected".to_owned(), short(c2), "-".to_owned()],
+            ["landed".to_owned(), short(c2), short(c2)],
+        ]
+    );
+    let ids: Vec<u64> = rows[1..].iter().map(|r| r[0].parse().unwrap()).collect();
+    assert!(ids.windows(2).all(|w| w[0] > w[1]), "{ids:?}");
+    assert!(rows[1..].iter().all(|r| r[4].ends_with('s')), "{rows:?}");
+    let landed = scn(&b, &["requests", "--status", "landed"]);
+    assert_eq!(landed.lines().count(), 2, "{landed}");
+    assert!(landed.contains(&format!("{} ", ids[2])), "{landed}");
+    let newest = scn(&b, &["requests", "--status", "needs_rebase", "-n", "1"]);
+    assert_eq!(newest.lines().count(), 2, "{newest}");
+    assert_eq!(
+        scn(&b, &["requests", "--status", "pending"]),
+        "no change requests\n"
+    );
 
     // A fresh clone of main sees the landed tree.
     let out = scn(dir.path(), &["clone", &server, REPO, "c"]);

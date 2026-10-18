@@ -26,6 +26,8 @@ mod postgres;
 mod recent;
 mod refs;
 
+use std::time::SystemTime;
+
 use async_trait::async_trait;
 use bytes::Bytes;
 use scion_types::{BlobId, Changeset, ChangesetId, Tree, TreeId};
@@ -135,6 +137,8 @@ pub struct ChangeRequest {
     pub landed: Option<ChangesetId>,
     /// Paths that conflict with `main`; non-empty only when `needs_rebase`.
     pub conflicts: Vec<String>,
+    /// When the request was recorded.
+    pub submitted_at: SystemTime,
 }
 
 /// How the land worker finished a request it claimed.
@@ -278,6 +282,16 @@ pub trait MetadataStore: Send + Sync {
 
     /// Read a change request of `repo`.
     async fn get_change_request(&self, repo: &str, id: u64) -> Result<Option<ChangeRequest>>;
+
+    /// The newest `limit` requests of `repo`, only those in `status` if
+    /// given, newest first. An unknown repository is
+    /// [`StoreError::RepoNotFound`].
+    async fn list_change_requests(
+        &self,
+        repo: &str,
+        status: Option<ChangeRequestStatus>,
+        limit: u32,
+    ) -> Result<Vec<ChangeRequest>>;
 
     /// Move the oldest `pending` request of `repo` to `landing` and return
     /// it; `None` if nothing is pending. Concurrent claims never return the

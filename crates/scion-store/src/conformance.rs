@@ -402,6 +402,89 @@ pub async fn change_requests<S: MetadataStore>(s: &S) {
     );
 }
 
+/// Listing returns the newest requests first, of one status or of any, and
+/// only of the repository asked.
+pub async fn list_change_requests<S: MetadataStore>(s: &S) {
+    use ChangeRequestStatus::{Landed, Landing, NeedsRebase, Pending, Rejected};
+    const N: u32 = 1_000;
+    s.create_repo(REPO).await.unwrap();
+    s.create_repo("conformance-other").await.unwrap();
+    let base = ChangesetId::from_bytes([0; 32]);
+    let mut model = Vec::new();
+    for i in 0..N {
+        let mut head = [0; 32];
+        head[..4].copy_from_slice(&i.to_be_bytes());
+        let cr = s
+            .submit_change_request(REPO, ChangesetId::from_bytes(head), base)
+            .await
+            .unwrap();
+        model.push((cr.id, Pending));
+    }
+    // The oldest 600 finish in turn as landed, needs_rebase and rejected; 10
+    // more stay claimed.
+    for (i, (id, status)) in model.iter_mut().take(610).enumerate() {
+        let cr = s.claim_next_change_request(REPO).await.unwrap().unwrap();
+        assert_eq!(cr.id, *id);
+        *status = Landing;
+        let outcome = match i {
+            600.. => continue,
+            _ if i % 3 == 0 => LandOutcome::Landed(cr.head),
+            _ if i % 3 == 1 => LandOutcome::NeedsRebase(vec!["f".to_owned()]),
+            _ => LandOutcome::Rejected,
+        };
+        *status = s
+            .finish_change_request(REPO, *id, outcome)
+            .await
+            .unwrap()
+            .status;
+    }
+
+    for (status, limit) in [
+        (None, 25),
+        (None, N + 1),
+        (Some(Pending), 7),
+        (Some(Landing), 100),
+        (Some(Landed), 5),
+        (Some(NeedsRebase), 200),
+        (Some(Rejected), 1),
+        (Some(Pending), 0),
+    ] {
+        let listed = s.list_change_requests(REPO, status, limit).await.unwrap();
+        let want: Vec<_> = model
+            .iter()
+            .rev()
+            .filter(|(_, st)| status.is_none_or(|want| *st == want))
+            .take(limit as usize)
+            .copied()
+            .collect();
+        let got: Vec<_> = listed.iter().map(|cr| (cr.id, cr.status)).collect();
+        assert_eq!(got, want, "{status:?}, limit {limit}");
+        assert!(
+            listed
+                .windows(2)
+                .all(|w| w[0].submitted_at >= w[1].submitted_at),
+            "newest first"
+        );
+        for cr in &listed {
+            assert_eq!(
+                s.get_change_request(REPO, cr.id).await.unwrap().as_ref(),
+                Some(cr)
+            );
+        }
+    }
+    assert_eq!(
+        s.list_change_requests("conformance-other", None, N)
+            .await
+            .unwrap(),
+        vec![],
+        "scoped by repo"
+    );
+    assert!(matches!(
+        s.list_change_requests("conformance-missing", None, N).await,
+        Err(StoreError::RepoNotFound(_))
+    ));
+}
+
 /// A change request of one repository is invisible from another.
 pub async fn change_requests_by_repo<S: MetadataStore>(s: &S) {
     const OTHER: &str = "conformance-other";
@@ -542,6 +625,10 @@ macro_rules! conformance_tests {
                 $crate::conformance::change_requests(&$ctor.await).await;
             }
             #[tokio::test]
+            async fn list_change_requests() {
+                $crate::conformance::list_change_requests(&$ctor.await).await;
+            }
+            #[tokio::test]
             async fn change_requests_by_repo() {
                 $crate::conformance::change_requests_by_repo(&$ctor.await).await;
             }
@@ -593,6 +680,10 @@ macro_rules! metadata_conformance_tests {
             #[tokio::test]
             async fn change_requests() {
                 $crate::conformance::change_requests(&$ctor.await).await;
+            }
+            #[tokio::test]
+            async fn list_change_requests() {
+                $crate::conformance::list_change_requests(&$ctor.await).await;
             }
             #[tokio::test]
             async fn change_requests_by_repo() {

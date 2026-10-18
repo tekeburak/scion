@@ -4,6 +4,7 @@
 //! else is derived on first request.
 
 use std::sync::Arc;
+use std::time::UNIX_EPOCH;
 
 use futures_util::{StreamExt, TryStreamExt, stream};
 
@@ -12,9 +13,10 @@ use scion_proto::v1::control_service_server::ControlService;
 use scion_proto::v1::{
     BlameRequest, BlameResponse, BlameRun, ChangeRequest, ChangeRequestStatus,
     CreateChangesetRequest, CreateChangesetResponse, DiffEntry, DiffRequest, DiffResponse,
-    FileEntry, FileType, GetChangeRequestRequest, GetRefRequest, GetRefResponse, LogRequest,
-    LogResponse, MergeBaseRequest, MergeBaseResponse, MoveRefRequest, MoveRefResponse,
-    PathLogRequest, RebaseRequest, RebaseResponse, SubmitChangeRequestRequest,
+    FileEntry, FileType, GetChangeRequestRequest, GetRefRequest, GetRefResponse,
+    ListChangeRequestsRequest, ListChangeRequestsResponse, LogRequest, LogResponse,
+    MergeBaseRequest, MergeBaseResponse, MoveRefRequest, MoveRefResponse, PathLogRequest,
+    RebaseRequest, RebaseResponse, SubmitChangeRequestRequest,
 };
 use scion_store::{MetadataStore, ObjectStore, StoreError, is_allowed_ref_name};
 use scion_types::{BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, RepoPath, TreeId};
@@ -24,8 +26,9 @@ use crate::land::LandWorkers;
 use crate::staged::Staged;
 use crate::store_status;
 
-/// Most changesets a single `Log` or `PathLog` call returns; larger limits are
-/// clamped. Clients page by asking again from the last parent.
+/// Most changesets a single `Log` or `PathLog` call returns, and most requests
+/// `ListChangeRequests` returns; larger limits are clamped. Clients page a log
+/// by asking again from the last parent.
 pub const MAX_LOG_LIMIT: u32 = 1000;
 
 /// Changesets a `Log` or `PathLog` reply reads at once.
@@ -169,6 +172,10 @@ fn change_request(cr: scion_store::ChangeRequest) -> ChangeRequest {
         .into(),
         landed: cr.landed.map(|cs| cs.as_bytes().to_vec()),
         conflicts: cr.conflicts,
+        submitted_unix_micros: cr
+            .submitted_at
+            .duration_since(UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX)),
     }
 }
 
@@ -659,5 +666,35 @@ impl ControlService for ControlServer {
         .map_err(store_status)?
         .ok_or_else(|| Status::not_found(format!("change request {} in {:?}", req.id, req.repo)))?;
         Ok(Response::new(change_request(cr)))
+    }
+
+    async fn list_change_requests(
+        &self,
+        request: Request<ListChangeRequestsRequest>,
+    ) -> Result<Response<ListChangeRequestsResponse>, Status> {
+        use scion_store::ChangeRequestStatus as S;
+        let req = request.into_inner();
+        let status = match ChangeRequestStatus::try_from(req.status) {
+            Ok(ChangeRequestStatus::Unspecified) => None,
+            Ok(ChangeRequestStatus::Pending) => Some(S::Pending),
+            Ok(ChangeRequestStatus::Landing) => Some(S::Landing),
+            Ok(ChangeRequestStatus::Landed) => Some(S::Landed),
+            Ok(ChangeRequestStatus::NeedsRebase) => Some(S::NeedsRebase),
+            Ok(ChangeRequestStatus::Rejected) => Some(S::Rejected),
+            Err(_) => {
+                return Err(Status::invalid_argument(format!(
+                    "change request status {}",
+                    req.status
+                )));
+            }
+        };
+        let requests = self
+            .meta
+            .list_change_requests(&req.repo, status, req.limit.min(MAX_LOG_LIMIT))
+            .await
+            .map_err(store_status)?;
+        Ok(Response::new(ListChangeRequestsResponse {
+            requests: requests.into_iter().map(change_request).collect(),
+        }))
     }
 }

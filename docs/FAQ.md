@@ -49,7 +49,8 @@ any changeset. The README [Getting started](../README.md#getting-started) sectio
 loop on the compose stack with only Docker and the Rust toolchain installed. Change requests
 are in progress (Phase 5): `scn land` submits one (`SubmitChangeRequest`) and waits while the
 serial land worker of the repository rebases and lands it, so concurrent heads land from the
-CLI with no manual `update`; listing requests, merge and revert are still to come.
+CLI with no manual `update`, and `scn requests` lists them newest first; merge and revert
+are still to come.
 Git import (Phase 6) works and a benchmark script runs it against git on a real
 repository; the README's Benchmarks section shows the results. A cold `blame` or path `log` (the first call
 for a revision) takes several times git's time; the 6.12 criteria bound how many.
