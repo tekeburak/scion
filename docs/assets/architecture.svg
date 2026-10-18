@@ -54,5 +54,5 @@
 <text x="316" y="674" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#93a1b8" font-weight="400" text-anchor="start">object plane</text>
 <rect x="456" y="656" width="40" height="24" rx="6" fill="#151d2e" stroke="#2dd4bf" stroke-width="2" stroke-dasharray="8 6"/>
 <text x="508" y="674" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#93a1b8" font-weight="400" text-anchor="start">planned tier</text>
-<text x="64" y="714" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#93a1b8" font-weight="400" text-anchor="start">In the MVP (Phase 3) both planes go to scion-server directly; no tier holds a materialized copy of the repository.</text>
+<text x="64" y="714" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#93a1b8" font-weight="400" text-anchor="start">Today both planes go to scion-server directly; no tier holds a materialized copy of the repository.</text>
 </svg>

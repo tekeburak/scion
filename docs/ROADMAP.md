@@ -1,9 +1,34 @@
-# Roadmap steps
+# Roadmap
 
-The phase table lives in `README.md`. Phases run in the order 3, 6, 5, 7, 9, 4, 8. When a phase
-starts, its single-PR steps are added here as `N.M`, each with one acceptance criterion; PRs
-are titled `Phase N.M: …` and land in order. Non-goals in `docs/ARCHITECTURE.md` stay out of
-every phase.
+Internal planning document: the phases, their order and the single-PR steps of the current
+ones. The README describes what Scion does today and what comes next in product terms and
+names no phase; this file is where the numbering lives.
+
+<p align="center">
+  <img src="assets/roadmap.svg" width="800" alt="Phases 0 to 3 and 6 done; then phases 5, 7, 9, 4 and 8 planned in that order">
+</p>
+
+| Phase | Scope | Status |
+|---|---|---|
+| 0 | Workspace, CI, local storage stack, docs | done |
+| 1 | Data model, canonical encoding, golden hashes, store traits + memory impl | done |
+| 1 | Postgres metadata store, S3-compatible object store | done |
+| 2 | Derived data (trees, path history, blame, skip lists), diff / merge-base / rebase / merge | done |
+| 3 | `scion-server` (gRPC) + `scn` CLI | done |
+| 6 | git → Scion ingestion, benchmarks on a real repository, `scn init` / `update` / `checkout`, bounded cold derivation | done |
+| 5 | Server-side rebase/merge UX, change requests, serial land worker | in progress |
+| 7 | IAM (GitHub device-flow login, service principals, repo + directory ACLs), fuzzing, hermetic simulation | planned |
+| 9 | Release and onboarding: versioned binaries, server image, production compose profile, five-minute quickstart | planned |
+| 4 | `scion-cache` and `scion-daemon` tiers, manifest-based seeding | planned |
+| 8 | Virtualized checkouts (FUSE / NFS) | planned |
+
+Phases run in table order: git import came right after the server and CLI because testing
+and benchmarking against real repositories needs it; the land worker and IAM come before any
+release, so a released server handles concurrent writers and authenticates them; the cache
+and daemon tiers wait until there is more than one machine to serve. When a phase starts, its
+single-PR steps are added below as `N.M`, each with one acceptance criterion; PRs are titled
+`Phase N.M: …` and land in order. Non-goals in `docs/ARCHITECTURE.md` stay out of every
+phase.
 
 ## Phase 6: git → Scion ingestion
 
