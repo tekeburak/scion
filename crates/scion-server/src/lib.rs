@@ -8,6 +8,7 @@
 
 mod backfill;
 mod control;
+mod land;
 mod object;
 mod staged;
 
@@ -22,6 +23,7 @@ use tonic::Status;
 use tonic::transport::server::TcpIncoming;
 
 use control::ControlServer;
+use land::LandWorkers;
 use object::ObjectServer;
 
 pub use backfill::{BACKFILL_TYPES, backfill};
@@ -36,12 +38,17 @@ pub const RPC_DEADLINE: Duration = Duration::from_secs(30);
 pub const MAX_MESSAGE_BYTES: usize = 64 << 20;
 
 /// Serve all services on `listener` until the future is dropped or the
-/// transport fails.
+/// transport fails, first starting the land worker of every repository with
+/// requests waiting.
 pub async fn serve(
     listener: TcpListener,
     meta: Arc<dyn MetadataStore>,
     objects: Arc<dyn ObjectStore>,
-) -> Result<(), tonic::transport::Error> {
+) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let workers = Arc::new(LandWorkers::new(meta.clone(), objects.clone()));
+    for repo in meta.repos_with_open_change_requests().await? {
+        workers.wake(&repo);
+    }
     let (health, health_service) = tonic_health::server::health_reporter();
     health
         .set_serving::<ObjectServiceServer<ObjectServer>>()
@@ -49,9 +56,10 @@ pub async fn serve(
     health
         .set_serving::<ControlServiceServer<ControlServer>>()
         .await;
-    let control_service = ControlServiceServer::new(ControlServer::new(meta, objects.clone()))
-        .max_decoding_message_size(MAX_MESSAGE_BYTES)
-        .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let control_service =
+        ControlServiceServer::new(ControlServer::new(meta, objects.clone(), workers))
+            .max_decoding_message_size(MAX_MESSAGE_BYTES)
+            .max_encoding_message_size(MAX_MESSAGE_BYTES);
     let object_service = ObjectServiceServer::new(ObjectServer::new(objects))
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
@@ -63,7 +71,8 @@ pub async fn serve(
         // Without TCP_NODELAY a small reply waits for the client's delayed
         // ACK, about 40 ms on Linux, whenever two writes go out back to back.
         .serve_with_incoming(TcpIncoming::from(listener).with_nodelay(Some(true)))
-        .await
+        .await?;
+    Ok(())
 }
 
 /// Map a store failure to a gRPC status.

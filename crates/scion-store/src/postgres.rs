@@ -763,7 +763,7 @@ impl MetadataStore for PostgresStore {
     }
 
     async fn claim_next_change_request(&self, repo: &str) -> Result<Option<ChangeRequest>> {
-        // The oldest pending row through `change_requests_pending`; a row
+        // The oldest pending row through `change_requests_open`; a row
         // another claim holds is skipped, never waited on or returned twice.
         let row: Option<ChangeRequestRow> = sqlx::query_as(&format!(
             "UPDATE change_requests c SET status = 'landing' \
@@ -813,5 +813,16 @@ impl MetadataStore for PostgresStore {
                 status: cr.status,
             }),
         }
+    }
+
+    async fn repos_with_open_change_requests(&self) -> Result<Vec<String>> {
+        // Through `change_requests_open`, which holds only these rows.
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT r.name FROM repos r WHERE EXISTS (SELECT 1 FROM change_requests c \
+             WHERE c.repo = r.id AND c.status IN ('pending', 'landing')) ORDER BY r.name",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|(name,)| name).collect())
     }
 }

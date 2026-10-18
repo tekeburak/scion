@@ -402,6 +402,8 @@ pub async fn change_requests_by_repo<S: MetadataStore>(s: &S) {
     ));
     s.create_repo(REPO).await.unwrap();
     s.create_repo(OTHER).await.unwrap();
+    let open = || async { s.repos_with_open_change_requests().await.unwrap() };
+    assert!(open().await.is_empty());
     let ours = s.submit_change_request(REPO, head, base).await.unwrap();
     let theirs = s.submit_change_request(OTHER, head, base).await.unwrap();
     assert_eq!(s.get_change_request(OTHER, ours.id).await.unwrap(), None);
@@ -409,10 +411,15 @@ pub async fn change_requests_by_repo<S: MetadataStore>(s: &S) {
     let claimed = s.claim_next_change_request(OTHER).await.unwrap().unwrap();
     assert_eq!(claimed.id, theirs.id);
     assert_eq!(s.claim_next_change_request(OTHER).await.unwrap(), None);
+    assert_eq!(open().await, [REPO, OTHER], "pending and landing are open");
     assert!(matches!(
         s.finish_change_request(REPO, theirs.id, LandOutcome::Rejected).await,
         Err(StoreError::ChangeRequestNotFound(id)) if id == theirs.id
     ));
+    s.finish_change_request(OTHER, theirs.id, LandOutcome::Rejected)
+        .await
+        .unwrap();
+    assert_eq!(open().await, [REPO]);
     assert_eq!(
         s.get_change_request(REPO, ours.id)
             .await

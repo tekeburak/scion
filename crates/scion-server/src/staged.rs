@@ -266,4 +266,8 @@ impl MetadataStore for Staged<'_> {
     ) -> Result<ChangeRequest> {
         self.meta.finish_change_request(repo, id, outcome).await
     }
+
+    async fn repos_with_open_change_requests(&self) -> Result<Vec<String>> {
+        self.meta.repos_with_open_change_requests().await
+    }
 }

@@ -273,4 +273,8 @@ impl MetadataStore for CountingMeta<'_> {
     ) -> scion_store::Result<ChangeRequest> {
         self.inner.finish_change_request(repo, id, outcome).await
     }
+
+    async fn repos_with_open_change_requests(&self) -> scion_store::Result<Vec<String>> {
+        self.inner.repos_with_open_change_requests().await
+    }
 }

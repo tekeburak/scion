@@ -293,6 +293,10 @@ pub trait MetadataStore: Send + Sync {
         id: u64,
         outcome: LandOutcome,
     ) -> Result<ChangeRequest>;
+
+    /// The repositories with a `pending` or `landing` request, sorted: the
+    /// ones whose land worker has work when the server starts.
+    async fn repos_with_open_change_requests(&self) -> Result<Vec<String>>;
 }
 
 /// Immutable content-addressed objects.
