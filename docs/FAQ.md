@@ -20,7 +20,7 @@ changeset id the client remembers, optionally under a local label that never lea
 At agent scale, thousands of short-lived per-user or per-feature refs would be shared mutable
 state on the server; an id is immutable and needs no coordination.
 Because objects are append-only, an anonymous head cannot be lost, and sharing work means
-sharing an id (or, from Phase 5, a change request). See
+sharing an id or submitting a change request for it (Phase 5, server side only so far). See
 [Refs and anonymous heads](DATA_MODEL.md#refs-and-anonymous-heads).
 
 ## Why do trees live in the object store?
@@ -46,8 +46,10 @@ Postgres + S3. `scn` can `init` a repository, `clone --sparse`, `status`, `log`,
 `blame`, `add`, `commit` (an anonymous head), `land` (a fast-forward of `main`), `update`
 (the server rebases the head onto `main`, so `land` is a fast-forward again) and `checkout`
 any changeset. The README [quickstart](../README.md#quickstart) runs that loop on the compose
-stack with only Docker and the Rust toolchain installed. Change requests and the serial land
-worker, which land concurrent heads without a manual `update`, are Phase 5.
+stack with only Docker and the Rust toolchain installed. Change requests are in progress
+(Phase 5): the server already accepts them (`SubmitChangeRequest`, `GetChangeRequest`) and a
+serial land worker per repository rebases and lands them, but `scn land` does not submit them
+yet (5.5), so landing concurrent heads from the CLI still takes a manual `update`.
 Git import (Phase 6) works and a benchmark script runs it against git on a real
 repository; the README's Benchmarks section shows the results. A cold `blame` or path `log` (the first call
 for a revision) takes several times git's time; the 6.12 criteria bound how many.

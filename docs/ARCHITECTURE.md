@@ -136,18 +136,43 @@ changeset touched, not the history.
 
 ### Landing changes
 
-*Planned, Phase 5.* Today `scn land` moves `main` to the current head only when that is a
+*In progress, Phase 5.* The server side exists (5.1–5.4); the client side does not yet.
+
+**What `scn` does today.** `scn land` moves `main` to the current head only when that is a
 fast-forward, with one compare-and-swap; anything else is refused. `scn update` makes it a
 fast-forward again: the `Rebase` RPC replays the head's first-parent changesets that `main`
 lacks onto `main` through `scion_core::rebase`, creating each through the shared create path,
-and stops at the first conflict with its paths, before the working copy changes. The serial
-land worker will use the same rebase.
+and stops at the first conflict with its paths, before the working copy changes. `scn land`
+submitting a change request instead is *planned* (5.5).
 
-There is no CI-gated merge queue and no global repository lock. A change request is landed by a
-**per-repository serial worker** inside `scion-server`: it rebases the request's head onto the
-current `main` on the server, then moves `main` with a single compare-and-swap. A rebase
-conflict marks the request `needs_rebase` with the conflicting paths; nothing retries blindly.
-Testing happens post-merge and pre-deploy.
+**Change requests on the server.** There is no CI-gated merge queue and no global repository
+lock. `SubmitChangeRequest(repo, head)` records the request with `main`'s current changeset as
+its base and returns at once; `GetChangeRequest(repo, id)` reads it back. A request moves
+through these states, stored in the `change_requests` table and scoped by `repo`:
+
+| State | Meaning |
+|---|---|
+| `pending` | Waiting for the land worker. |
+| `landing` | Claimed; being rebased onto `main` and landed. |
+| `landed` | On `main` as `landed_cs`. |
+| `needs_rebase` | Conflicts with `main` at the listed paths; `main` is untouched. |
+| `rejected` | Rebased onto `main`, it would land nothing. |
+
+Each repository with requests gets one **serial land worker** inside `scion-server`, started
+by its first submit (or at server start if requests are waiting) and woken by every later
+submit. It claims the oldest `pending` request, rebases the head onto `main` through the same
+rebase as `scn update`, and moves `main` with one compare-and-swap. A lost CAS happens only when
+another writer (`MoveRef`, an import) moved `main`, so the rebased stack is replayed onto the
+new `main`; every retry follows a move of `main`, never a timer. A conflict finishes the
+request `needs_rebase` with its paths; nothing retries blindly.
+
+**Crash recovery.** A request found `landing` when the server starts is landed again first.
+That is idempotent because rebased changesets are content-addressed: a request stopped before
+its CAS recreates the same ids, and one stopped after it finds `main` already holding its
+change and is recorded `landed`.
+
+Listing requests, "when did X land" (`FindLanding`), server-side merge and revert are
+*planned* (5.6–5.10). Testing happens post-merge and pre-deploy.
 
 ### Snapshots and seeding
 
