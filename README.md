@@ -356,6 +356,9 @@ cargo test -p scn --features integration --test e2e_stack   # scn + scion-server
 scripts/bench-real 3
 ```
 
+CI runs the same commands on Linux, on self-hosted runners (the header of
+`.github/workflows/ci.yml` says how they behave); macOS is covered by developing on it.
+
 Golden-hash fixtures live in `crates/scion-types/tests/golden/`. They are the format
 specification's executable form; see `docs/DATA_MODEL.md` before touching them.
 

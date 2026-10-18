@@ -1,22 +1,42 @@
+# Every pull request to main passes these before it merges. Branch protection
+# requires the branch to be up to date, so the squash commit is the head that
+# was just checked; main itself is checked once a night, which catches two
+# pull requests that pass alone and break together, and can be run by hand.
+#
+# The jobs run on our own Linux machines in Google Cloud (self-hosted runners
+# labelled `konuq-ci`), not on GitHub's. A machine stops itself when idle and a
+# webhook starts one when a job is queued, so a job waits a minute or two before
+# it starts; when every machine is busy the job waits for the first free one.
+# The machines are Spot instances: a job that failed with "lost communication
+# with the server" or "received a shutdown signal" was stopped with its machine,
+# not by the code; rerun it (`gh run rerun <run-id> --failed`). Nothing here may
+# claim a fixed port: every service is mapped to a free port that the tests read
+# from the environment (`SCION_TEST_*`). The runner has Docker and no `aws` CLI.
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
+  schedule:
+    - cron: "41 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
   RUSTFLAGS: "-D warnings"
 
 jobs:
   check:
-    name: fmt + clippy + test (${{ matrix.os }})
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    name: fmt + clippy + test
+    runs-on: [self-hosted, linux, konuq-ci]
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -40,7 +60,8 @@ jobs:
 
   integration:
     name: store integration (postgres + s3)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, konuq-ci]
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:16
@@ -48,7 +69,7 @@ jobs:
           POSTGRES_USER: scion
           POSTGRES_PASSWORD: scion
           POSTGRES_DB: scion
-        ports: ["5432:5432"]
+        ports: ["5432"]
         options: >-
           --health-cmd "pg_isready -U scion -d scion"
           --health-interval 5s --health-timeout 3s --health-retries 10
@@ -59,27 +80,28 @@ jobs:
           RUSTFS_SECRET_KEY: scionscion
           RUSTFS_VOLUMES: /data
           RUSTFS_ADDRESS: ":9000"
-        ports: ["9000:9000"]
+        ports: ["9000"]
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: create bucket
         env:
-          AWS_ACCESS_KEY_ID: scion
-          AWS_SECRET_ACCESS_KEY: scionscion
-          AWS_DEFAULT_REGION: us-east-1
+          SCION_TEST_S3_ENDPOINT: http://localhost:${{ job.services.rustfs.ports['9000'] }}
         run: |
-          for i in $(seq 1 30); do
-            aws --endpoint-url http://localhost:9000 s3 ls >/dev/null 2>&1 && break; sleep 1
-          done
-          aws --endpoint-url http://localhost:9000 s3 mb s3://scion-objects
+          s3() { docker run --rm --network host -e AWS_ACCESS_KEY_ID=scion -e AWS_SECRET_ACCESS_KEY=scionscion -e AWS_DEFAULT_REGION=us-east-1 amazon/aws-cli --endpoint-url "$SCION_TEST_S3_ENDPOINT" s3 "$@"; }
+          for i in $(seq 1 30); do s3 ls >/dev/null 2>&1 && break; sleep 1; done
+          s3 mb s3://scion-objects
       - name: test
+        env:
+          SCION_TEST_DATABASE_URL: postgres://scion:scion@localhost:${{ job.services.postgres.ports['5432'] }}/scion
+          SCION_TEST_S3_ENDPOINT: http://localhost:${{ job.services.rustfs.ports['9000'] }}
         run: cargo test -p scion-store --features integration
 
   server:
     name: server end-to-end (scn + scion-server on postgres + s3)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, konuq-ci]
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:16
@@ -87,7 +109,7 @@ jobs:
           POSTGRES_USER: scion
           POSTGRES_PASSWORD: scion
           POSTGRES_DB: scion
-        ports: ["5432:5432"]
+        ports: ["5432"]
         options: >-
           --health-cmd "pg_isready -U scion -d scion"
           --health-interval 5s --health-timeout 3s --health-retries 10
@@ -98,7 +120,7 @@ jobs:
           RUSTFS_SECRET_KEY: scionscion
           RUSTFS_VOLUMES: /data
           RUSTFS_ADDRESS: ":9000"
-        ports: ["9000:9000"]
+        ports: ["9000"]
     steps:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
@@ -108,20 +130,21 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: create bucket
         env:
-          AWS_ACCESS_KEY_ID: scion
-          AWS_SECRET_ACCESS_KEY: scionscion
-          AWS_DEFAULT_REGION: us-east-1
+          SCION_TEST_S3_ENDPOINT: http://localhost:${{ job.services.rustfs.ports['9000'] }}
         run: |
-          for i in $(seq 1 30); do
-            aws --endpoint-url http://localhost:9000 s3 ls >/dev/null 2>&1 && break; sleep 1
-          done
-          aws --endpoint-url http://localhost:9000 s3 mb s3://scion-objects
+          s3() { docker run --rm --network host -e AWS_ACCESS_KEY_ID=scion -e AWS_SECRET_ACCESS_KEY=scionscion -e AWS_DEFAULT_REGION=us-east-1 amazon/aws-cli --endpoint-url "$SCION_TEST_S3_ENDPOINT" s3 "$@"; }
+          for i in $(seq 1 30); do s3 ls >/dev/null 2>&1 && break; sleep 1; done
+          s3 mb s3://scion-objects
       - name: test
+        env:
+          SCION_TEST_DATABASE_URL: postgres://scion:scion@localhost:${{ job.services.postgres.ports['5432'] }}/scion
+          SCION_TEST_S3_ENDPOINT: http://localhost:${{ job.services.rustfs.ports['9000'] }}
         run: cargo test -p scn --features integration --test e2e_stack
 
   deny:
     name: cargo-deny
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, konuq-ci]
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v5
       - uses: EmbarkStudios/cargo-deny-action@v2

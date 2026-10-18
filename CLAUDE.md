@@ -18,7 +18,10 @@ docker compose -f deploy/docker-compose.yml up -d        # Postgres :5432, S3 (R
 docker compose -f deploy/docker-compose.yml down -v      # reset local data
 ```
 
-All of the above must pass before a commit. CI runs the same set on ubuntu and macos.
+All of the above must pass before a commit. CI runs the same set on Linux, on our own self-hosted
+runners (the header of `.github/workflows/ci.yml` says how they behave). A job that failed with
+"lost communication with the server" or "received a shutdown signal" was stopped with its Spot
+machine, not by the code: rerun it with `gh run rerun <run-id> --failed`, change nothing.
 
 ## Invariants (never violate without asking)
 
