@@ -55,9 +55,9 @@ Scion is that design, built on boring infrastructure:
 Scion is **alpha** software. The server, the CLI, git import and the real-repository benchmark
 work and are exercised end to end in CI on Postgres + S3. There is **no authentication yet**:
 run a server only on a network you trust. Landing goes through change requests and a serial
-land worker; listing requests, server-side merge and revert are under construction, and the
-cache and daemon tiers, access control and released binaries follow (see
-[What's next](#whats-next)).
+land worker, and every request can be listed and traced to the changeset it landed;
+server-side merge and revert are under construction, and the cache and daemon tiers, access
+control and released binaries follow (see [What's next](#whats-next)).
 
 What works today:
 
@@ -108,7 +108,9 @@ it, and your working copy moves to the landed changeset. Only a change that edit
 lines is refused: `scn land` names the conflicting paths and `main` is untouched. `scn land
 --no-wait` returns the request id at once and `scn land --status <id>` reads its outcome
 later; `scn requests` lists the newest requests with their status, head, landed changeset and
-age (`--status needs-rebase` shows only the conflicted ones). After a code change, rebuild
+age (`--status needs-rebase` shows only the conflicted ones), and `scn log --landed` adds to
+each changeset the request that landed it and when, even when the server rebased it to a new
+id. After a code change, rebuild
 the server with `docker compose -f deploy/docker-compose.yml up -d --wait --build`.
 `docker compose -f deploy/docker-compose.yml down -v` deletes every repository; the next `up`
 starts a new server with it. A `scion-server` run outside compose must be restarted after
