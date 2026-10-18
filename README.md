@@ -5,7 +5,7 @@
 <p align="center">
   <a href="https://github.com/tekeburak/scion/actions/workflows/ci.yml"><img src="https://github.com/tekeburak/scion/actions/workflows/ci.yml/badge.svg?branch=main" alt="CI"></a>
   <a href="LICENSE"><img src="docs/assets/badge-license.svg" alt="license: Apache-2.0"></a>
-  <a href="#status"><img src="docs/assets/badge-status.svg" alt="status: MVP, Phase 5 next"></a>
+  <a href="#status"><img src="docs/assets/badge-status.svg" alt="status: MVP, Phase 5 in progress"></a>
 </p>
 
 <p align="center"><b>A server-authoritative source control system for one very large monorepo whose
@@ -23,10 +23,10 @@ deliberate deviations from the reference design (trees in S3, canonical BLAKE3, 
 ## Status
 
 <p align="center">
-  <img src="docs/assets/roadmap.svg" width="800" alt="Phases 0 to 3 and 6 done; then Phases 5, 7, 9, 4 and 8 planned in that order">
+  <img src="docs/assets/roadmap.svg" width="800" alt="Phases 0 to 3 and 6 done; Phase 5 in progress; then Phases 7, 9, 4 and 8 planned in that order">
 </p>
 
-**MVP (Phase 3) and git import (Phase 6) done; change requests (Phase 5) next. Not production-ready: no auth, no cache tiers.**
+**MVP (Phase 3) and git import (Phase 6) done; change requests (Phase 5) in progress. Not production-ready: no auth, no cache tiers.**
 
 - **Works today:** `scion-server` serves the object and control gRPC services over Postgres +
   S3 (`log`, `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`, `move_ref`,
@@ -54,7 +54,13 @@ deliberate deviations from the reference design (trees in S3, canonical BLAKE3, 
   `blame` measured cold (first call) and warm; the results are under [Benchmarks](#benchmarks).
   Clone, `status`, warm `log` and `blame` and commit + `land` run at or below git's time;
   cold, a path `log` takes about 9× git's and a `blame` about 4×.
-- **Next:** change requests and the land worker (Phase 5), IAM (Phase 7), release binaries
+- **Change requests (Phase 5, in progress):** `scion-server` serves `SubmitChangeRequest` and
+  `GetChangeRequest`, and runs one serial land worker per repository that rebases each pending
+  head onto `main` and moves `main` with one compare-and-swap; a conflict marks the request
+  `needs_rebase` with its paths, and a request interrupted mid-land resumes at server start
+  and lands once (5.1–5.4). `scn land` does not submit change requests yet (5.5).
+- **Next:** the rest of Phase 5 (`scn land` through change requests, listing, "when did X
+  land", server-side merge and revert), IAM (Phase 7), release binaries
   and a five-minute quickstart (Phase 9), the cache and daemon tiers (Phase 4) and virtualized
   checkouts (Phase 8).
 
@@ -288,8 +294,9 @@ Full details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and
 
 - **Target:** one server serving many repositories, with Linux and macOS clients that are
   always online.
-- **Planned, not built:** the cache and daemon tiers (Phase 4), change
-  requests and the serial land worker (Phase 5), and IAM (Phase 7). Git import (Phase 6) is
+- **Planned, not built:** the cache and daemon tiers (Phase 4), the client side of change
+  requests and server-side merge and revert (Phase 5; the RPCs and the serial land worker
+  exist), and IAM (Phase 7). Git import (Phase 6) is
   done, and the real-repository benchmark results are under [Benchmarks](#benchmarks).
 - **Out of scope for now:** git wire compatibility, offline operation, Windows, a review UI,
   garbage collection, large-file chunking (there is a per-blob size limit) and ignore files. See

@@ -52,7 +52,7 @@ ROADMAP = [
     ("2", "Derived data, diff, merge, rebase", "done"),
     ("3", "scion-server + scn CLI (MVP)", "done"),
     ("6", "git import, usable MVP", "done"),
-    ("5", "Change requests, land worker", "planned"),
+    ("5", "Change requests, land worker", "active"),
     ("7", "IAM, fuzzing, simulation", "planned"),
     ("9", "Release and onboarding", "planned"),
     ("4", "Cache + daemon tiers", "planned"),
@@ -61,7 +61,7 @@ ROADMAP = [
 # Phases run in the order listed: git import comes right after the MVP so real repositories
 # can be tested and benchmarked.
 STATUS_DONE = "Usable MVP done: git import, scn init, clone --sparse, status, log, blame, commit, land, update"
-STATUS_NEXT = "next: Phase 5 change requests and the land worker, then 7, 9, 4, 8"
+STATUS_NEXT = "in progress: Phase 5 (5.1-5.4 done: change-request RPCs, serial land worker); then 7, 9, 4, 8"
 
 
 def t(x, y, s, size=20, fill=TEXT, weight=400, anchor="start", mono=False, extra=""):
@@ -569,7 +569,7 @@ FIGURES = {
     "commit-cost.svg": commit_cost_svg,
     "roadmap.svg": roadmap_svg,
     "bench-real.svg": bench_real_svg,
-    "badge-status.svg": lambda: badge_svg("status", "MVP \u00b7 Phase 5 next", "#c27c0e"),
+    "badge-status.svg": lambda: badge_svg("status", "MVP \u00b7 Phase 5 in progress", "#c27c0e"),
     "badge-license.svg": lambda: badge_svg("license", "Apache-2.0", "#2b7bb9"),
 }
 
