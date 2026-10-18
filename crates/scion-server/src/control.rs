@@ -20,6 +20,7 @@ use scion_store::{MetadataStore, ObjectStore, StoreError, is_allowed_ref_name};
 use scion_types::{BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, RepoPath, TreeId};
 use tonic::{Request, Response, Status};
 
+use crate::land::LandWorkers;
 use crate::staged::Staged;
 use crate::store_status;
 
@@ -35,6 +36,7 @@ const READ_CONCURRENCY: usize = 32;
 pub(crate) struct ControlServer {
     meta: Arc<dyn MetadataStore>,
     objects: Arc<dyn ObjectStore>,
+    workers: Arc<LandWorkers>,
 }
 
 impl std::fmt::Debug for ControlServer {
@@ -44,8 +46,16 @@ impl std::fmt::Debug for ControlServer {
 }
 
 impl ControlServer {
-    pub(crate) fn new(meta: Arc<dyn MetadataStore>, objects: Arc<dyn ObjectStore>) -> Self {
-        Self { meta, objects }
+    pub(crate) fn new(
+        meta: Arc<dyn MetadataStore>,
+        objects: Arc<dyn ObjectStore>,
+        workers: Arc<LandWorkers>,
+    ) -> Self {
+        Self {
+            meta,
+            objects,
+            workers,
+        }
     }
 
     fn deriver<'a>(&'a self, repo: &'a str) -> Deriver<'a> {
@@ -624,6 +634,7 @@ impl ControlService for ControlServer {
             .submit_change_request(&req.repo, head, main.target)
             .await
             .map_err(store_status)?;
+        self.workers.wake(&req.repo);
         Ok(Response::new(change_request(cr)))
     }
 

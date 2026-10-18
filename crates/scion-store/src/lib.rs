@@ -284,6 +284,10 @@ pub trait MetadataStore: Send + Sync {
     /// same request.
     async fn claim_next_change_request(&self, repo: &str) -> Result<Option<ChangeRequest>>;
 
+    /// The oldest `landing` request of `repo`: one a stopped land worker
+    /// claimed and did not finish.
+    async fn landing_change_request(&self, repo: &str) -> Result<Option<ChangeRequest>>;
+
     /// Finish a `landing` request of `repo` with `outcome`. A request in any
     /// other status is [`StoreError::ChangeRequestNotLanding`] and stays as
     /// it is.
@@ -293,6 +297,10 @@ pub trait MetadataStore: Send + Sync {
         id: u64,
         outcome: LandOutcome,
     ) -> Result<ChangeRequest>;
+
+    /// The repositories with a `pending` or `landing` request, sorted: the
+    /// ones whose land worker has work when the server starts.
+    async fn repos_with_open_change_requests(&self) -> Result<Vec<String>>;
 }
 
 /// Immutable content-addressed objects.

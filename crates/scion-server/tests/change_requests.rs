@@ -7,7 +7,7 @@ use bytes::Bytes;
 use scion_derived::test_util::{REPO, changeset, tracked};
 use scion_proto::v1::control_service_client::ControlServiceClient;
 use scion_proto::v1::{ChangeRequestStatus, GetChangeRequestRequest, SubmitChangeRequestRequest};
-use scion_store::{LandOutcome, MemoryStore, MetadataStore, ObjectStore};
+use scion_store::{MemoryStore, MetadataStore, ObjectStore};
 use scion_types::{ChangesetId, RepoPath};
 use tokio::net::TcpListener;
 use tonic::Code;
@@ -73,30 +73,24 @@ async fn submits_and_reads_back() {
         (submitted.landed.as_ref(), submitted.conflicts.len()),
         (None, 0)
     );
-    let got = c.get_change_request(get(REPO, submitted.id)).await.unwrap();
-    assert_eq!(got.into_inner(), submitted);
-
-    // What the land worker records comes back through `Get`.
-    store
-        .claim_next_change_request(REPO)
-        .await
-        .unwrap()
-        .unwrap();
-    store
-        .finish_change_request(
-            REPO,
-            submitted.id,
-            LandOutcome::NeedsRebase(vec!["f.txt".into()]),
-        )
-        .await
-        .unwrap();
-    let got = c
-        .get_change_request(get(REPO, submitted.id))
-        .await
-        .unwrap()
-        .into_inner();
-    assert_eq!(got.status(), ChangeRequestStatus::NeedsRebase);
-    assert_eq!(got.conflicts, ["f.txt"]);
+    // The land worker finishes it; `Get` reports what it recorded.
+    let mut got = submitted.clone();
+    while got.status() == ChangeRequestStatus::Pending
+        || got.status() == ChangeRequestStatus::Landing
+    {
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        got = c
+            .get_change_request(get(REPO, submitted.id))
+            .await
+            .unwrap()
+            .into_inner();
+    }
+    assert_eq!(
+        (got.id, &got.head, &got.base),
+        (submitted.id, &submitted.head, &submitted.base)
+    );
+    assert_eq!(got.status(), ChangeRequestStatus::Landed);
+    assert_eq!(got.landed.as_deref(), Some(head.as_bytes().as_slice()));
 }
 
 #[tokio::test]

@@ -254,6 +254,15 @@ impl MetadataStore for MemoryStore {
         }))
     }
 
+    async fn landing_change_request(&self, repo: &str) -> Result<Option<ChangeRequest>> {
+        let m = self.meta.read().expect("poisoned");
+        Ok(m.change_requests.get(repo).and_then(|r| {
+            r.values()
+                .find(|cr| cr.status == ChangeRequestStatus::Landing)
+                .cloned()
+        }))
+    }
+
     async fn finish_change_request(
         &self,
         repo: &str,
@@ -279,6 +288,25 @@ impl MetadataStore for MemoryStore {
             LandOutcome::Rejected => {}
         }
         Ok(cr.clone())
+    }
+
+    async fn repos_with_open_change_requests(&self) -> Result<Vec<String>> {
+        let m = self.meta.read().expect("poisoned");
+        let mut repos: Vec<String> = m
+            .change_requests
+            .iter()
+            .filter(|(_, requests)| {
+                requests.values().any(|cr| {
+                    matches!(
+                        cr.status,
+                        ChangeRequestStatus::Pending | ChangeRequestStatus::Landing
+                    )
+                })
+            })
+            .map(|(repo, _)| repo.clone())
+            .collect();
+        repos.sort();
+        Ok(repos)
     }
 }
 

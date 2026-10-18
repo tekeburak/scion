@@ -29,7 +29,7 @@ use tokio::net::TcpListener;
 
 const USAGE: &str = "usage: scion-server\n       scion-server backfill <repo> <type>";
 
-async fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
+async fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let backfill = match args {
         [] => None,
         [c, repo, ty] if c == "backfill" => Some((repo, ty)),

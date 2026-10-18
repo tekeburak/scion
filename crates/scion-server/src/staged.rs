@@ -258,6 +258,10 @@ impl MetadataStore for Staged<'_> {
         self.meta.claim_next_change_request(repo).await
     }
 
+    async fn landing_change_request(&self, repo: &str) -> Result<Option<ChangeRequest>> {
+        self.meta.landing_change_request(repo).await
+    }
+
     async fn finish_change_request(
         &self,
         repo: &str,
@@ -265,5 +269,9 @@ impl MetadataStore for Staged<'_> {
         outcome: LandOutcome,
     ) -> Result<ChangeRequest> {
         self.meta.finish_change_request(repo, id, outcome).await
+    }
+
+    async fn repos_with_open_change_requests(&self) -> Result<Vec<String>> {
+        self.meta.repos_with_open_change_requests().await
     }
 }
