@@ -20,7 +20,7 @@ changeset id the client remembers, optionally under a local label that never lea
 At agent scale, thousands of short-lived per-user or per-feature refs would be shared mutable
 state on the server; an id is immutable and needs no coordination.
 Because objects are append-only, an anonymous head cannot be lost, and sharing work means
-sharing an id or submitting a change request for it (Phase 5, server side only so far). See
+sharing an id or submitting a change request for it (`scn land`). See
 [Refs and anonymous heads](DATA_MODEL.md#refs-and-anonymous-heads).
 
 ## Why do trees live in the object store?
