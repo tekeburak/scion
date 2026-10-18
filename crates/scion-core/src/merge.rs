@@ -262,7 +262,9 @@ async fn three_way(
 
 /// Merge head `theirs` into head `ours`; the result is the `file_changes` of
 /// a merge changeset with parents `[ours, theirs]`. Unrelated heads merge
-/// against the empty tree.
+/// against the empty tree. A file taken from `theirs` as it is there names
+/// itself in `theirs` as `copy_from`, so blame follows `theirs`' history
+/// for it while history stays on the first-parent line.
 pub async fn merge(ctx: &Deriver<'_>, ours: ChangesetId, theirs: ChangesetId) -> Result<ThreeWay> {
     let base = match SkipList::merge_base(ctx, ours, theirs).await? {
         Some(b) => Some(ctx.derive::<RootTree>(b).await?.0),
@@ -270,7 +272,16 @@ pub async fn merge(ctx: &Deriver<'_>, ours: ChangesetId, theirs: ChangesetId) ->
     };
     let ours_tree = ctx.derive::<RootTree>(ours).await?.0;
     let theirs_tree = ctx.derive::<RootTree>(theirs).await?.0;
-    let theirs_changes = changes_from_diff(tree_diff(ctx.objects, base, Some(theirs_tree)).await?);
+    let theirs_changes = changes_from_diff(tree_diff(ctx.objects, base, Some(theirs_tree)).await?)
+        .into_iter()
+        .map(|(path, change)| match change {
+            Change::Set(entry, _) => {
+                let from = Some((path.clone(), theirs));
+                (path, Change::Set(entry, from))
+            }
+            Change::Deleted => (path, Change::Deleted),
+        })
+        .collect();
     three_way(ctx, base, ours_tree, &theirs_changes).await
 }
 

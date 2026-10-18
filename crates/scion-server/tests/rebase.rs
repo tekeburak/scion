@@ -1,6 +1,7 @@
 //! `Rebase`, the server half of `scn update`: a stack replayed onto another
-//! head ends at the same tree as merging the two, and conflicts, merges and
+//! head ends at the same tree as merging the two, and conflicts and
 //! already-contained heads are handled without creating anything wrong.
+//! Replaying a merge is covered with `Merge` in `merge.rs`.
 
 use std::collections::BTreeMap;
 
@@ -11,7 +12,6 @@ use scion_derived::{Deriver, RootTree};
 use scion_server::{Rebased, rebase};
 use scion_store::{MemoryStore, MetadataStore, ObjectStore};
 use scion_types::{ChangesetId, FileChange, RepoPath};
-use tonic::Code;
 
 fn path(p: &str) -> RepoPath {
     RepoPath::new(p).unwrap()
@@ -125,14 +125,6 @@ async fn replays_a_stack_and_reports_conflicts() {
             paths: vec![path("a")]
         }
     );
-
-    // A merge in the stack is refused.
-    let merge = store
-        .put_changeset(&changeset(vec![one, theirs], BTreeMap::new(), "merge"))
-        .await
-        .unwrap();
-    let err = rebase(&store, &store, REPO, merge, main).await.unwrap_err();
-    assert_eq!(err.code(), Code::FailedPrecondition, "{err}");
 }
 
 /// A stack of edits to paths in `pool`: each step sets or deletes some.

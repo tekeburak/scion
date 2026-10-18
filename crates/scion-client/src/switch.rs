@@ -1,4 +1,5 @@
-//! `checkout <rev>` and `update`: move a working copy to another changeset.
+//! `checkout <rev>`, `update` and `merge`: move a working copy to another
+//! changeset.
 //!
 //! Only what differs between the two changesets is touched: the server's
 //! `Diff` names the files, each is removed and, if the target has it,
@@ -11,11 +12,11 @@ use std::io;
 use std::path::Path;
 
 use futures_util::{StreamExt, TryStreamExt, stream};
-use scion_types::{ChangesetId, RepoPath};
+use scion_types::{ChangesetId, Identity, RepoPath, Timestamp};
 
 use crate::checkout::{CheckoutError, FETCH_CONCURRENCY, File, write_file};
 use crate::index::Index;
-use crate::remote::{Rebased, Remote, RemoteError};
+use crate::remote::{Merged, Rebased, Remote, RemoteError};
 use crate::status::{FileStatus, StatusError, status};
 use crate::workspace::{Workspace, WorkspaceError};
 
@@ -241,4 +242,43 @@ pub async fn update(
     state.base = onto;
     ws.write_state(&state)?;
     Ok(Updated { head, created })
+}
+
+/// Merge `theirs` into the working copy's head on the server, as a changeset
+/// by `author` at `date`, and move the working copy to it; returns the new
+/// head, which is the old one if it already contained `theirs`. Local edits
+/// are refused; on a conflict nothing changes.
+pub async fn merge(
+    ws: &Workspace,
+    remote: &Remote,
+    theirs: ChangesetId,
+    (author, date): (&Identity, Timestamp),
+    message: &str,
+) -> Result<ChangesetId, SwitchError> {
+    let repo = ws.read_config()?.repo;
+    let mut state = ws.read_state()?;
+    let mut index = ws.read_index()?;
+    let edits = local_edits(ws, &index)?;
+    if !edits.is_empty() {
+        return Err(SwitchError::Dirty(edits));
+    }
+    let ours = state.current_head;
+    let head = match remote
+        .clone()
+        .merge(&repo, (ours, theirs), (author, date), message)
+        .await?
+    {
+        Merged::Clean { merged, .. } => merged,
+        Merged::Conflict { paths } => {
+            return Err(SwitchError::Conflict {
+                changeset: theirs,
+                onto: ours,
+                paths,
+            });
+        }
+    };
+    apply(ws, remote, &mut index, (ours, head), &[], false).await?;
+    state.current_head = head;
+    ws.write_state(&state)?;
+    Ok(head)
 }

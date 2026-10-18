@@ -14,8 +14,9 @@
 //! working copy to the landed changeset; `requests` lists the repository's
 //! change requests, newest first. `update` has the server rebase the
 //! head onto `main` (or another revision) ahead of landing, which a conflict
-//! needs; `checkout` moves the working copy to any changeset. There is no branch command: work is shared
-//! by changeset id.
+//! needs; `merge` has the server merge another revision (a `release/*` fix,
+//! say) into the head; `checkout` moves the working copy to any changeset.
+//! There is no branch command: work is shared by changeset id.
 //!
 //! A revision is `@` (the working copy's current head), a 64-hex changeset
 //! id, a local head label, or a server ref (`main`, `release/*`).
@@ -140,6 +141,18 @@ enum Command {
         /// Revision to rebase onto.
         #[arg(default_value = MAIN_REF)]
         rev: String,
+    },
+    /// Merge a revision into the current head on the server and move the
+    /// working copy to the merge; refused with local edits, and a conflict
+    /// changes nothing.
+    Merge {
+        /// Revision to merge, e.g. `release/1`.
+        rev: String,
+        /// Message of the merge changeset; defaults to `Merge <rev>`.
+        #[arg(short, long)]
+        message: Option<String>,
+        #[arg(long, env = "SCN_AUTHOR", value_name = "NAME <EMAIL>")]
+        author: String,
     },
     /// Move the working copy to a revision.
     Checkout {
@@ -542,10 +555,15 @@ fn add(out: &mut impl Write, args: &[String]) -> Result<()> {
     Ok(())
 }
 
+/// The current time, in UTC.
+fn now() -> Result<Timestamp> {
+    let secs = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+    Ok(Timestamp::new(i64::try_from(secs)?, 0))
+}
+
 async fn commit(out: &mut impl Write, message: &str, author: &str) -> Result<()> {
     let author = parse_identity(author)?;
-    let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-    let date = Timestamp::new(i64::try_from(now)?, 0);
+    let date = now()?;
     let s = Session::open().await?;
     let id = scion_client::commit(&s.ws, &s.remote, author, date, message).await?;
     writeln!(out, "committed {id}")?;
@@ -724,6 +742,22 @@ async fn update(out: &mut impl Write, rev: &str) -> Result<()> {
     Ok(())
 }
 
+async fn merge(out: &mut impl Write, rev: &str, message: Option<&str>, author: &str) -> Result<()> {
+    let author = parse_identity(author)?;
+    let date = now()?;
+    let mut s = Session::open().await?;
+    let theirs = s.resolve(rev).await?;
+    let old = s.state.current_head;
+    let message = message.map_or_else(|| format!("Merge {rev}"), str::to_owned);
+    let head = scion_client::merge(&s.ws, &s.remote, theirs, (&author, date), &message).await?;
+    if head == old {
+        writeln!(out, "{old} already contains {rev}")?;
+    } else {
+        writeln!(out, "merged {rev} into {old} as {head}")?;
+    }
+    Ok(())
+}
+
 async fn checkout(out: &mut impl Write, rev: &str, force: bool) -> Result<()> {
     let mut s = Session::open().await?;
     let to = s.resolve(rev).await?;
@@ -762,6 +796,11 @@ async fn run(cli: Cli) -> Result<()> {
         Command::Land { no_wait, .. } => land(&mut out, no_wait).await?,
         Command::Requests { status, limit } => requests(&mut out, status, limit).await?,
         Command::Update { rev } => update(&mut out, &rev).await?,
+        Command::Merge {
+            rev,
+            message,
+            author,
+        } => merge(&mut out, &rev, message.as_deref(), &author).await?,
         Command::Checkout { rev, force } => checkout(&mut out, &rev, force).await?,
     }
     out.flush()?;

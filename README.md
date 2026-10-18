@@ -62,9 +62,9 @@ cache and daemon tiers, access control and released binaries follow (see
 What works today:
 
 - **`scion-server`**: the control-plane and object gRPC services over Postgres + S3 — `log`,
-  `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`, `move_ref`, `rebase`, change
-  requests — plus `backfill`, which derives a type for a repository's whole history ahead of the
-  first request.
+  `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`, `move_ref`, `rebase`, `merge`,
+  change requests — plus `backfill`, which derives a type for a repository's whole history
+  ahead of the first request.
 - **Change requests and the land worker**: a submitted head is landed by one serial worker
   per repository, in submission order, rebased onto the current `main` on the server and
   moved in with a single compare-and-swap. A conflict leaves `main` untouched and reports the
@@ -73,8 +73,9 @@ What works today:
   `add`, `commit` (an anonymous head), `land` (submits the head as a change request; the
   server rebases it onto `main` and lands it, or names the conflicting paths), `update` (the
   server rebases your head onto `main`), `requests` (the repository's change requests, newest
-  first, by status), `log --landed` (which request landed each changeset, and when) and
-  `checkout` of any changeset. Two clones landing
+  first, by status), `log --landed` (which request landed each changeset, and when), `merge`
+  (the server merges a revision such as a `release/*` fix into your head; blame credits the
+  fix to the changeset that wrote it) and `checkout` of any changeset. Two clones landing
   at the same time, with no `update` in between, is the CI end-to-end test.
 - **`scion-ingest`**: imports a git history into Scion (one changeset per commit, renames and
   copies kept for `blame`, the git sha kept in the changeset), resumes from checkpoints, syncs
@@ -251,7 +252,7 @@ Read these numbers with their limits:
 
 ## What's next
 
-In order: server-side merge and revert, and
+In order: server-side revert and
 conflict markers on `update`, with a benchmark of many writers landing at once; then access
 control (GitHub device-flow login, service principals, repository
 and directory ACLs) together with fuzzing and a hermetic simulation; released binaries, a

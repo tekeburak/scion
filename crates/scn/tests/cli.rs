@@ -464,6 +464,104 @@ async fn two_clones_land_alternately_with_update() {
     assert_eq!(scn(&b, &["status"]), "");
 }
 
+/// A fix on `release/1` is merged into a head that is behind `main`; the
+/// merge lands (the server replays it onto `main`) and blame attributes the
+/// fix to the release changeset.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn merge_a_release_fix_and_land_it() {
+    let store = Arc::new(MemoryStore::with_repo(REPO));
+    let main_rs = b"fn main() {}\n";
+    let fixed = b"fn main() {}\n// fixed\n";
+    for content in [&b"one\n"[..], main_rs, fixed] {
+        store
+            .put_blob(Bytes::copy_from_slice(content))
+            .await
+            .unwrap();
+    }
+    let file = |p: &str, content: &[u8]| (RepoPath::new(p).unwrap(), tracked(content));
+    let c0 = store
+        .put_changeset(&changeset(
+            vec![],
+            BTreeMap::from([file("README", b"one\n"), file("main.rs", main_rs)]),
+            "initial",
+        ))
+        .await
+        .unwrap();
+    let fix = store
+        .put_changeset(&changeset(
+            vec![c0],
+            BTreeMap::from([file("main.rs", fixed)]),
+            "fix",
+        ))
+        .await
+        .unwrap();
+    store.create_ref(REPO, "main", c0).await.unwrap();
+    store.create_ref(REPO, "release/1", fix).await.unwrap();
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let server = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(scion_server::serve(listener, store.clone(), store));
+
+    let dir = tempfile::tempdir().unwrap();
+    scn(dir.path(), &["clone", &server, REPO, "a"]);
+    scn(dir.path(), &["clone", &server, REPO, "b"]);
+    let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+    std::fs::write(b.join("b.txt"), b"b\n").unwrap();
+    scn(&b, &["add", "b.txt"]);
+    assert!(scn_try(&b, &["commit", "-m", "b"]).0);
+    scn(&b, &["land"]);
+
+    std::fs::write(a.join("a.txt"), b"a\n").unwrap();
+    scn(&a, &["add", "a.txt"]);
+    let (ok, out, err) = scn_try(&a, &["commit", "-m", "a"]);
+    assert!(ok, "{err}");
+    let head = id_after(&out, "committed ");
+    let (ok, out, err) = scn_try(&a, &["merge", "release/1"]);
+    assert!(ok, "{err}");
+    assert!(
+        out.starts_with(&format!("merged release/1 into {head} as ")),
+        "{out}"
+    );
+    assert_eq!(std::fs::read(a.join("main.rs")).unwrap(), fixed);
+    assert_eq!(scn(&a, &["status"]), "");
+    let log = scn(&a, &["log", "-n", "1"]);
+    assert!(
+        log.contains(&format!("Parents: {} {}", head.to_hex(), fix.to_hex()))
+            && log.contains("    Merge release/1\n"),
+        "{log}"
+    );
+    let (ok, out, _) = scn_try(&a, &["merge", "release/1"]);
+    assert!(ok && out.ends_with("already contains release/1\n"), "{out}");
+
+    let out = scn(&a, &["land"]);
+    assert!(out.contains(" as "), "replayed onto b's change: {out}");
+    let short = |cs: ChangesetId| cs.to_hex()[..12].to_owned();
+    assert_eq!(
+        scn(&a, &["blame", "main.rs", "-r", "main"]),
+        format!("{} fn main() {{}}\n{} // fixed\n", short(c0), short(fix))
+    );
+    assert!(a.join("b.txt").is_file());
+
+    // Both sides changing the same line is refused, and nothing moves.
+    std::fs::write(a.join("README"), b"a\n").unwrap();
+    assert!(scn_try(&a, &["commit", "-m", "readme"]).0);
+    scn(&b, &["update"]);
+    std::fs::write(b.join("README"), b"b\n").unwrap();
+    let (ok, out, err) = scn_try(&b, &["commit", "-m", "readme"]);
+    assert!(ok, "{err}");
+    let b_head = id_after(&out, "committed ");
+    let a_head = id_after(&scn(&a, &["log", "-n", "1"]), "changeset ");
+    let (ok, _, err) = scn_try(&b, &["merge", &a_head.to_hex()]);
+    assert!(
+        !ok && err.contains("conflicts") && err.contains("\n  README"),
+        "{err}"
+    );
+    assert_eq!(std::fs::read(b.join("README")).unwrap(), b"b\n");
+    assert_eq!(
+        id_after(&scn(&b, &["log", "-n", "1"]), "changeset "),
+        b_head
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn land_without_waiting_and_read_the_request_back() {
     let (server, ..) = serve().await;

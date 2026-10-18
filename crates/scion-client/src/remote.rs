@@ -8,11 +8,12 @@ use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_proto::v1::{
     BlameRequest, CreateChangesetRequest, DiffRequest, FindLandingRequest, GetBlobRequest,
     GetChangeRequestRequest, GetRefRequest, GetTreeRequest, ListChangeRequestsRequest, LogRequest,
-    LogResponse, MoveRefRequest, PathLogRequest, PutBlobRequest, RebaseRequest,
+    LogResponse, MergeRequest, MoveRefRequest, PathLogRequest, PutBlobRequest, RebaseRequest,
     SubmitChangeRequestRequest,
 };
 use scion_types::{
-    BlobId, Changeset, ChangesetId, Decode, Encode, FileType, RepoPath, Tree, TreeId,
+    BlobId, Changeset, ChangesetId, Decode, Encode, FileType, Identity, RepoPath, Timestamp, Tree,
+    TreeId,
 };
 use tonic::transport::{Channel, Endpoint};
 
@@ -72,6 +73,16 @@ pub enum Rebased {
         changeset: ChangesetId,
         paths: Vec<RepoPath>,
     },
+}
+
+/// What the server's `Merge` did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Merged {
+    /// The merge changeset; `created` is false when `ours` already
+    /// contained `theirs` and `merged` is `ours`.
+    Clean { merged: ChangesetId, created: bool },
+    /// The heads conflict on `paths`; nothing was created.
+    Conflict { paths: Vec<RepoPath> },
 }
 
 /// Consecutive lines last changed by one changeset.
@@ -334,6 +345,44 @@ impl Remote {
         }
         Ok(Rebased::Conflict {
             changeset: changeset_id(&resp.conflicted, "conflicted changeset")?,
+            paths: resp
+                .conflicts
+                .into_iter()
+                .map(|p| RepoPath::new(p).map_err(|_| RemoteError::Malformed("path")))
+                .collect::<Result<_, _>>()?,
+        })
+    }
+
+    /// Merge `theirs` into `ours` on the server, creating a changeset with
+    /// parents `[ours, theirs]` written by `author` at `date`.
+    pub async fn merge(
+        &mut self,
+        repo: &str,
+        (ours, theirs): (ChangesetId, ChangesetId),
+        (author, date): (&Identity, Timestamp),
+        message: &str,
+    ) -> Result<Merged, RemoteError> {
+        let resp = self
+            .control
+            .merge(MergeRequest {
+                repo: repo.to_owned(),
+                ours: ours.as_bytes().to_vec(),
+                theirs: theirs.as_bytes().to_vec(),
+                author_name: author.name.clone(),
+                author_email: author.email.clone(),
+                author_unix_secs: date.unix_secs,
+                author_tz_offset_minutes: date.tz_offset_minutes,
+                message: message.to_owned(),
+            })
+            .await?
+            .into_inner();
+        if let Some(merged) = resp.merged {
+            return Ok(Merged::Clean {
+                merged: changeset_id(&merged, "merge changeset")?,
+                created: resp.created,
+            });
+        }
+        Ok(Merged::Conflict {
             paths: resp
                 .conflicts
                 .into_iter()

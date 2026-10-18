@@ -15,11 +15,15 @@ use scion_proto::v1::{
     CreateChangesetRequest, CreateChangesetResponse, DiffEntry, DiffRequest, DiffResponse,
     FileEntry, FileType, FindLandingRequest, FindLandingResponse, GetChangeRequestRequest,
     GetRefRequest, GetRefResponse, Landing, ListChangeRequestsRequest, ListChangeRequestsResponse,
-    LogRequest, LogResponse, MergeBaseRequest, MergeBaseResponse, MoveRefRequest, MoveRefResponse,
-    PathLogRequest, RebaseRequest, RebaseResponse, SubmitChangeRequestRequest,
+    LogRequest, LogResponse, MergeBaseRequest, MergeBaseResponse, MergeRequest, MergeResponse,
+    MoveRefRequest, MoveRefResponse, PathLogRequest, RebaseRequest, RebaseResponse,
+    SubmitChangeRequestRequest,
 };
 use scion_store::{MetadataStore, ObjectStore, StoreError, is_allowed_ref_name};
-use scion_types::{BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, RepoPath, TreeId};
+use scion_types::{
+    BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, Identity, RepoPath, Timestamp,
+    TreeId,
+};
 use tonic::{Request, Response, Status};
 
 use crate::land::LandWorkers;
@@ -353,7 +357,9 @@ pub enum Rebased {
 
 /// Replay `head`'s changesets that `onto` does not contain on top of
 /// `onto`, oldest first, through [`scion_core::rebase`], creating each as
-/// `CreateChangeset` does; as the `Rebase` RPC does.
+/// `CreateChangeset` does; as the `Rebase` RPC does. The stack is `head`'s
+/// first-parent line; a merge in it is replayed against its first parent
+/// and keeps its other parents.
 pub async fn rebase(
     meta: &dyn MetadataStore,
     objects: &dyn ObjectStore,
@@ -395,18 +401,10 @@ pub async fn rebase(
             .await
             .map_err(store_status)?
             .ok_or_else(|| Status::data_loss(format!("indexed changeset {cur} is missing")))?;
-        let parent = match cs.parents[..] {
-            [parent] => parent,
-            [] => {
-                return Err(Status::failed_precondition(format!(
-                    "{head} shares no history with {onto}"
-                )));
-            }
-            _ => {
-                return Err(Status::failed_precondition(format!(
-                    "{cur} is a merge; only a linear stack can be replayed"
-                )));
-            }
+        let Some(parent) = cs.first_parent() else {
+            return Err(Status::failed_precondition(format!(
+                "{head} shares no history with {onto}"
+            )));
         };
         stack.push(cs);
         cur = parent;
@@ -433,8 +431,12 @@ pub async fn rebase(
         if merged.changes.is_empty() {
             continue;
         }
+        // A merge keeps its other parents; its changes are against the
+        // first one only, as they were.
+        let mut parents = cs.parents.clone();
+        parents[0] = parent;
         let replayed = Changeset {
-            parents: vec![parent],
+            parents,
             file_changes: merged.changes,
             ..cs
         };
@@ -446,6 +448,74 @@ pub async fn rebase(
         created += 1;
     }
     clean(parent, created).await
+}
+
+/// What [`merge`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Merged {
+    /// `merged`, with root tree `root`, has both heads; `created` unless
+    /// `ours` already contained `theirs`.
+    Clean {
+        merged: ChangesetId,
+        root: TreeId,
+        created: bool,
+    },
+    /// The heads conflict on `paths` (sorted); nothing was created.
+    Conflict { paths: Vec<RepoPath> },
+}
+
+/// Merge `theirs` into `ours` through [`scion_core::merge`] and create the
+/// merge changeset, parents `[ours, theirs]` and file changes against `ours`
+/// only, as `CreateChangeset` does; as the `Merge` RPC does.
+pub async fn merge(
+    meta: &dyn MetadataStore,
+    objects: &dyn ObjectStore,
+    repo: &str,
+    (ours, theirs): (ChangesetId, ChangesetId),
+    (author, author_date): (Identity, Timestamp),
+    message: &str,
+) -> Result<Merged, Status> {
+    let ctx = Deriver::new(repo, meta, objects);
+    if SkipList::is_ancestor(&ctx, theirs, ours)
+        .await
+        .map_err(derive_status)?
+    {
+        let root = ctx.derive::<RootTree>(ours).await.map_err(derive_status)?.0;
+        return Ok(Merged::Clean {
+            merged: ours,
+            root,
+            created: false,
+        });
+    }
+    let merged = scion_core::merge(&ctx, ours, theirs)
+        .await
+        .map_err(derive_status)?;
+    if !merged.is_clean() {
+        let mut paths: Vec<RepoPath> = merged.conflicts.iter().map(|c| c.path().clone()).collect();
+        paths.sort();
+        paths.dedup();
+        return Ok(Merged::Conflict { paths });
+    }
+    let cs = Changeset {
+        repo: repo.to_owned(),
+        parents: vec![ours, theirs],
+        author,
+        author_date,
+        committer: None,
+        committer_date: None,
+        message: message.to_owned(),
+        file_changes: merged.changes,
+        extra: std::collections::BTreeMap::new(),
+    };
+    let [(merged, root)] = create_changesets(meta, objects, &[cs])
+        .await?
+        .try_into()
+        .expect("one changeset in, one out");
+    Ok(Merged::Clean {
+        merged,
+        root,
+        created: true,
+    })
 }
 
 #[tonic::async_trait]
@@ -586,6 +656,45 @@ impl ControlService for ControlServer {
                 conflicted: changeset.as_bytes().to_vec(),
                 conflicts: paths.iter().map(|p| p.as_str().to_owned()).collect(),
                 ..RebaseResponse::default()
+            },
+        };
+        Ok(Response::new(resp))
+    }
+
+    async fn merge(
+        &self,
+        request: Request<MergeRequest>,
+    ) -> Result<Response<MergeResponse>, Status> {
+        let req = request.into_inner();
+        let ours = changeset_id(&req.ours, "ours")?;
+        let theirs = changeset_id(&req.theirs, "theirs")?;
+        let author = (
+            Identity::new(req.author_name, req.author_email),
+            Timestamp::new(req.author_unix_secs, req.author_tz_offset_minutes),
+        );
+        let resp = match merge(
+            &*self.meta,
+            &*self.objects,
+            &req.repo,
+            (ours, theirs),
+            author,
+            &req.message,
+        )
+        .await?
+        {
+            Merged::Clean {
+                merged,
+                root,
+                created,
+            } => MergeResponse {
+                merged: Some(merged.as_bytes().to_vec()),
+                root_tree: root.as_bytes().to_vec(),
+                created,
+                ..MergeResponse::default()
+            },
+            Merged::Conflict { paths } => MergeResponse {
+                conflicts: paths.iter().map(|p| p.as_str().to_owned()).collect(),
+                ..MergeResponse::default()
             },
         };
         Ok(Response::new(resp))

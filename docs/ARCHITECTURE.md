@@ -136,7 +136,7 @@ changeset touched, not the history.
 
 ### Landing changes
 
-*In progress, Phase 5.* Change requests are landed end to end, listed, and answer "when did X land" (5.1–5.7).
+*In progress, Phase 5.* Change requests are landed end to end, listed, and answer "when did X land"; merges are server-side (5.1–5.8).
 
 **What `scn` does.** `scn land` submits the current head as a change request and waits for
 the outcome in the same call: the server holds the reply until the land worker finishes the
@@ -188,7 +188,19 @@ a single query, never a walk of `changesets` (invariant 1). `scn log --landed` a
 changeset on the page. Only the top of a rebased stack is recorded as `landed_cs`, so the
 changesets below it show no request.
 
-Server-side merge and revert are *planned* (5.8–5.10). Testing happens post-merge and pre-deploy.
+**Server-side merge.** `Merge(repo, ours, theirs)` merges `theirs` into `ours` through
+`scion_core::merge` against their merge base and creates a changeset with parents
+`[ours, theirs]` whose file changes are against `ours` only (invariant 8), or returns the
+conflicting paths and creates nothing; it creates nothing either when `ours` already contains
+`theirs`. A file taken from `theirs` unchanged records `copy_from` (the same path, at
+`theirs`), the provenance field every tracked change already has, so blame of that file follows
+`theirs`' history, for instance to the `release/*` changeset that wrote a fix, while log and
+path history stay on the first-parent line. `scn merge <rev>` merges a revision into the
+working copy's head and moves the working copy to the merge, refusing local edits and changing
+nothing on a conflict. Landing a merge is like landing anything else: when `main` has moved,
+the rebase replays it against its first parent onto `main` and keeps its other parents.
+
+Server-side revert is *planned* (5.10). Testing happens post-merge and pre-deploy.
 
 ### Snapshots and seeding
 

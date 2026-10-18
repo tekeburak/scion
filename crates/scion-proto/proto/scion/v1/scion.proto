@@ -72,6 +72,7 @@ service ControlService {
   rpc PathLog(PathLogRequest) returns (LogResponse);
   rpc MergeBase(MergeBaseRequest) returns (MergeBaseResponse);
   rpc Rebase(RebaseRequest) returns (RebaseResponse);
+  rpc Merge(MergeRequest) returns (MergeResponse);
   rpc Blame(BlameRequest) returns (BlameResponse);
   rpc SubmitChangeRequest(SubmitChangeRequestRequest) returns (ChangeRequest);
   rpc GetChangeRequest(GetChangeRequestRequest) returns (ChangeRequest);
@@ -187,10 +188,10 @@ message MergeBaseResponse {
 }
 
 // Replay `head`'s changesets that `onto` does not contain on top of `onto`,
-// oldest first, and create each: same author, message and extra, parent the
-// previous one, file changes merged three-way against it. A changeset whose
-// changes `onto` already has is dropped. `head` must reach `onto`'s history
-// through first parents and none of the replayed changesets may be a merge
+// oldest first, and create each: same author, message and extra, first
+// parent the previous one (a merge keeps its other parents), file changes
+// merged three-way against it. A changeset whose changes `onto` already has
+// is dropped. `head` must reach `onto`'s history through first parents
 // (FAILED_PRECONDITION otherwise). Nothing is replayed if `head` already
 // descends from `onto`; `head` is `onto` if `onto` descends from it.
 message RebaseRequest {
@@ -209,6 +210,36 @@ message RebaseResponse {
   bytes conflicted = 4;
   repeated string conflicts = 5;
 }
+
+// Merge `theirs` into `ours`: create a changeset with parents `[ours,
+// theirs]` whose file changes, against `ours` only, bring in what `theirs`
+// changed since their merge base. A file taken from `theirs` unchanged
+// carries `copy_from` (its path, `theirs`), so blame follows `theirs`'
+// history. Nothing is created if `ours` already contains `theirs` or the
+// merge conflicts. An unknown `ours` or `theirs` is NOT_FOUND.
+message MergeRequest {
+  string repo = 1;
+  bytes ours = 2;
+  bytes theirs = 3;
+  // The merge changeset's author, date and message.
+  string author_name = 4;
+  string author_email = 5;
+  int64 author_unix_secs = 6;
+  int32 author_tz_offset_minutes = 7;
+  string message = 8;
+}
+
+message MergeResponse {
+  // The merge changeset (`ours` if it already contains `theirs`) and its
+  // root tree; absent on a conflict.
+  optional bytes merged = 1;
+  bytes root_tree = 2;
+  // Whether this call created `merged`.
+  bool created = 3;
+  // On a conflict: the conflicting paths, sorted.
+  repeated string conflicts = 4;
+}
+
 // Line attribution of the file at `path` in `changeset`. A path that is not a
 // file there is NOT_FOUND.
 message BlameRequest {

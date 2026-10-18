@@ -33,10 +33,10 @@ pub use checkout::{CheckoutError, MAIN_REF, checkout, clone};
 pub use commit::{CommitError, commit};
 pub use index::{Index, IndexEntry};
 pub use remote::{
-    BlameRun, ChangeRequestStatus, DiffEntry, FileEntry, RPC_DEADLINE, Rebased, Remote,
+    BlameRun, ChangeRequestStatus, DiffEntry, FileEntry, Merged, RPC_DEADLINE, Rebased, Remote,
     RemoteChangeRequest, RemoteError, RemoteRef, RequestStatus,
 };
 pub use sparse::{SparseError, SparseProfile};
 pub use status::{FileStatus, StatusError, read_working_file, status};
-pub use switch::{SwitchError, Updated, switch, update};
+pub use switch::{SwitchError, Updated, merge, switch, update};
 pub use workspace::{Config, Head, State, Workspace, WorkspaceError};

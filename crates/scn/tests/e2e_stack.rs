@@ -6,7 +6,7 @@
 //! `SCION_TEST_DATABASE_URL` and `SCION_TEST_S3_{ENDPOINT,BUCKET,ACCESS_KEY,SECRET_KEY}`.
 //! The repository is created with `scn init` and seeded through a working
 //! copy, with no git repository involved; two clones then land alternately
-//! with `scn update` between.
+//! with `scn update` between, and a `release/1` fix is merged and landed.
 //! Each run uses its own repository name, so runs never see each other's
 //! refs or changesets even though they share the database and bucket.
 
@@ -181,6 +181,38 @@ async fn init_clone_commit_land_on_postgres_and_s3() {
     assert!(b.join("srv/web/index.html").is_file());
 
     two_clones_land_at_once(&a, &b);
+    merge_a_release_fix(&server, &repo, &a, &b).await;
+}
+
+/// `b` commits a fix that becomes `release/1`; `a` merges it into its own
+/// change and lands the merge, and blame on `main` attributes the fix's
+/// line to the release changeset.
+async fn merge_a_release_fix(server: &str, repo: &str, a: &Path, b: &Path) {
+    scn(b, &["update"]);
+    let mut readme = std::fs::read(b.join("README")).unwrap();
+    readme.extend_from_slice(b"fixed\n");
+    std::fs::write(b.join("README"), &readme).unwrap();
+    let fix = committed(&scn(b, &["commit", "-m", "fix"]));
+    scion_client::Remote::connect(server)
+        .await
+        .unwrap()
+        .create_ref(repo, "release/1", fix)
+        .await
+        .unwrap();
+
+    std::fs::write(a.join("srv/api/merged.rs"), b"// a\n").unwrap();
+    scn(a, &["add", "srv/api/merged.rs"]);
+    scn(a, &["commit", "-m", "a before the merge"]);
+    let out = scn(a, &["merge", "release/1"]);
+    assert!(out.starts_with("merged release/1 into "), "{out}");
+    assert_eq!(std::fs::read(a.join("README")).unwrap(), readme);
+    assert!(scn(a, &["land"]).starts_with("landed "));
+
+    let blame = scn(a, &["blame", "README", "-r", "main"]);
+    assert!(
+        blame.ends_with(&format!("{} fixed\n", &fix.to_hex()[..12])),
+        "{blame}"
+    );
 }
 
 /// Two clones commit non-overlapping edits and land at the same time,

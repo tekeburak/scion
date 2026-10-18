@@ -27,7 +27,7 @@ use land::LandWorkers;
 use object::ObjectServer;
 
 pub use backfill::{BACKFILL_TYPES, backfill};
-pub use control::{MAX_LOG_LIMIT, Rebased, create_changesets, move_ref, rebase};
+pub use control::{MAX_LOG_LIMIT, Merged, Rebased, create_changesets, merge, move_ref, rebase};
 
 /// Upper bound on every RPC. A client may ask for less with `grpc-timeout`;
 /// it cannot get more.
