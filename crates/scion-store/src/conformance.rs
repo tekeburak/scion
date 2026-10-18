@@ -403,7 +403,7 @@ pub async fn change_requests_by_repo<S: MetadataStore>(s: &S) {
     s.create_repo(REPO).await.unwrap();
     s.create_repo(OTHER).await.unwrap();
     let open = || async { s.repos_with_open_change_requests().await.unwrap() };
-    assert!(open().await.is_empty());
+    assert_eq!(open().await, Vec::<String>::new());
     let ours = s.submit_change_request(REPO, head, base).await.unwrap();
     let theirs = s.submit_change_request(OTHER, head, base).await.unwrap();
     assert_eq!(s.get_change_request(OTHER, ours.id).await.unwrap(), None);
