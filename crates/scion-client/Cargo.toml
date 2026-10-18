@@ -10,6 +10,7 @@ rust-version.workspace = true
 [dependencies]
 scion-types.workspace = true
 scion-proto.workspace = true
+scion-diff3.workspace = true
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 serde.workspace = true
 thiserror.workspace = true

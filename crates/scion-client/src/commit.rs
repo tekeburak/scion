@@ -31,6 +31,34 @@ pub enum CommitError {
     Io(PathBuf, #[source] io::Error),
     #[error("nothing to commit")]
     NothingToCommit,
+    #[error("conflict markers remain; resolve them first{}", list(.0))]
+    Unresolved(Vec<RepoPath>),
+}
+
+/// `paths`, one per line, indented.
+fn list(paths: &[RepoPath]) -> String {
+    paths.iter().fold(String::new(), |mut out, p| {
+        out.push_str("\n  ");
+        out.push_str(p.as_str());
+        out
+    })
+}
+
+/// Whether the file at `path` still has a line opening or closing a
+/// conflict block: the marker alone or followed by a space or tab, so a
+/// longer run of `<` or `>` in ordinary text is not one.
+fn has_markers(path: &std::path::Path) -> bool {
+    let Ok(data) = std::fs::read(path) else {
+        return false;
+    };
+    data.split(|b| *b == b'\n').any(|line| {
+        let line = line.strip_suffix(b"\r").unwrap_or(line);
+        b"<>".iter().any(|&c| {
+            line.len() >= scion_diff3::MARKER_LEN
+                && line[..scion_diff3::MARKER_LEN].iter().all(|b| *b == c)
+                && matches!(line.get(scion_diff3::MARKER_LEN), None | Some(b' ' | b'\t'))
+        })
+    })
 }
 
 /// Read the file at `path`, upload it, and return its new index entry. The
@@ -57,7 +85,8 @@ async fn upload(
 
 /// Commit every modified, added and deleted file in `ws` as a child of its
 /// current head, then make the result the current head. Untracked files that
-/// were not added are left out.
+/// were not added are left out. A file `update --conflicts` marked is
+/// refused while it still holds a conflict block.
 pub async fn commit(
     ws: &Workspace,
     remote: &Remote,
@@ -68,6 +97,14 @@ pub async fn commit(
     let config = ws.read_config()?;
     let mut state = ws.read_state()?;
     let mut index = ws.read_index()?;
+    let unresolved: Vec<RepoPath> = ws
+        .read_conflicts()?
+        .into_iter()
+        .filter(|p| has_markers(&ws.root().join(p.as_str())))
+        .collect();
+    if !unresolved.is_empty() {
+        return Err(CommitError::Unresolved(unresolved));
+    }
     let changes = status(ws.root(), &index, &ws.read_added()?)?;
 
     let mut deleted = Vec::new();
@@ -130,5 +167,33 @@ pub async fn commit(
     state.current_head = id;
     ws.write_state(&state)?;
     ws.write_added(&BTreeSet::new())?;
+    ws.write_conflicts(&BTreeSet::new())?;
     Ok(id)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn only_marker_lines_count() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("f");
+        for (text, marked) in [
+            (&b"<<<<<<< ours\nA\n=======\nB\n>>>>>>> theirs\n"[..], true),
+            (b"x\n<<<<<<<\n", true),
+            (b"x\r\n>>>>>>> theirs\r\n", true),
+            (b"<<<<<<<< eight\n=======\nsetext heading\n", false),
+            (b"a <<<<<<< b\n", false),
+        ] {
+            std::fs::write(&file, text).unwrap();
+            assert_eq!(
+                has_markers(&file),
+                marked,
+                "{}",
+                String::from_utf8_lossy(text)
+            );
+        }
+        assert!(!has_markers(&dir.path().join("gone")));
+    }
 }

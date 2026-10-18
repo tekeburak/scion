@@ -8,8 +8,8 @@ use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_proto::v1::{
     BlameRequest, CreateChangesetRequest, DiffRequest, FindLandingRequest, GetBlobRequest,
     GetChangeRequestRequest, GetRefRequest, GetTreeRequest, ListChangeRequestsRequest, LogRequest,
-    LogResponse, MergeRequest, MoveRefRequest, PathLogRequest, PutBlobRequest, RebaseRequest,
-    SubmitChangeRequestRequest,
+    LogResponse, MergeBaseRequest, MergeRequest, MoveRefRequest, PathLogRequest, PutBlobRequest,
+    RebaseRequest, SubmitChangeRequestRequest,
 };
 use scion_types::{
     BlobId, Changeset, ChangesetId, Decode, Encode, FileType, Identity, RepoPath, Timestamp, Tree,
@@ -351,6 +351,27 @@ impl Remote {
                 .map(|p| RepoPath::new(p).map_err(|_| RemoteError::Malformed("path")))
                 .collect::<Result<_, _>>()?,
         })
+    }
+
+    /// The merge base of `a` and `b`; `None` if they share no ancestor.
+    pub async fn merge_base(
+        &mut self,
+        repo: &str,
+        a: ChangesetId,
+        b: ChangesetId,
+    ) -> Result<Option<ChangesetId>, RemoteError> {
+        let resp = self
+            .control
+            .merge_base(MergeBaseRequest {
+                repo: repo.to_owned(),
+                a: a.as_bytes().to_vec(),
+                b: b.as_bytes().to_vec(),
+            })
+            .await?
+            .into_inner();
+        resp.base
+            .map(|base| changeset_id(&base, "merge base"))
+            .transpose()
     }
 
     /// Merge `theirs` into `ours` on the server, creating a changeset with

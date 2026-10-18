@@ -562,6 +562,84 @@ async fn merge_a_release_fix_and_land_it() {
     );
 }
 
+/// Both clones rewrite the same line: plain `update` refuses and touches
+/// nothing, `update --conflicts` writes markers, `commit` refuses until
+/// they are resolved, and the resolution lands as a fast-forward.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn resolve_a_conflict_through_markers_and_land() {
+    let (server, ..) = serve().await;
+    let dir = tempfile::tempdir().unwrap();
+    scn(dir.path(), &["clone", &server, REPO, "a"]);
+    scn(dir.path(), &["clone", &server, REPO, "b"]);
+    let (a, b) = (dir.path().join("a"), dir.path().join("b"));
+
+    std::fs::write(a.join("README"), b"one\nA\nthree\n").unwrap();
+    std::fs::write(a.join("a.txt"), b"a\n").unwrap();
+    scn(&a, &["add", "a.txt"]);
+    assert!(scn_try(&a, &["commit", "-m", "a"]).0);
+    let landed = id_after(&scn(&a, &["land"]), "landed ");
+
+    std::fs::write(b.join("README"), b"one\nB\nthree\n").unwrap();
+    std::fs::write(b.join("b.txt"), b"b\n").unwrap();
+    scn(&b, &["add", "b.txt"]);
+    let (ok, out, err) = scn_try(&b, &["commit", "-m", "b"]);
+    assert!(ok, "{err}");
+    let b_head = id_after(&out, "committed ");
+
+    let (ok, _, err) = scn_try(&b, &["update"]);
+    assert!(
+        !ok && err.contains("\n  README") && err.contains("scn update --conflicts main"),
+        "{err}"
+    );
+    assert_eq!(std::fs::read(b.join("README")).unwrap(), b"one\nB\nthree\n");
+    assert!(!b.join("a.txt").exists());
+    assert_eq!(scn(&b, &["status"]), "");
+
+    let out = scn(&b, &["update", "--conflicts"]);
+    assert!(
+        out.contains(&format!(
+            "moved to {landed} (main) with the changes of {b_head}"
+        )) && out.contains("conflicts in:\n  README\n"),
+        "{out}"
+    );
+    let readme = String::from_utf8(std::fs::read(b.join("README")).unwrap()).unwrap();
+    assert!(
+        readme.contains("<<<<<<<") && readme.contains("A\n") && readme.contains("B\n"),
+        "{readme}"
+    );
+    assert_eq!(std::fs::read(b.join("a.txt")).unwrap(), b"a\n");
+    assert_eq!(std::fs::read(b.join("b.txt")).unwrap(), b"b\n");
+    let status = scn(&b, &["status"]);
+    assert!(
+        status.contains(" README\n") && status.contains(" b.txt\n") && !status.contains("a.txt"),
+        "{status}"
+    );
+
+    let (ok, _, err) = scn_try(&b, &["commit", "-m", "b, resolved"]);
+    assert!(
+        !ok && err.contains("conflict markers remain") && err.contains("\n  README"),
+        "{err}"
+    );
+    std::fs::write(b.join("README"), b"one\nA and B\nthree\n").unwrap();
+    let (ok, out, err) = scn_try(&b, &["commit", "-m", "b, resolved"]);
+    assert!(ok, "{err}");
+    let resolved = id_after(&out, "committed ");
+    assert_eq!(
+        scn(&b, &["land"]).trim_end(),
+        format!("landed {resolved} on main")
+    );
+    let log = scn(&b, &["log", "-n", "2"]);
+    assert!(log.find(&landed.to_hex()).is_some(), "on top of a: {log}");
+
+    scn(dir.path(), &["clone", &server, REPO, "c"]);
+    let c = dir.path().join("c");
+    assert_eq!(
+        std::fs::read(c.join("README")).unwrap(),
+        b"one\nA and B\nthree\n"
+    );
+    assert!(c.join("a.txt").is_file() && c.join("b.txt").is_file());
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn land_without_waiting_and_read_the_request_back() {
     let (server, ..) = serve().await;

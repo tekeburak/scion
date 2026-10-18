@@ -216,9 +216,9 @@ impl Workspace {
         write_atomic(self.file("index"), &index.encode())
     }
 
-    /// Untracked paths marked for the next commit; empty if none.
-    pub fn read_added(&self) -> Result<BTreeSet<RepoPath>, WorkspaceError> {
-        let path = self.file("added");
+    /// A list of paths, one per line, from `.scn/<name>`; empty if absent.
+    fn read_paths(&self, name: &str) -> Result<BTreeSet<RepoPath>, WorkspaceError> {
+        let path = self.file(name);
         if !path.exists() {
             return Ok(BTreeSet::new());
         }
@@ -230,13 +230,32 @@ impl Workspace {
             .collect()
     }
 
-    pub fn write_added(&self, added: &BTreeSet<RepoPath>) -> Result<(), WorkspaceError> {
+    fn write_paths(&self, name: &str, paths: &BTreeSet<RepoPath>) -> Result<(), WorkspaceError> {
         let mut text = String::new();
-        for p in added {
+        for p in paths {
             text.push_str(p.as_str());
             text.push('\n');
         }
-        write_atomic(self.file("added"), text.as_bytes())
+        write_atomic(self.file(name), text.as_bytes())
+    }
+
+    /// Untracked paths marked for the next commit; empty if none.
+    pub fn read_added(&self) -> Result<BTreeSet<RepoPath>, WorkspaceError> {
+        self.read_paths("added")
+    }
+
+    pub fn write_added(&self, added: &BTreeSet<RepoPath>) -> Result<(), WorkspaceError> {
+        self.write_paths("added", added)
+    }
+
+    /// Paths `update --conflicts` wrote conflict markers into, until the
+    /// next commit; empty if none.
+    pub fn read_conflicts(&self) -> Result<BTreeSet<RepoPath>, WorkspaceError> {
+        self.read_paths("conflicts")
+    }
+
+    pub fn write_conflicts(&self, paths: &BTreeSet<RepoPath>) -> Result<(), WorkspaceError> {
+        self.write_paths("conflicts", paths)
     }
 }
 

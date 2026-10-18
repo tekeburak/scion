@@ -72,7 +72,8 @@ What works today:
 - **`scn`**, the CLI: `init` a repository, `clone --sparse`, `status`, `log`, `diff`, `blame`,
   `add`, `commit` (an anonymous head), `land` (submits the head as a change request; the
   server rebases it onto `main` and lands it, or names the conflicting paths), `update` (the
-  server rebases your head onto `main`), `requests` (the repository's change requests, newest
+  server rebases your head onto `main`; `--conflicts` writes conflict markers to resolve and
+  commit instead of refusing), `requests` (the repository's change requests, newest
   first, by status), `log --landed` (which request landed each changeset, and when), `merge`
   (the server merges a revision such as a `release/*` fix into your head; blame credits the
   fix to the changeset that wrote it) and `checkout` of any changeset. Two clones landing
@@ -254,8 +255,7 @@ Read these numbers with their limits:
 
 ## What's next
 
-In order: server-side revert and
-conflict markers on `update`, with a benchmark of many writers landing at once; then access
+In order: server-side revert, with a benchmark of many writers landing at once; then access
 control (GitHub device-flow login, service principals, repository
 and directory ACLs) together with fuzzing and a hermetic simulation; released binaries, a
 server image and a production compose profile; the regional cache and per-node daemon tiers

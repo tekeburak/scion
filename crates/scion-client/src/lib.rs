@@ -38,5 +38,5 @@ pub use remote::{
 };
 pub use sparse::{SparseError, SparseProfile};
 pub use status::{FileStatus, StatusError, read_working_file, status};
-pub use switch::{SwitchError, Updated, merge, switch, update};
+pub use switch::{Marked, SwitchError, Updated, merge, switch, update, update_with_markers};
 pub use workspace::{Config, Head, State, Workspace, WorkspaceError};

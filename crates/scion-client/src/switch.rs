@@ -1,6 +1,11 @@
 //! `checkout <rev>`, `update` and `merge`: move a working copy to another
 //! changeset.
 //!
+//! `update --conflicts` is the one move that leaves local edits behind: when
+//! the server cannot replay the head, the working copy goes to the target
+//! with the head's changes on top, conflicting files holding three-way
+//! markers, for the next commit to land as one resolved changeset.
+//!
 //! Only what differs between the two changesets is touched: the server's
 //! `Diff` names the files, each is removed and, if the target has it,
 //! written again. Files outside the sparse profile are never fetched.
@@ -12,11 +17,11 @@ use std::io;
 use std::path::Path;
 
 use futures_util::{StreamExt, TryStreamExt, stream};
-use scion_types::{ChangesetId, Identity, RepoPath, Timestamp};
+use scion_types::{BlobId, ChangesetId, FileType, Identity, RepoPath, Timestamp};
 
 use crate::checkout::{CheckoutError, FETCH_CONCURRENCY, File, write_file};
 use crate::index::Index;
-use crate::remote::{Merged, Rebased, Remote, RemoteError};
+use crate::remote::{FileEntry, Merged, Rebased, Remote, RemoteError};
 use crate::status::{FileStatus, StatusError, status};
 use crate::workspace::{Workspace, WorkspaceError};
 
@@ -186,6 +191,7 @@ pub async fn switch(
     )
     .await?;
     ws.write_added(&BTreeSet::new())?;
+    ws.write_conflicts(&BTreeSet::new())?;
     state.current_head = to;
     ws.write_state(&state)?;
     Ok(())
@@ -281,4 +287,145 @@ pub async fn merge(
     state.current_head = head;
     ws.write_state(&state)?;
     Ok(head)
+}
+
+/// What [`update_with_markers`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Marked {
+    /// The head was rebased cleanly, as by [`update`].
+    Updated(Updated),
+    /// The working copy is at the target, with the old head's changes as
+    /// local edits; `conflicts` (sorted) hold conflict markers, or the side
+    /// that kept a file the other deleted. The next commit lands them on
+    /// the target as one changeset.
+    Conflicted { conflicts: Vec<RepoPath> },
+}
+
+/// What a marked update does to one path.
+enum Write {
+    Remove,
+    File(FileType, Vec<u8>),
+}
+
+/// Whether `a` is a proper ancestor directory of `b`.
+fn is_ancestor_path(a: &RepoPath, b: &RepoPath) -> bool {
+    b.as_str()
+        .strip_prefix(a.as_str())
+        .is_some_and(|rest| rest.starts_with('/'))
+}
+
+/// As [`update`], but a conflict does not refuse: the working copy moves to
+/// `onto` and gets every change the head made since its merge base with
+/// `onto`, merged three-way per file with `onto`'s, conflict markers (from
+/// `scion-diff3`) in each file both changed on the same lines. `onto` is
+/// recorded as the head, and the conflicting paths in `.scn/conflicts`,
+/// which `commit` checks for markers. A change outside the sparse profile,
+/// or a file on one side where the other has files beneath it, still
+/// refuses and changes nothing.
+pub async fn update_with_markers(
+    ws: &Workspace,
+    remote: &Remote,
+    onto: ChangesetId,
+) -> Result<Marked, SwitchError> {
+    let refused = match update(ws, remote, onto).await {
+        Ok(done) => return Ok(Marked::Updated(done)),
+        Err(e @ SwitchError::Conflict { .. }) => e,
+        Err(e) => return Err(e),
+    };
+    let repo = ws.read_config()?.repo;
+    let sparse = ws.read_sparse()?;
+    let mut state = ws.read_state()?;
+    let head = state.current_head;
+    let mut r = remote.clone();
+    let base = r.merge_base(&repo, head, onto).await?;
+    let mut other = r.clone();
+    let (theirs, ours) =
+        tokio::try_join!(r.diff(&repo, base, head), other.diff(&repo, base, onto))?;
+    let ours: BTreeMap<RepoPath, Option<FileEntry>> =
+        ours.into_iter().map(|e| (e.path, e.new)).collect();
+    let no_place = theirs.iter().any(|t| {
+        !sparse.includes(&t.path)
+            || t.new.is_some()
+                && ours.iter().any(|(p, new)| {
+                    new.is_some() && (is_ancestor_path(p, &t.path) || is_ancestor_path(&t.path, p))
+                })
+    });
+    if no_place {
+        return Err(refused);
+    }
+
+    // Decide every path before the first file changes.
+    let mut plan = Vec::new();
+    let mut conflicts = BTreeSet::new();
+    for t in theirs {
+        let write = match (ours.get(&t.path), t.new) {
+            (None, None) => Some(Write::Remove),
+            (Some(None), None) => None,
+            (None, Some(new)) => Some(Write::File(new.kind, r.get_blob(new.id).await?)),
+            // Deleted on one side, changed on the other: the changed file
+            // stays for the resolver to keep or delete.
+            (Some(None), Some(new)) => {
+                conflicts.insert(t.path.clone());
+                Some(Write::File(new.kind, r.get_blob(new.id).await?))
+            }
+            (Some(Some(_)), None) => {
+                conflicts.insert(t.path.clone());
+                None
+            }
+            (Some(Some(o)), Some(new)) if *o == new => None,
+            (Some(Some(o)), Some(new)) => {
+                let base_kind = t.old.map(|b| b.kind);
+                let kind = if o.kind == new.kind || Some(new.kind) == base_kind {
+                    o.kind
+                } else if Some(o.kind) == base_kind {
+                    new.kind
+                } else {
+                    conflicts.insert(t.path.clone());
+                    continue;
+                };
+                let base_bytes = match t.old {
+                    Some(b) => r.get_blob(b.id).await?,
+                    None => Vec::new(),
+                };
+                let (o_bytes, t_bytes) = (r.get_blob(o.id).await?, r.get_blob(new.id).await?);
+                let merged = scion_diff3::merge(&base_bytes, &o_bytes, &t_bytes);
+                if !merged.is_clean() {
+                    conflicts.insert(t.path.clone());
+                }
+                Some(Write::File(kind, merged.into_content()))
+            }
+        };
+        if let Some(write) = write {
+            plan.push((t.path, write));
+        }
+    }
+
+    let mut index = ws.read_index()?;
+    apply(ws, remote, &mut index, (head, onto), &[], false).await?;
+    // The index stays at `onto`, so everything written is a local edit.
+    let root = ws.root();
+    let mut added = BTreeSet::new();
+    for (path, write) in plan {
+        remove(root, &path)?;
+        if let Write::File(kind, data) = write {
+            let file = File {
+                path: path.clone(),
+                id: BlobId::hash(&data),
+                kind,
+                size: data.len() as u64,
+            };
+            write_file(root, &file, data).await?;
+            if !index.entries.contains_key(&path) {
+                added.insert(path);
+            }
+        }
+    }
+    ws.write_added(&added)?;
+    ws.write_conflicts(&conflicts)?;
+    state.current_head = onto;
+    state.base = onto;
+    ws.write_state(&state)?;
+    Ok(Marked::Conflicted {
+        conflicts: conflicts.into_iter().collect(),
+    })
 }

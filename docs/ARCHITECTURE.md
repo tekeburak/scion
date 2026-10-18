@@ -136,7 +136,7 @@ changeset touched, not the history.
 
 ### Landing changes
 
-*In progress, Phase 5.* Change requests are landed end to end, listed, and answer "when did X land"; merges are server-side (5.1–5.8).
+*In progress, Phase 5.* Change requests are landed end to end, listed, and answer "when did X land"; merges are server-side, and `update` can resolve through conflict markers (5.1–5.9).
 
 **What `scn` does.** `scn land` submits the current head as a change request and waits for
 the outcome in the same call: the server holds the reply until the land worker finishes the
@@ -149,7 +149,11 @@ prints the request id and `scn land --status <id>` reads it. `scn update` rebase
 landing: the `Rebase` RPC replays the head's first-parent changesets that the target lacks
 onto it through `scion_core::rebase`, creating each through the shared create path, skipping
 any whose changes are already there, and stops at the first conflict with its paths, before
-the working copy changes.
+the working copy changes. `scn update --conflicts` resolves such a conflict locally instead:
+the client asks for the merge base and the two diffs, moves the working copy to the target and
+writes the head's changes on top, merged per file with `scion-diff3`, conflict markers where
+both sides changed the same lines; the next `scn commit` turns the resolution into one
+changeset on the target, which then lands as a fast-forward.
 
 **Change requests on the server.** There is no CI-gated merge queue and no global repository
 lock. `SubmitChangeRequest(repo, head)` records the request with `main`'s current changeset as

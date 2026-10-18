@@ -14,7 +14,8 @@
 //! working copy to the landed changeset; `requests` lists the repository's
 //! change requests, newest first. `update` has the server rebase the
 //! head onto `main` (or another revision) ahead of landing, which a conflict
-//! needs; `merge` has the server merge another revision (a `release/*` fix,
+//! needs (`--conflicts` writes conflict markers to resolve instead of
+//! refusing); `merge` has the server merge another revision (a `release/*` fix,
 //! say) into the head; `checkout` moves the working copy to any changeset.
 //! There is no branch command: work is shared by changeset id.
 //!
@@ -32,8 +33,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, Subcommand};
 use scion_client::{
-    ChangeRequestStatus, Config, FileStatus, MAIN_REF, Remote, RemoteChangeRequest, RemoteError,
-    RequestStatus, SparseProfile, State, SwitchError, Workspace, read_working_file, status,
+    ChangeRequestStatus, Config, FileStatus, MAIN_REF, Marked, Remote, RemoteChangeRequest,
+    RemoteError, RequestStatus, SparseProfile, State, SwitchError, Workspace, read_working_file,
+    status,
 };
 use scion_types::{Changeset, ChangesetId, FileChange, FileType, Identity, RepoPath, Timestamp};
 
@@ -141,6 +143,11 @@ enum Command {
         /// Revision to rebase onto.
         #[arg(default_value = MAIN_REF)]
         rev: String,
+        /// On a conflict, move to the revision anyway with your changes as
+        /// local edits and conflict markers in the conflicting files; resolve
+        /// them and `commit`.
+        #[arg(long)]
+        conflicts: bool,
     },
     /// Merge a revision into the current head on the server and move the
     /// working copy to the merge; refused with local edits, and a conflict
@@ -725,11 +732,34 @@ async fn requests(out: &mut impl Write, status: Option<StatusArg>, limit: u32) -
     Ok(())
 }
 
-async fn update(out: &mut impl Write, rev: &str) -> Result<()> {
+async fn update(out: &mut impl Write, rev: &str, markers: bool) -> Result<()> {
     let mut s = Session::open().await?;
     let onto = s.resolve(rev).await?;
     let old = s.state.current_head;
-    let done = scion_client::update(&s.ws, &s.remote, onto).await?;
+    let done = if markers {
+        match scion_client::update_with_markers(&s.ws, &s.remote, onto).await? {
+            Marked::Updated(done) => done,
+            Marked::Conflicted { conflicts } => {
+                writeln!(
+                    out,
+                    "moved to {onto} ({rev}) with the changes of {old} as local edits; \
+                     conflicts in:{}\nresolve them, then `scn commit` and `scn land`",
+                    path_list(&conflicts)
+                )?;
+                return Ok(());
+            }
+        }
+    } else {
+        match scion_client::update(&s.ws, &s.remote, onto).await {
+            Err(e @ SwitchError::Conflict { .. }) => {
+                return Err(format!(
+                    "{e}\nto resolve with conflict markers: scn update --conflicts {rev}"
+                )
+                .into());
+            }
+            done => done?,
+        }
+    };
     if done.head == old {
         writeln!(out, "{old} already contains {rev}")?;
     } else {
@@ -795,7 +825,7 @@ async fn run(cli: Cli) -> Result<()> {
         } => land_status(&mut out, id).await?,
         Command::Land { no_wait, .. } => land(&mut out, no_wait).await?,
         Command::Requests { status, limit } => requests(&mut out, status, limit).await?,
-        Command::Update { rev } => update(&mut out, &rev).await?,
+        Command::Update { rev, conflicts } => update(&mut out, &rev, conflicts).await?,
         Command::Merge {
             rev,
             message,

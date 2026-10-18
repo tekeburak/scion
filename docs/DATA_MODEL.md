@@ -207,6 +207,12 @@ base          = "d41c…"          # last known merge-base with main (a cache)
   `scn update [rev]` (default `main`) has the server replay `current_head`'s changesets that
   `rev` does not contain on top of it, then moves the working copy to the result and sets
   `base` to `rev`. Both touch only the files that differ, and both refuse local edits.
+- `scn update --conflicts [rev]` does not refuse a conflict: it moves `current_head` and `base`
+  to `rev` and leaves every change the old head made since its merge base with `rev` as local
+  edits, merged per file, with three-way conflict markers where both changed the same lines. The
+  conflicting paths are listed one per line in `.scn/conflicts`; `scn commit` refuses while any
+  of them still has a conflict block, then creates the resolved changeset on `rev` (the old
+  head's changesets land as that one) and empties the list.
 - Because the object store is append-only and there is no GC, an anonymous head cannot be lost
   by forgetting it; it can always be re-attached by id.
 - Sharing work means sharing an id, or landing it: `scn land` submits a change request, the
