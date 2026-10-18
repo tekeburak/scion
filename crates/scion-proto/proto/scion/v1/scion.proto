@@ -76,6 +76,7 @@ service ControlService {
   rpc SubmitChangeRequest(SubmitChangeRequestRequest) returns (ChangeRequest);
   rpc GetChangeRequest(GetChangeRequestRequest) returns (ChangeRequest);
   rpc ListChangeRequests(ListChangeRequestsRequest) returns (ListChangeRequestsResponse);
+  rpc FindLanding(FindLandingRequest) returns (FindLandingResponse);
 }
 
 // Server refs are only `main` and `release/*`. An unknown ref is NOT_FOUND.
@@ -259,6 +260,25 @@ message ListChangeRequestsResponse {
   repeated ChangeRequest requests = 1;
 }
 
+// Which request put each changeset on `main`, as its head (a fast-forward)
+// or as the rebased changeset it landed as. An unknown repository is
+// NOT_FOUND; more than 1000 changesets is INVALID_ARGUMENT.
+message FindLandingRequest {
+  string repo = 1;
+  repeated bytes changesets = 2;
+}
+
+message FindLandingResponse {
+  // In the order asked; a changeset no request landed is left out.
+  repeated Landing landings = 1;
+}
+
+message Landing {
+  bytes changeset = 1;
+  // LANDED, with `landed_unix_micros`; the oldest if several landed it.
+  ChangeRequest request = 2;
+}
+
 enum ChangeRequestStatus {
   CHANGE_REQUEST_STATUS_UNSPECIFIED = 0;
   // Waiting for the land worker.
@@ -285,4 +305,6 @@ message ChangeRequest {
   repeated string conflicts = 6;
   // When the request was submitted, in microseconds since the Unix epoch.
   uint64 submitted_unix_micros = 7;
+  // When `main` moved to `landed`; present once LANDED.
+  optional uint64 landed_unix_micros = 8;
 }

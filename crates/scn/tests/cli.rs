@@ -275,6 +275,18 @@ async fn add_commit_land_end_to_end() {
     let ids: Vec<u64> = rows[1..].iter().map(|r| r[0].parse().unwrap()).collect();
     assert!(ids.windows(2).all(|w| w[0] > w[1]), "{ids:?}");
     assert!(rows[1..].iter().all(|r| r[4].ends_with('s')), "{rows:?}");
+    // `log --landed` names the request that landed c2; c1 came before
+    // change requests.
+    let log = scn(&a, &["log", "-r", "main", "-n", "2", "--landed"]);
+    let landed_line = format!(" (request {})\n", ids[2]);
+    let blocks: Vec<&str> = log.split("changeset ").skip(1).collect();
+    assert!(blocks[0].starts_with(&c2.to_hex()), "{log}");
+    assert!(
+        blocks[0].contains("\nLanded: ") && blocks[0].contains(&landed_line),
+        "{log}"
+    );
+    assert!(!blocks[1].contains("Landed: "), "{log}");
+    assert!(!scn(&a, &["log", "-r", "main", "-n", "1"]).contains("Landed: "));
     let landed = scn(&b, &["requests", "--status", "landed"]);
     assert_eq!(landed.lines().count(), 2, "{landed}");
     assert!(landed.contains(&format!("{} ", ids[2])), "{landed}");

@@ -23,6 +23,7 @@
 #![forbid(unsafe_code)]
 
 use std::borrow::Cow;
+use std::collections::HashMap;
 use std::io::{self, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::ExitCode;
@@ -81,6 +82,9 @@ enum Command {
         /// Most changesets to show.
         #[arg(short = 'n', long, default_value_t = 20)]
         limit: u32,
+        /// Also show the change request that landed each changeset, and when.
+        #[arg(long)]
+        landed: bool,
     },
     /// Show local edits, or the changes between two revisions.
     Diff {
@@ -285,7 +289,17 @@ fn kind_name(kind: FileType) -> &'static str {
     }
 }
 
-fn print_changeset(out: &mut impl Write, cs: &Changeset) -> io::Result<()> {
+/// `t` as [`format_date`] prints it, in UTC.
+fn format_utc(t: SystemTime) -> String {
+    let secs = t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs();
+    format_date(Timestamp::new(i64::try_from(secs).unwrap_or(i64::MAX), 0))
+}
+
+fn print_changeset(
+    out: &mut impl Write,
+    cs: &Changeset,
+    landing: Option<&RemoteChangeRequest>,
+) -> io::Result<()> {
     writeln!(out, "changeset {}", cs.id())?;
     if cs.parents.len() > 1 {
         let parents: Vec<String> = cs.parents.iter().map(ChangesetId::to_hex).collect();
@@ -293,6 +307,10 @@ fn print_changeset(out: &mut impl Write, cs: &Changeset) -> io::Result<()> {
     }
     writeln!(out, "Author: {} <{}>", cs.author.name, cs.author.email)?;
     writeln!(out, "Date:   {}", format_date(cs.author_date))?;
+    if let Some(cr) = landing {
+        let at = cr.landed_at.map_or_else(|| "?".to_owned(), format_utc);
+        writeln!(out, "Landed: {at} (request {})", cr.id)?;
+    }
     writeln!(out)?;
     for line in cs.message.lines() {
         writeln!(out, "    {line}")?;
@@ -387,7 +405,13 @@ fn print_status(out: &mut impl Write) -> Result<()> {
     Ok(())
 }
 
-async fn log(out: &mut impl Write, path: Option<&str>, rev: &str, limit: u32) -> Result<()> {
+async fn log(
+    out: &mut impl Write,
+    path: Option<&str>,
+    rev: &str,
+    limit: u32,
+    landed: bool,
+) -> Result<()> {
     let mut s = Session::open().await?;
     let head = s.resolve(rev).await?;
     let repo = s.config.repo.clone();
@@ -398,8 +422,18 @@ async fn log(out: &mut impl Write, path: Option<&str>, rev: &str, limit: u32) ->
             s.remote.path_log(&repo, head, &path, limit).await?
         }
     };
+    let landings: HashMap<ChangesetId, RemoteChangeRequest> = if landed {
+        let ids: Vec<ChangesetId> = changesets.iter().map(Changeset::id).collect();
+        s.remote
+            .find_landings(&repo, &ids)
+            .await?
+            .into_iter()
+            .collect()
+    } else {
+        HashMap::new()
+    };
     for cs in &changesets {
-        print_changeset(out, cs)?;
+        print_changeset(out, cs, landings.get(&cs.id()))?;
     }
     Ok(())
 }
@@ -709,7 +743,12 @@ async fn run(cli: Cli) -> Result<()> {
             sparse,
         } => clone(&mut out, &server, &repo, dest, &sparse).await?,
         Command::Status => print_status(&mut out)?,
-        Command::Log { path, rev, limit } => log(&mut out, path.as_deref(), &rev, limit).await?,
+        Command::Log {
+            path,
+            rev,
+            limit,
+            landed,
+        } => log(&mut out, path.as_deref(), &rev, limit, landed).await?,
         Command::Diff { from, to } => match (from, to) {
             (Some(from), Some(to)) => diff_revisions(&mut out, &from, &to).await?,
             _ => diff_working_copy(&mut out).await?,

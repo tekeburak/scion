@@ -281,10 +281,11 @@ impl<'a> FileChangeColumns<'a> {
 
 /// The `change_requests` columns every query returns, in
 /// [`ChangeRequestRow`] order.
-/// `submitted_at` comes back in microseconds since the Unix epoch, its
-/// precision.
+/// `submitted_at` and `landed_at` come back in microseconds since the Unix
+/// epoch, their precision.
 const CHANGE_REQUEST_COLUMNS: &str = "c.id, c.head_cs, c.base_cs, c.status::text, c.landed_cs, \
-     c.conflicts, (EXTRACT(EPOCH FROM c.submitted_at) * 1000000)::bigint";
+     c.conflicts, (EXTRACT(EPOCH FROM c.submitted_at) * 1000000)::bigint, \
+     (EXTRACT(EPOCH FROM c.landed_at) * 1000000)::bigint";
 
 type ChangeRequestRow = (
     i64,
@@ -294,11 +295,13 @@ type ChangeRequestRow = (
     Option<Vec<u8>>,
     Option<Vec<String>>,
     i64,
+    Option<i64>,
 );
 
 fn change_request(
-    (id, head, base, status, landed, conflicts, submitted_us): ChangeRequestRow,
+    (id, head, base, status, landed, conflicts, submitted_us, landed_us): ChangeRequestRow,
 ) -> Result<ChangeRequest> {
+    let time = |us: i64| to_u64(us).map(|us| UNIX_EPOCH + Duration::from_micros(us));
     let cs = |bytes: &[u8]| {
         ChangesetId::try_from_slice(bytes)
             .map_err(|e| StoreError::Corrupt(format!("change request {id}: {e}")))
@@ -311,8 +314,21 @@ fn change_request(
             .ok_or_else(|| StoreError::Corrupt(format!("change request status {status:?}")))?,
         landed: landed.as_deref().map(cs).transpose()?,
         conflicts: conflicts.unwrap_or_default(),
-        submitted_at: UNIX_EPOCH + Duration::from_micros(to_u64(submitted_us)?),
+        submitted_at: time(submitted_us)?,
+        landed_at: landed_us.map(time).transpose()?,
     })
+}
+
+/// The statement behind [`MetadataStore::find_landings`]: per asked
+/// changeset, one probe of `change_requests_landed_cs` and one of
+/// `change_requests_landed_head`, keeping the oldest match.
+fn find_landings_sql() -> String {
+    format!(
+        "SELECT {CHANGE_REQUEST_COLUMNS} FROM unnest($2::bytea[]) AS q(cs) \
+         CROSS JOIN LATERAL (SELECT * FROM change_requests r WHERE r.repo = $1 \
+         AND r.status = 'landed' AND (r.landed_cs = q.cs OR r.head_cs = q.cs) \
+         ORDER BY r.id LIMIT 1) c"
+    )
 }
 
 #[async_trait]
@@ -804,6 +820,37 @@ impl MetadataStore for PostgresStore {
         rows.into_iter().map(change_request).collect()
     }
 
+    async fn find_landings(
+        &self,
+        repo: &str,
+        changesets: &[ChangesetId],
+    ) -> Result<Vec<(ChangesetId, ChangeRequest)>> {
+        let repo = self.repo(repo).await?;
+        let ids: Vec<&[u8]> = changesets
+            .iter()
+            .map(|cs| cs.as_bytes().as_slice())
+            .collect();
+        let rows: Vec<ChangeRequestRow> = sqlx::query_as(&find_landings_sql())
+            .bind(repo)
+            .bind(ids)
+            .fetch_all(&self.pool)
+            .await?;
+        let found = rows
+            .into_iter()
+            .map(change_request)
+            .collect::<Result<Vec<_>>>()?;
+        Ok(changesets
+            .iter()
+            .filter_map(|cs| {
+                found
+                    .iter()
+                    .filter(|cr| cr.head == *cs || cr.landed == Some(*cs))
+                    .min_by_key(|cr| cr.id)
+                    .map(|cr| (*cs, cr.clone()))
+            })
+            .collect())
+    }
+
     async fn claim_next_change_request(&self, repo: &str) -> Result<Option<ChangeRequest>> {
         // The oldest pending row through `change_requests_status`; a row
         // another claim holds is skipped, never waited on or returned twice.
@@ -877,5 +924,92 @@ impl MetadataStore for PostgresStore {
         .fetch_all(&self.pool)
         .await?;
         Ok(rows.into_iter().map(|(name,)| name).collect())
+    }
+}
+
+#[cfg(all(test, feature = "integration"))]
+mod tests {
+    use super::*;
+
+    /// With 1,000 landed requests, `find_landings` plans as index probes
+    /// only, under the generic plan a cached statement ends up with as well
+    /// as a custom one.
+    #[tokio::test]
+    async fn find_landings_uses_the_indexes() {
+        let opts: PgConnectOptions = std::env::var("SCION_TEST_DATABASE_URL")
+            .unwrap_or_else(|_| "postgres://scion:scion@localhost:5432/scion".to_owned())
+            .parse()
+            .unwrap();
+        let name = format!("scion_test_{}_plan", std::process::id());
+        let admin = PgPool::connect_with(opts.clone()).await.unwrap();
+        sqlx::query(&format!("CREATE DATABASE \"{name}\""))
+            .execute(&admin)
+            .await
+            .unwrap();
+        let store = PostgresStore::connect_with(opts.database(&name))
+            .await
+            .unwrap();
+        store.migrate().await.unwrap();
+        store.create_repo("plan").await.unwrap();
+        let cs = |i: u32, tag: u8| {
+            let mut b = [tag; 32];
+            b[..4].copy_from_slice(&i.to_be_bytes());
+            ChangesetId::from_bytes(b)
+        };
+        for i in 0..1_000 {
+            let cr = store
+                .submit_change_request("plan", cs(i, 1), cs(0, 0))
+                .await
+                .unwrap();
+            store.claim_next_change_request("plan").await.unwrap();
+            store
+                .finish_change_request("plan", cr.id, LandOutcome::Landed(cs(i, 2)))
+                .await
+                .unwrap();
+        }
+        let mut conn = store.pool().acquire().await.unwrap();
+        sqlx::raw_sql("ANALYZE change_requests")
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+        sqlx::raw_sql(&format!(
+            "PREPARE find(bigint, bytea[]) AS {}",
+            find_landings_sql()
+        ))
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+        let repo = store.repo("plan").await.unwrap();
+        for mode in ["force_generic_plan", "force_custom_plan"] {
+            sqlx::raw_sql(&format!("SET plan_cache_mode = {mode}"))
+                .execute(&mut *conn)
+                .await
+                .unwrap();
+            let plan: Vec<(String,)> = sqlx::query_as(&format!(
+                "EXPLAIN EXECUTE find({repo}, ARRAY['\\x{}'::bytea, '\\x{}'::bytea])",
+                cs(7, 1),
+                cs(9, 2)
+            ))
+            .fetch_all(&mut *conn)
+            .await
+            .unwrap();
+            let plan = plan
+                .into_iter()
+                .map(|(l,)| l)
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert!(
+                plan.contains("change_requests_landed_cs")
+                    && plan.contains("change_requests_landed_head")
+                    && !plan.contains("Seq Scan"),
+                "{mode}:\n{plan}"
+            );
+        }
+        drop(conn);
+        store.pool().close().await;
+        sqlx::query(&format!("DROP DATABASE \"{name}\" WITH (FORCE)"))
+            .execute(&admin)
+            .await
+            .unwrap();
     }
 }

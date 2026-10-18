@@ -485,6 +485,54 @@ pub async fn list_change_requests<S: MetadataStore>(s: &S) {
     ));
 }
 
+/// A landed changeset is found from the request's head and from the
+/// changeset it landed as; nothing else is.
+pub async fn find_landings<S: MetadataStore>(s: &S) {
+    const OTHER: &str = "conformance-other";
+    let cs = |b: u8| ChangesetId::from_bytes([b; 32]);
+    s.create_repo(REPO).await.unwrap();
+    s.create_repo(OTHER).await.unwrap();
+    let finish = async |head: ChangesetId, outcome: LandOutcome| {
+        let cr = s.submit_change_request(REPO, head, cs(0)).await.unwrap();
+        assert_eq!(
+            s.claim_next_change_request(REPO).await.unwrap().unwrap().id,
+            cr.id
+        );
+        s.finish_change_request(REPO, cr.id, outcome).await.unwrap()
+    };
+    // 1 lands rebased as 11, 2 lands as itself, 3 conflicts, and 1 again
+    // has nothing left to land.
+    let rebased = finish(cs(1), LandOutcome::Landed(cs(11))).await;
+    let forward = finish(cs(2), LandOutcome::Landed(cs(2))).await;
+    finish(cs(3), LandOutcome::NeedsRebase(vec!["f".to_owned()])).await;
+    finish(cs(1), LandOutcome::Rejected).await;
+    for cr in [&rebased, &forward] {
+        let at = cr.landed_at.expect("landed_at set");
+        assert!(at >= cr.submitted_at);
+    }
+
+    let asked = [cs(3), cs(11), cs(9), cs(2), cs(1)];
+    assert_eq!(
+        s.find_landings(REPO, &asked).await.unwrap(),
+        [
+            (cs(11), rebased.clone()),
+            (cs(2), forward.clone()),
+            (cs(1), rebased.clone()),
+        ],
+        "in the order asked, from the head or the landed id"
+    );
+    assert_eq!(s.find_landings(REPO, &[]).await.unwrap(), []);
+    assert_eq!(
+        s.find_landings(OTHER, &asked).await.unwrap(),
+        [],
+        "scoped by repo"
+    );
+    assert!(matches!(
+        s.find_landings("conformance-missing", &asked).await,
+        Err(StoreError::RepoNotFound(_))
+    ));
+}
+
 /// A change request of one repository is invisible from another.
 pub async fn change_requests_by_repo<S: MetadataStore>(s: &S) {
     const OTHER: &str = "conformance-other";
@@ -629,6 +677,10 @@ macro_rules! conformance_tests {
                 $crate::conformance::list_change_requests(&$ctor.await).await;
             }
             #[tokio::test]
+            async fn find_landings() {
+                $crate::conformance::find_landings(&$ctor.await).await;
+            }
+            #[tokio::test]
             async fn change_requests_by_repo() {
                 $crate::conformance::change_requests_by_repo(&$ctor.await).await;
             }
@@ -684,6 +736,10 @@ macro_rules! metadata_conformance_tests {
             #[tokio::test]
             async fn list_change_requests() {
                 $crate::conformance::list_change_requests(&$ctor.await).await;
+            }
+            #[tokio::test]
+            async fn find_landings() {
+                $crate::conformance::find_landings(&$ctor.await).await;
             }
             #[tokio::test]
             async fn change_requests_by_repo() {

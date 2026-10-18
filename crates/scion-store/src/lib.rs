@@ -139,6 +139,8 @@ pub struct ChangeRequest {
     pub conflicts: Vec<String>,
     /// When the request was recorded.
     pub submitted_at: SystemTime,
+    /// When `main` moved to [`landed`](Self::landed); set once `landed`.
+    pub landed_at: Option<SystemTime>,
 }
 
 /// How the land worker finished a request it claimed.
@@ -292,6 +294,17 @@ pub trait MetadataStore: Send + Sync {
         status: Option<ChangeRequestStatus>,
         limit: u32,
     ) -> Result<Vec<ChangeRequest>>;
+
+    /// For each of `changesets` that a `landed` request of `repo` put on
+    /// `main`, as its head or as its rebased [`landed`](ChangeRequest::landed),
+    /// that request (the oldest, if several did), in the order asked;
+    /// changesets no request landed are left out. An unknown repository is
+    /// [`StoreError::RepoNotFound`].
+    async fn find_landings(
+        &self,
+        repo: &str,
+        changesets: &[ChangesetId],
+    ) -> Result<Vec<(ChangesetId, ChangeRequest)>>;
 
     /// Move the oldest `pending` request of `repo` to `landing` and return
     /// it; `None` if nothing is pending. Concurrent claims never return the

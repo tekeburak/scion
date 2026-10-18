@@ -268,6 +268,14 @@ impl MetadataStore for CountingMeta<'_> {
         self.inner.list_change_requests(repo, status, limit).await
     }
 
+    async fn find_landings(
+        &self,
+        repo: &str,
+        changesets: &[ChangesetId],
+    ) -> scion_store::Result<Vec<(ChangesetId, ChangeRequest)>> {
+        self.inner.find_landings(repo, changesets).await
+    }
+
     async fn claim_next_change_request(
         &self,
         repo: &str,

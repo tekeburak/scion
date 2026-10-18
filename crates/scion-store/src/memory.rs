@@ -228,6 +228,7 @@ impl MetadataStore for MemoryStore {
             landed: None,
             conflicts: Vec::new(),
             submitted_at: SystemTime::now(),
+            landed_at: None,
         };
         m.change_requests
             .entry(repo.to_owned())
@@ -263,6 +264,30 @@ impl MetadataStore for MemoryStore {
                     .collect()
             })
             .unwrap_or_default())
+    }
+
+    async fn find_landings(
+        &self,
+        repo: &str,
+        changesets: &[ChangesetId],
+    ) -> Result<Vec<(ChangesetId, ChangeRequest)>> {
+        let m = self.meta.read().expect("poisoned");
+        m.check_repo(repo)?;
+        let Some(requests) = m.change_requests.get(repo) else {
+            return Ok(Vec::new());
+        };
+        Ok(changesets
+            .iter()
+            .filter_map(|cs| {
+                requests
+                    .values()
+                    .find(|cr| {
+                        cr.status == ChangeRequestStatus::Landed
+                            && (cr.head == *cs || cr.landed == Some(*cs))
+                    })
+                    .map(|cr| (*cs, cr.clone()))
+            })
+            .collect())
     }
 
     async fn claim_next_change_request(&self, repo: &str) -> Result<Option<ChangeRequest>> {
@@ -306,7 +331,10 @@ impl MetadataStore for MemoryStore {
         }
         cr.status = outcome.status();
         match outcome {
-            LandOutcome::Landed(cs) => cr.landed = Some(cs),
+            LandOutcome::Landed(cs) => {
+                cr.landed = Some(cs);
+                cr.landed_at = Some(SystemTime::now());
+            }
             LandOutcome::NeedsRebase(paths) => cr.conflicts = paths,
             LandOutcome::Rejected => {}
         }

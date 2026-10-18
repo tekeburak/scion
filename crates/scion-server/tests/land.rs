@@ -8,8 +8,8 @@ use futures_util::future::join_all;
 use scion_derived::test_util::{REPO, changeset, tracked};
 use scion_proto::v1::control_service_client::ControlServiceClient;
 use scion_proto::v1::{
-    ChangeRequest, ChangeRequestStatus, GetChangeRequestRequest, GetRefRequest, LogRequest,
-    SubmitChangeRequestRequest,
+    ChangeRequest, ChangeRequestStatus, FindLandingRequest, GetChangeRequestRequest, GetRefRequest,
+    LogRequest, SubmitChangeRequestRequest,
 };
 use scion_store::{MemoryStore, MetadataStore, ObjectStore};
 use scion_types::{Changeset, ChangesetId, Decode, RepoPath};
@@ -276,4 +276,53 @@ async fn a_waiting_submit_replies_with_the_outcome() {
         .into_inner();
     assert_eq!(cr.status(), ChangeRequestStatus::Landed);
     assert_eq!(cr.landed.as_deref(), Some(head.as_bytes().as_slice()));
+}
+
+/// A change that landed rebased is found from its own id and from the id it
+/// landed as, with the time it landed.
+#[tokio::test]
+async fn find_landing_from_the_original_and_the_landed_id() {
+    let (store, root) = repository().await;
+    let a = commit(&store, root, "a.txt").await;
+    let b = commit(&store, root, "b.txt").await;
+    let mut c = start(store.clone()).await;
+
+    let first = submit(&mut c, a).await;
+    let first = finished(&mut c, first.id).await;
+    let second = submit(&mut c, b).await;
+    let second = finished(&mut c, second.id).await;
+    let landed = ChangesetId::try_from_slice(second.landed.as_deref().unwrap()).unwrap();
+    assert_ne!(landed, b, "b was rebased onto a");
+
+    let mut find = async |changesets: &[ChangesetId]| {
+        c.find_landing(FindLandingRequest {
+            repo: REPO.into(),
+            changesets: changesets.iter().map(|cs| cs.as_bytes().to_vec()).collect(),
+        })
+        .await
+        .map(|r| r.into_inner().landings)
+    };
+    let landings = find(&[b, root, landed, a]).await.unwrap();
+    let found: Vec<_> = landings
+        .iter()
+        .map(|l| (l.changeset.as_slice(), l.request.as_ref().unwrap().id))
+        .collect();
+    assert_eq!(
+        found,
+        [
+            (b.as_bytes().as_slice(), second.id),
+            (landed.as_bytes().as_slice(), second.id),
+            (a.as_bytes().as_slice(), first.id),
+        ]
+    );
+    for l in &landings {
+        let cr = l.request.as_ref().unwrap();
+        assert!(cr.landed_unix_micros.unwrap() >= cr.submitted_unix_micros);
+    }
+
+    let too_many = vec![root; 1001];
+    assert_eq!(
+        find(&too_many).await.unwrap_err().code(),
+        tonic::Code::InvalidArgument
+    );
 }

@@ -264,6 +264,14 @@ impl MetadataStore for Staged<'_> {
         self.meta.list_change_requests(repo, status, limit).await
     }
 
+    async fn find_landings(
+        &self,
+        repo: &str,
+        changesets: &[ChangesetId],
+    ) -> Result<Vec<(ChangesetId, ChangeRequest)>> {
+        self.meta.find_landings(repo, changesets).await
+    }
+
     async fn claim_next_change_request(&self, repo: &str) -> Result<Option<ChangeRequest>> {
         self.meta.claim_next_change_request(repo).await
     }

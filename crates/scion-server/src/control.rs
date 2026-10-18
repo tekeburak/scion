@@ -4,7 +4,7 @@
 //! else is derived on first request.
 
 use std::sync::Arc;
-use std::time::UNIX_EPOCH;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use futures_util::{StreamExt, TryStreamExt, stream};
 
@@ -13,10 +13,10 @@ use scion_proto::v1::control_service_server::ControlService;
 use scion_proto::v1::{
     BlameRequest, BlameResponse, BlameRun, ChangeRequest, ChangeRequestStatus,
     CreateChangesetRequest, CreateChangesetResponse, DiffEntry, DiffRequest, DiffResponse,
-    FileEntry, FileType, GetChangeRequestRequest, GetRefRequest, GetRefResponse,
-    ListChangeRequestsRequest, ListChangeRequestsResponse, LogRequest, LogResponse,
-    MergeBaseRequest, MergeBaseResponse, MoveRefRequest, MoveRefResponse, PathLogRequest,
-    RebaseRequest, RebaseResponse, SubmitChangeRequestRequest,
+    FileEntry, FileType, FindLandingRequest, FindLandingResponse, GetChangeRequestRequest,
+    GetRefRequest, GetRefResponse, Landing, ListChangeRequestsRequest, ListChangeRequestsResponse,
+    LogRequest, LogResponse, MergeBaseRequest, MergeBaseResponse, MoveRefRequest, MoveRefResponse,
+    PathLogRequest, RebaseRequest, RebaseResponse, SubmitChangeRequestRequest,
 };
 use scion_store::{MetadataStore, ObjectStore, StoreError, is_allowed_ref_name};
 use scion_types::{BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, RepoPath, TreeId};
@@ -27,7 +27,8 @@ use crate::staged::Staged;
 use crate::store_status;
 
 /// Most changesets a single `Log` or `PathLog` call returns, and most requests
-/// `ListChangeRequests` returns; larger limits are clamped. Clients page a log
+/// `ListChangeRequests` returns; larger limits are clamped. `FindLanding`
+/// refuses more changesets than this. Clients page a log
 /// by asking again from the last parent.
 pub const MAX_LOG_LIMIT: u32 = 1000;
 
@@ -172,11 +173,14 @@ fn change_request(cr: scion_store::ChangeRequest) -> ChangeRequest {
         .into(),
         landed: cr.landed.map(|cs| cs.as_bytes().to_vec()),
         conflicts: cr.conflicts,
-        submitted_unix_micros: cr
-            .submitted_at
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX)),
+        submitted_unix_micros: unix_micros(cr.submitted_at),
+        landed_unix_micros: cr.landed_at.map(unix_micros),
     }
+}
+
+fn unix_micros(t: SystemTime) -> u64 {
+    t.duration_since(UNIX_EPOCH)
+        .map_or(0, |d| u64::try_from(d.as_micros()).unwrap_or(u64::MAX))
 }
 
 /// Store `batch`, in order, and derive what clone, log and diff need, as
@@ -695,6 +699,38 @@ impl ControlService for ControlServer {
             .map_err(store_status)?;
         Ok(Response::new(ListChangeRequestsResponse {
             requests: requests.into_iter().map(change_request).collect(),
+        }))
+    }
+
+    async fn find_landing(
+        &self,
+        request: Request<FindLandingRequest>,
+    ) -> Result<Response<FindLandingResponse>, Status> {
+        let req = request.into_inner();
+        if req.changesets.len() > MAX_LOG_LIMIT as usize {
+            return Err(Status::invalid_argument(format!(
+                "{} changesets; at most {MAX_LOG_LIMIT}",
+                req.changesets.len()
+            )));
+        }
+        let changesets = req
+            .changesets
+            .iter()
+            .map(|cs| changeset_id(cs, "changeset"))
+            .collect::<Result<Vec<_>, _>>()?;
+        let landings = self
+            .meta
+            .find_landings(&req.repo, &changesets)
+            .await
+            .map_err(store_status)?;
+        Ok(Response::new(FindLandingResponse {
+            landings: landings
+                .into_iter()
+                .map(|(cs, cr)| Landing {
+                    changeset: cs.as_bytes().to_vec(),
+                    request: Some(change_request(cr)),
+                })
+                .collect(),
         }))
     }
 }

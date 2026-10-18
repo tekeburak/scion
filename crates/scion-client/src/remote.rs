@@ -6,9 +6,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use scion_proto::v1::control_service_client::ControlServiceClient;
 use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_proto::v1::{
-    BlameRequest, CreateChangesetRequest, DiffRequest, GetBlobRequest, GetChangeRequestRequest,
-    GetRefRequest, GetTreeRequest, ListChangeRequestsRequest, LogRequest, LogResponse,
-    MoveRefRequest, PathLogRequest, PutBlobRequest, RebaseRequest, SubmitChangeRequestRequest,
+    BlameRequest, CreateChangesetRequest, DiffRequest, FindLandingRequest, GetBlobRequest,
+    GetChangeRequestRequest, GetRefRequest, GetTreeRequest, ListChangeRequestsRequest, LogRequest,
+    LogResponse, MoveRefRequest, PathLogRequest, PutBlobRequest, RebaseRequest,
+    SubmitChangeRequestRequest,
 };
 use scion_types::{
     BlobId, Changeset, ChangesetId, Decode, Encode, FileType, RepoPath, Tree, TreeId,
@@ -111,6 +112,8 @@ pub struct RemoteChangeRequest {
     pub base: ChangesetId,
     pub status: RequestStatus,
     pub submitted_at: SystemTime,
+    /// When `main` moved to the landed changeset; set once landed.
+    pub landed_at: Option<SystemTime>,
 }
 
 fn change_request(cr: scion_proto::v1::ChangeRequest) -> Result<RemoteChangeRequest, RemoteError> {
@@ -138,6 +141,9 @@ fn change_request(cr: scion_proto::v1::ChangeRequest) -> Result<RemoteChangeRequ
         base: changeset_id(&cr.base, "change request base")?,
         status,
         submitted_at: UNIX_EPOCH + Duration::from_micros(cr.submitted_unix_micros),
+        landed_at: cr
+            .landed_unix_micros
+            .map(|us| UNIX_EPOCH + Duration::from_micros(us)),
     })
 }
 
@@ -488,5 +494,32 @@ impl Remote {
             .await?
             .into_inner();
         resp.requests.into_iter().map(change_request).collect()
+    }
+
+    /// The request that put each of `changesets` on `main`, in the order
+    /// asked; a changeset no request landed is left out.
+    pub async fn find_landings(
+        &mut self,
+        repo: &str,
+        changesets: &[ChangesetId],
+    ) -> Result<Vec<(ChangesetId, RemoteChangeRequest)>, RemoteError> {
+        let resp = self
+            .control
+            .find_landing(FindLandingRequest {
+                repo: repo.to_owned(),
+                changesets: changesets.iter().map(|cs| cs.as_bytes().to_vec()).collect(),
+            })
+            .await?
+            .into_inner();
+        resp.landings
+            .into_iter()
+            .map(|l| {
+                let request = l.request.ok_or(RemoteError::Malformed("landing"))?;
+                Ok((
+                    changeset_id(&l.changeset, "landed changeset")?,
+                    change_request(request)?,
+                ))
+            })
+            .collect()
     }
 }

@@ -136,7 +136,7 @@ changeset touched, not the history.
 
 ### Landing changes
 
-*In progress, Phase 5.* Change requests are landed end to end and listed (5.1–5.6).
+*In progress, Phase 5.* Change requests are landed end to end, listed, and answer "when did X land" (5.1–5.7).
 
 **What `scn` does.** `scn land` submits the current head as a change request and waits for
 the outcome in the same call: the server holds the reply until the land worker finishes the
@@ -180,7 +180,15 @@ That is idempotent because rebased changesets are content-addressed: a request s
 its CAS recreates the same ids, and one stopped after it finds `main` already holding its
 change and is recorded `landed`.
 
-"When did X land" (`FindLanding`), server-side merge and revert are *planned* (5.7–5.10). Testing happens post-merge and pre-deploy.
+**When did X land.** `FindLanding(repo, changesets)` returns, for each changeset, the
+`landed` request that put it on `main`, either as the request's head (a fast-forward) or as
+the rebased changeset it landed as, with the time it landed. Partial indexes on
+`(repo, landed_cs)` and `(repo, head_cs)` over landed rows make that one probe per changeset in
+a single query, never a walk of `changesets` (invariant 1). `scn log --landed` asks it for every
+changeset on the page. Only the top of a rebased stack is recorded as `landed_cs`, so the
+changesets below it show no request.
+
+Server-side merge and revert are *planned* (5.8–5.10). Testing happens post-merge and pre-deploy.
 
 ### Snapshots and seeding
 
