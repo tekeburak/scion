@@ -45,9 +45,10 @@ jobs:
         run: |
           df -h / | tail -1
           if [ "$(df --output=avail -BG / | tail -1 | tr -dc 0-9)" -lt 8 ]; then
-            echo "under 8 GB free: dropping target/ and unused Docker data"
+            echo "under 8 GB free: dropping target/, stopped containers and dangling images"
             rm -rf "$GITHUB_WORKSPACE/target"
-            docker system prune -af >/dev/null 2>&1 || true
+            # Not -a: the runner has already built this job's action images.
+            docker system prune -f >/dev/null 2>&1 || true
             df -h / | tail -1
           fi
       - uses: actions/checkout@v5
@@ -98,9 +99,10 @@ jobs:
         run: |
           df -h / | tail -1
           if [ "$(df --output=avail -BG / | tail -1 | tr -dc 0-9)" -lt 8 ]; then
-            echo "under 8 GB free: dropping target/ and unused Docker data"
+            echo "under 8 GB free: dropping target/, stopped containers and dangling images"
             rm -rf "$GITHUB_WORKSPACE/target"
-            docker system prune -af >/dev/null 2>&1 || true
+            # Not -a: the runner has already built this job's action images.
+            docker system prune -f >/dev/null 2>&1 || true
             df -h / | tail -1
           fi
       - uses: actions/checkout@v5
@@ -147,9 +149,10 @@ jobs:
         run: |
           df -h / | tail -1
           if [ "$(df --output=avail -BG / | tail -1 | tr -dc 0-9)" -lt 8 ]; then
-            echo "under 8 GB free: dropping target/ and unused Docker data"
+            echo "under 8 GB free: dropping target/, stopped containers and dangling images"
             rm -rf "$GITHUB_WORKSPACE/target"
-            docker system prune -af >/dev/null 2>&1 || true
+            # Not -a: the runner has already built this job's action images.
+            docker system prune -f >/dev/null 2>&1 || true
             df -h / | tail -1
           fi
       - uses: actions/checkout@v5
@@ -180,9 +183,10 @@ jobs:
         run: |
           df -h / | tail -1
           if [ "$(df --output=avail -BG / | tail -1 | tr -dc 0-9)" -lt 8 ]; then
-            echo "under 8 GB free: dropping target/ and unused Docker data"
+            echo "under 8 GB free: dropping target/, stopped containers and dangling images"
             rm -rf "$GITHUB_WORKSPACE/target"
-            docker system prune -af >/dev/null 2>&1 || true
+            # Not -a: the runner has already built this job's action images.
+            docker system prune -f >/dev/null 2>&1 || true
             df -h / | tail -1
           fi
       - uses: actions/checkout@v5
