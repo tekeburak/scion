@@ -54,9 +54,10 @@ Scion is that design, built on boring infrastructure:
 
 Scion is **alpha** software. The server, the CLI, git import and the real-repository benchmark
 work and are exercised end to end in CI on Postgres + S3. There is **no authentication yet**:
-run a server only on a network you trust. Change requests and a serial land worker are under
-construction; the cache and daemon tiers, access control and released binaries follow (see
-[What's next](#whats-next)).
+run a server only on a network you trust. The server already lands change requests through a
+serial land worker; the CLI still lands by fast-forward, and moving `scn land` onto change
+requests is the next step. The cache and daemon tiers, access control and released binaries
+follow (see [What's next](#whats-next)).
 
 What works today:
 
@@ -64,6 +65,10 @@ What works today:
   `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`, `move_ref`, `rebase`, change
   requests — plus `backfill`, which derives a type for a repository's whole history ahead of the
   first request.
+- **Change requests and the land worker**: a submitted head is landed by one serial worker
+  per repository, in submission order, rebased onto the current `main` on the server and
+  moved in with a single compare-and-swap. A conflict leaves `main` untouched and reports the
+  conflicting paths; a request interrupted by a server restart resumes and lands exactly once.
 - **`scn`**, the CLI: `init` a repository, `clone --sparse`, `status`, `log`, `diff`, `blame`,
   `add`, `commit` (an anonymous head), `land` (fast-forward `main`), `update` (the server
   rebases your head onto `main` so it lands as a fast-forward again) and `checkout` of any
@@ -239,8 +244,10 @@ Read these numbers with their limits:
 
 ## What's next
 
-In order: change requests and a serial land worker, so many writers land onto one `main`
-without a merge queue; access control (GitHub device-flow login, service principals, repository
+In order: finishing change requests, so many writers land onto one `main` without a merge
+queue: `scn land` through the land worker, listing requests, "when did this land" lookups,
+server-side merge and revert, conflict markers on `update`, and a benchmark of 16 concurrent
+writers against git; then access control (GitHub device-flow login, service principals, repository
 and directory ACLs) together with fuzzing and a hermetic simulation; released binaries, a
 server image and a production compose profile; the regional cache and per-node daemon tiers
 with manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan,
