@@ -307,6 +307,12 @@ pub async fn change_requests<S: MetadataStore>(s: &S) {
     let cs = |b: u8| ChangesetId::from_bytes([b; 32]);
     s.create_repo(REPO).await.unwrap();
     assert_eq!(s.claim_next_change_request(REPO).await.unwrap(), None);
+    let landing = || async {
+        s.landing_change_request(REPO)
+            .await
+            .unwrap()
+            .map(|cr| cr.id)
+    };
 
     let mut ids = Vec::new();
     for b in 1..=4 {
@@ -330,6 +336,7 @@ pub async fn change_requests<S: MetadataStore>(s: &S) {
             ..
         })
     ));
+    assert_eq!(landing().await, None, "pending is not landing");
     let mut claimed = Vec::new();
     for want in &ids {
         let cr = s.claim_next_change_request(REPO).await.unwrap().unwrap();
@@ -337,6 +344,7 @@ pub async fn change_requests<S: MetadataStore>(s: &S) {
         claimed.push(cr);
     }
     assert_eq!(s.claim_next_change_request(REPO).await.unwrap(), None);
+    assert_eq!(landing().await, Some(ids[0]), "the oldest landing request");
 
     let landed = s
         .finish_change_request(REPO, ids[0], LandOutcome::Landed(cs(7)))
@@ -387,6 +395,11 @@ pub async fn change_requests<S: MetadataStore>(s: &S) {
             .map(|cr| cr.status),
         Some(Landing)
     );
+    assert_eq!(
+        landing().await,
+        Some(ids[3]),
+        "finished requests are skipped"
+    );
 }
 
 /// A change request of one repository is invisible from another.
@@ -410,6 +423,7 @@ pub async fn change_requests_by_repo<S: MetadataStore>(s: &S) {
     assert_eq!(s.get_change_request(REPO, theirs.id).await.unwrap(), None);
     let claimed = s.claim_next_change_request(OTHER).await.unwrap().unwrap();
     assert_eq!(claimed.id, theirs.id);
+    assert_eq!(s.landing_change_request(REPO).await.unwrap(), None);
     assert_eq!(s.claim_next_change_request(OTHER).await.unwrap(), None);
     assert_eq!(open().await, [REPO, OTHER], "pending and landing are open");
     assert!(matches!(

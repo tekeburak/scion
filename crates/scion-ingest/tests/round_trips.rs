@@ -265,6 +265,14 @@ impl MetadataStore for CountingMeta {
         self.inner.claim_next_change_request(repo).await
     }
 
+    async fn landing_change_request(
+        &self,
+        repo: &str,
+    ) -> scion_store::Result<Option<ChangeRequest>> {
+        self.tick();
+        self.inner.landing_change_request(repo).await
+    }
+
     async fn finish_change_request(
         &self,
         repo: &str,

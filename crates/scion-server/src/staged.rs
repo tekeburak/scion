@@ -258,6 +258,10 @@ impl MetadataStore for Staged<'_> {
         self.meta.claim_next_change_request(repo).await
     }
 
+    async fn landing_change_request(&self, repo: &str) -> Result<Option<ChangeRequest>> {
+        self.meta.landing_change_request(repo).await
+    }
+
     async fn finish_change_request(
         &self,
         repo: &str,

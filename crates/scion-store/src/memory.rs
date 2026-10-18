@@ -254,6 +254,15 @@ impl MetadataStore for MemoryStore {
         }))
     }
 
+    async fn landing_change_request(&self, repo: &str) -> Result<Option<ChangeRequest>> {
+        let m = self.meta.read().expect("poisoned");
+        Ok(m.change_requests.get(repo).and_then(|r| {
+            r.values()
+                .find(|cr| cr.status == ChangeRequestStatus::Landing)
+                .cloned()
+        }))
+    }
+
     async fn finish_change_request(
         &self,
         repo: &str,

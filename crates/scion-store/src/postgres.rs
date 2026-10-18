@@ -778,6 +778,17 @@ impl MetadataStore for PostgresStore {
         row.map(change_request).transpose()
     }
 
+    async fn landing_change_request(&self, repo: &str) -> Result<Option<ChangeRequest>> {
+        let row: Option<ChangeRequestRow> = sqlx::query_as(&format!(
+            "SELECT {CHANGE_REQUEST_COLUMNS} FROM change_requests c JOIN repos r ON r.id = c.repo \
+             WHERE r.name = $1 AND c.status = 'landing' ORDER BY c.submitted_at, c.id LIMIT 1"
+        ))
+        .bind(repo)
+        .fetch_optional(&self.pool)
+        .await?;
+        row.map(change_request).transpose()
+    }
+
     async fn finish_change_request(
         &self,
         repo: &str,

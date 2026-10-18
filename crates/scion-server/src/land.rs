@@ -10,7 +10,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use scion_store::{LandOutcome, MetadataStore, ObjectStore, StoreError};
-use scion_types::ChangesetId;
+use scion_types::{Changeset, ChangesetId};
 use tokio::sync::Notify;
 use tonic::Status;
 
@@ -53,17 +53,24 @@ impl LandWorkers {
 }
 
 /// `repo`'s worker: land every pending request, then sleep until woken.
+/// Its first run, and the run after any failure, first finishes the request
+/// a stopped or failed run left `landing`.
 async fn work(
     meta: Arc<dyn MetadataStore>,
     objects: Arc<dyn ObjectStore>,
     repo: String,
     notify: Arc<Notify>,
 ) {
+    let mut resume = true;
     loop {
         notify.notified().await;
-        if let Err(e) = land_pending(&*meta, &*objects, &repo).await {
-            eprintln!("scion-server: land worker for {repo:?}: {e}");
-        }
+        resume = match land_pending(&*meta, &*objects, &repo, resume).await {
+            Ok(()) => false,
+            Err(e) => {
+                eprintln!("scion-server: land worker for {repo:?}: {e}");
+                true
+            }
+        };
     }
 }
 
@@ -71,13 +78,26 @@ async fn land_pending(
     meta: &dyn MetadataStore,
     objects: &dyn ObjectStore,
     repo: &str,
+    resume: bool,
 ) -> Result<(), Status> {
+    if resume {
+        while let Some(cr) = meta
+            .landing_change_request(repo)
+            .await
+            .map_err(store_status)?
+        {
+            let outcome = land(meta, objects, repo, cr.head, true).await?;
+            meta.finish_change_request(repo, cr.id, outcome)
+                .await
+                .map_err(store_status)?;
+        }
+    }
     while let Some(cr) = meta
         .claim_next_change_request(repo)
         .await
         .map_err(store_status)?
     {
-        let outcome = land(meta, objects, repo, cr.head).await?;
+        let outcome = land(meta, objects, repo, cr.head, false).await?;
         meta.finish_change_request(repo, cr.id, outcome)
             .await
             .map_err(store_status)?;
@@ -89,11 +109,17 @@ async fn land_pending(
 /// CAS means another writer (`MoveRef`, an import) moved `main` meanwhile,
 /// so the rebased stack is replayed onto the new `main`; each retry follows
 /// a move of `main`, never a timer.
+///
+/// Landing again is idempotent: rebased changesets are content-addressed,
+/// so a request stopped before its CAS recreates the same ids. One
+/// `resumed` after its CAS finds `main` already holding the change; it
+/// landed if `main` is its head or the rebased copy of it.
 async fn land(
     meta: &dyn MetadataStore,
     objects: &dyn ObjectStore,
     repo: &str,
     mut head: ChangesetId,
+    resumed: bool,
 ) -> Result<LandOutcome, Status> {
     loop {
         let main = meta
@@ -107,8 +133,14 @@ async fn land(
                     paths.iter().map(|p| p.as_str().to_owned()).collect(),
                 ));
             }
-            Rebased::Clean { head, .. } if head == main.target => {
-                return Ok(LandOutcome::Rejected);
+            Rebased::Clean { head: new, .. } if new == main.target => {
+                return Ok(
+                    if resumed && is_copy(meta, repo, head, main.target).await? {
+                        LandOutcome::Landed(main.target)
+                    } else {
+                        LandOutcome::Rejected
+                    },
+                );
             }
             Rebased::Clean { head, .. } => head,
         };
@@ -118,4 +150,29 @@ async fn land(
             Err(e) => return Err(store_status(e)),
         }
     }
+}
+
+/// Whether `landed` is `head` or `head` replayed by [`rebase`], which keeps
+/// everything but the parents and the file changes.
+async fn is_copy(
+    meta: &dyn MetadataStore,
+    repo: &str,
+    head: ChangesetId,
+    landed: ChangesetId,
+) -> Result<bool, Status> {
+    if head == landed {
+        return Ok(true);
+    }
+    let read = async |id| {
+        meta.get_changeset(repo, id)
+            .await
+            .map_err(store_status)?
+            .ok_or_else(|| Status::data_loss(format!("changeset {id} is missing")))
+    };
+    let (head, landed) = (read(head).await?, read(landed).await?);
+    Ok(Changeset {
+        parents: landed.parents.clone(),
+        file_changes: landed.file_changes.clone(),
+        ..head
+    } == landed)
 }
