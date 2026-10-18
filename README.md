@@ -65,6 +65,10 @@ What works today:
   `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`, `move_ref`, `rebase`, change
   requests — plus `backfill`, which derives a type for a repository's whole history ahead of the
   first request.
+- **Change requests and the land worker**: a submitted head is landed by one serial worker
+  per repository, in submission order, rebased onto the current `main` on the server and
+  moved in with a single compare-and-swap. A conflict leaves `main` untouched and reports the
+  conflicting paths; a request interrupted by a server restart resumes and lands exactly once.
 - **`scn`**, the CLI: `init` a repository, `clone --sparse`, `status`, `log`, `diff`, `blame`,
   `add`, `commit` (an anonymous head), `land` (submits the head as a change request; the
   server rebases it onto `main` and lands it, or names the conflicting paths), `update` (the
@@ -245,7 +249,8 @@ Read these numbers with their limits:
 ## What's next
 
 In order: listing change requests, "when did this land", server-side merge and revert, and
-conflict markers on `update`, with a benchmark of many writers landing at once; access control (GitHub device-flow login, service principals, repository
+conflict markers on `update`, with a benchmark of many writers landing at once; then access
+control (GitHub device-flow login, service principals, repository
 and directory ACLs) together with fuzzing and a hermetic simulation; released binaries, a
 server image and a production compose profile; the regional cache and per-node daemon tiers
 with manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan,
