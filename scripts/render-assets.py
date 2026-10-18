@@ -45,23 +45,24 @@ GREEN = "#4ade80"   # done
 FONT = "Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif"
 MONO = "'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace"
 
-# Roadmap status. Source of truth is the README roadmap and the merged "Phase N.M:" PRs.
+# Roadmap status. Source of truth is the phase table in docs/ROADMAP.md and the merged
+# "Phase N.M:" PRs. The figure is for docs/ROADMAP.md; the README names no phases.
 ROADMAP = [
     ("0", "Workspace, CI, local stack", "done"),
     ("1", "Data model, Postgres + S3 stores", "done"),
     ("2", "Derived data, diff, merge, rebase", "done"),
-    ("3", "scion-server + scn CLI (MVP)", "done"),
-    ("6", "git import, usable MVP", "done"),
+    ("3", "scion-server + scn CLI", "done"),
+    ("6", "git import, init / update / checkout", "done"),
     ("5", "Change requests, land worker", "planned"),
     ("7", "IAM, fuzzing, simulation", "planned"),
     ("9", "Release and onboarding", "planned"),
     ("4", "Cache + daemon tiers", "planned"),
     ("8", "Virtual checkouts (FUSE / NFS)", "planned"),
 ]
-# Phases run in the order listed: git import comes right after the MVP so real repositories
-# can be tested and benchmarked.
-STATUS_DONE = "Usable MVP done: git import, scn init, clone --sparse, status, log, blame, commit, land, update"
-STATUS_NEXT = "next: Phase 5 change requests and the land worker, then 7, 9, 4, 8"
+# Phases run in the order listed: git import comes right after the server and CLI so real
+# repositories can be tested and benchmarked.
+STATUS_DONE = "Done: git import, scn init, clone --sparse, status, log, blame, commit, land, update, checkout"
+STATUS_NEXT = "next: change requests and the land worker, then IAM, release, cache tiers, virtual checkouts"
 
 
 def t(x, y, s, size=20, fill=TEXT, weight=400, anchor="start", mono=False, extra=""):
@@ -215,7 +216,7 @@ def architecture_svg():
     b.append(t(lx + 252, ly + 6, "object plane", 16, MUTED))
     b.append(box(lx + 392, ly - 12, 40, 24, stroke=TEAL, r=6, dashed=True, sw=2))
     b.append(t(lx + 444, ly + 6, "planned tier", 16, MUTED))
-    b.append(t(lx, ly + 46, "In the MVP (Phase 3) both planes go to scion-server directly; no tier holds a "
+    b.append(t(lx, ly + 46, "Today both planes go to scion-server directly; no tier holds a "
                             "materialized copy of the repository.", 16, MUTED))
     return svg(h, "Scion architecture: clients, daemon, cache, server, Postgres and object store", b)
 
@@ -569,7 +570,7 @@ FIGURES = {
     "commit-cost.svg": commit_cost_svg,
     "roadmap.svg": roadmap_svg,
     "bench-real.svg": bench_real_svg,
-    "badge-status.svg": lambda: badge_svg("status", "MVP \u00b7 Phase 5 next", "#c27c0e"),
+    "badge-status.svg": lambda: badge_svg("status", "alpha", "#c27c0e"),
     "badge-license.svg": lambda: badge_svg("license", "Apache-2.0", "#2b7bb9"),
 }
 

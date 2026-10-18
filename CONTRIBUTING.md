@@ -1,8 +1,7 @@
 # Contributing
 
-Thanks for your interest. The MVP (Phase 3) is done and git import (Phase 6) is in progress.
-The roadmap table in `README.md` and the single-PR steps in `docs/ROADMAP.md` are the source
-of truth for what is being worked on. `CLAUDE.md` holds the working rules every change
+Thanks for your interest. The phase table and the single-PR steps in `docs/ROADMAP.md` are
+the source of truth for what is being worked on; the README describes what works today. `CLAUDE.md` holds the working rules every change
 follows, for people and agents alike; read it, together with `docs/ARCHITECTURE.md` and
 `docs/DATA_MODEL.md`, before opening a PR.
 
