@@ -43,13 +43,13 @@ changing any id or any client.
 Not for real work: there is no authentication (Phase 7) and no cache tier yet (Phase 4).
 The MVP (Phase 3) is done: `scion-server` serves the object and control gRPC services over
 Postgres + S3. `scn` can `init` a repository, `clone --sparse`, `status`, `log`, `diff`,
-`blame`, `add`, `commit` (an anonymous head), `land` (a fast-forward of `main`), `update`
-(the server rebases the head onto `main`, so `land` is a fast-forward again) and `checkout`
+`blame`, `add`, `commit` (an anonymous head), `land` (a change request the server rebases
+onto `main` and lands), `update` (the server rebases the head onto `main`) and `checkout`
 any changeset. The README [quickstart](../README.md#quickstart) runs that loop on the compose
 stack with only Docker and the Rust toolchain installed. Change requests are in progress
-(Phase 5): the server already accepts them (`SubmitChangeRequest`, `GetChangeRequest`) and a
-serial land worker per repository rebases and lands them, but `scn land` does not submit them
-yet (5.5), so landing concurrent heads from the CLI still takes a manual `update`.
+(Phase 5): `scn land` submits one (`SubmitChangeRequest`) and waits while the serial land
+worker of the repository rebases and lands it, so concurrent heads land from the CLI with no
+manual `update`; listing requests, merge and revert are still to come.
 Git import (Phase 6) works and a benchmark script runs it against git on a real
 repository; the README's Benchmarks section shows the results. A cold `blame` or path `log` (the first call
 for a revision) takes several times git's time; the 6.12 criteria bound how many.

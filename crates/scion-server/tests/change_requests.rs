@@ -42,6 +42,7 @@ fn submit(repo: &str, head: ChangesetId) -> SubmitChangeRequestRequest {
     SubmitChangeRequestRequest {
         repo: repo.into(),
         head: head.as_bytes().to_vec(),
+        wait: false,
     }
 }
 
@@ -49,6 +50,7 @@ fn get(repo: &str, id: u64) -> GetChangeRequestRequest {
     GetChangeRequestRequest {
         repo: repo.into(),
         id,
+        wait: false,
     }
 }
 
@@ -129,6 +131,7 @@ async fn unknown_head_repository_or_request_is_not_found() {
             c.submit_change_request(SubmitChangeRequestRequest {
                 repo: REPO.into(),
                 head: vec![1, 2, 3],
+                wait: false,
             })
             .await
         ),

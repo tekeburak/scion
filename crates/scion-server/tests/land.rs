@@ -2,7 +2,6 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
-use std::time::Duration;
 
 use bytes::Bytes;
 use futures_util::future::join_all;
@@ -67,26 +66,25 @@ async fn start(store: Arc<MemoryStore>) -> ControlServiceClient<Channel> {
     ControlServiceClient::new(channel)
 }
 
-/// Read request `id` until the worker has finished it.
+/// Request `id` once the worker has finished it.
 async fn finished(c: &mut ControlServiceClient<Channel>, id: u64) -> ChangeRequest {
-    for _ in 0..1000 {
-        let cr = c
-            .get_change_request(GetChangeRequestRequest {
-                repo: REPO.into(),
-                id,
-            })
-            .await
-            .unwrap()
-            .into_inner();
-        if !matches!(
+    let cr = c
+        .get_change_request(GetChangeRequestRequest {
+            repo: REPO.into(),
+            id,
+            wait: true,
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(
+        !matches!(
             cr.status(),
             ChangeRequestStatus::Pending | ChangeRequestStatus::Landing
-        ) {
-            return cr;
-        }
-        tokio::time::sleep(Duration::from_millis(10)).await;
-    }
-    panic!("request {id} did not finish");
+        ),
+        "request {id} did not finish"
+    );
+    cr
 }
 
 /// `main`'s first-parent history, newest first.
@@ -129,6 +127,7 @@ async fn concurrent_requests_all_land_on_a_linear_main() {
             c.submit_change_request(SubmitChangeRequestRequest {
                 repo: REPO.into(),
                 head: head.as_bytes().to_vec(),
+                wait: false,
             })
             .await
             .unwrap()
@@ -178,6 +177,7 @@ async fn requests_waiting_at_start_land_and_a_noop_is_rejected() {
         .submit_change_request(SubmitChangeRequestRequest {
             repo: REPO.into(),
             head: head.as_bytes().to_vec(),
+            wait: false,
         })
         .await
         .unwrap()
@@ -191,6 +191,7 @@ async fn submit(c: &mut ControlServiceClient<Channel>, head: ChangesetId) -> Cha
     c.submit_change_request(SubmitChangeRequestRequest {
         repo: REPO.into(),
         head: head.as_bytes().to_vec(),
+        wait: false,
     })
     .await
     .unwrap()
@@ -257,4 +258,22 @@ async fn a_request_left_landing_lands_once_after_a_restart() {
         let log: Vec<ChangesetId> = main_log(&mut c).await.iter().map(Changeset::id).collect();
         assert_eq!(log, [rebased, other, root], "landed once ({moved_main})");
     }
+}
+
+#[tokio::test]
+async fn a_waiting_submit_replies_with_the_outcome() {
+    let (store, root) = repository().await;
+    let head = commit(&store, root, "a.txt").await;
+    let mut c = start(store.clone()).await;
+    let cr = c
+        .submit_change_request(SubmitChangeRequestRequest {
+            repo: REPO.into(),
+            head: head.as_bytes().to_vec(),
+            wait: true,
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(cr.status(), ChangeRequestStatus::Landed);
+    assert_eq!(cr.landed.as_deref(), Some(head.as_bytes().as_slice()));
 }

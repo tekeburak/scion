@@ -6,9 +6,9 @@ use std::time::Duration;
 use scion_proto::v1::control_service_client::ControlServiceClient;
 use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_proto::v1::{
-    BlameRequest, CreateChangesetRequest, DiffRequest, GetBlobRequest, GetRefRequest,
-    GetTreeRequest, LogRequest, LogResponse, MoveRefRequest, PathLogRequest, PutBlobRequest,
-    RebaseRequest,
+    BlameRequest, ChangeRequestStatus, CreateChangesetRequest, DiffRequest, GetBlobRequest,
+    GetChangeRequestRequest, GetRefRequest, GetTreeRequest, LogRequest, LogResponse,
+    MoveRefRequest, PathLogRequest, PutBlobRequest, RebaseRequest, SubmitChangeRequestRequest,
 };
 use scion_types::{
     BlobId, Changeset, ChangesetId, Decode, Encode, FileType, RepoPath, Tree, TreeId,
@@ -75,6 +75,65 @@ pub enum Rebased {
 pub struct BlameRun {
     pub changeset: ChangesetId,
     pub lines: u64,
+}
+
+/// Where a change request is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RequestStatus {
+    /// Waiting for the land worker.
+    Pending,
+    /// Being rebased onto `main` and landed.
+    Landing,
+    /// On `main` as this changeset.
+    Landed(ChangesetId),
+    /// Conflicts with `main` at these paths; `main` is untouched.
+    NeedsRebase(Vec<RepoPath>),
+    /// Rebased onto `main`, it would land nothing.
+    Rejected,
+}
+
+impl RequestStatus {
+    /// Whether the land worker is done with the request.
+    pub fn is_finished(&self) -> bool {
+        !matches!(self, Self::Pending | Self::Landing)
+    }
+}
+
+/// A change request as the server reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteChangeRequest {
+    pub id: u64,
+    pub head: ChangesetId,
+    /// `main`'s changeset when the request was submitted.
+    pub base: ChangesetId,
+    pub status: RequestStatus,
+}
+
+fn change_request(cr: scion_proto::v1::ChangeRequest) -> Result<RemoteChangeRequest, RemoteError> {
+    let status = match ChangeRequestStatus::try_from(cr.status) {
+        Ok(ChangeRequestStatus::Pending) => RequestStatus::Pending,
+        Ok(ChangeRequestStatus::Landing) => RequestStatus::Landing,
+        Ok(ChangeRequestStatus::Landed) => RequestStatus::Landed(changeset_id(
+            cr.landed.as_deref().unwrap_or_default(),
+            "landed changeset",
+        )?),
+        Ok(ChangeRequestStatus::NeedsRebase) => RequestStatus::NeedsRebase(
+            cr.conflicts
+                .into_iter()
+                .map(|p| RepoPath::new(p).map_err(|_| RemoteError::Malformed("path")))
+                .collect::<Result<_, _>>()?,
+        ),
+        Ok(ChangeRequestStatus::Rejected) => RequestStatus::Rejected,
+        Ok(ChangeRequestStatus::Unspecified) | Err(_) => {
+            return Err(RemoteError::Malformed("change request status"));
+        }
+    };
+    Ok(RemoteChangeRequest {
+        id: cr.id,
+        head: changeset_id(&cr.head, "change request head")?,
+        base: changeset_id(&cr.base, "change request base")?,
+        status,
+    })
 }
 
 fn changeset_id(bytes: &[u8], what: &'static str) -> Result<ChangesetId, RemoteError> {
@@ -363,5 +422,46 @@ impl Remote {
             .await?
             .into_inner()
             .version)
+    }
+
+    /// Ask the server to land `head` on `main`. With `wait`, the reply comes
+    /// once the request is finished, or still open after the server's
+    /// longest wait.
+    pub async fn submit_change_request(
+        &mut self,
+        repo: &str,
+        head: ChangesetId,
+        wait: bool,
+    ) -> Result<RemoteChangeRequest, RemoteError> {
+        let resp = self
+            .control
+            .submit_change_request(SubmitChangeRequestRequest {
+                repo: repo.to_owned(),
+                head: head.as_bytes().to_vec(),
+                wait,
+            })
+            .await?
+            .into_inner();
+        change_request(resp)
+    }
+
+    /// Read change request `id`; `wait` as in
+    /// [`submit_change_request`](Self::submit_change_request).
+    pub async fn get_change_request(
+        &mut self,
+        repo: &str,
+        id: u64,
+        wait: bool,
+    ) -> Result<RemoteChangeRequest, RemoteError> {
+        let resp = self
+            .control
+            .get_change_request(GetChangeRequestRequest {
+                repo: repo.to_owned(),
+                id,
+                wait,
+            })
+            .await?
+            .into_inner();
+        change_request(resp)
     }
 }

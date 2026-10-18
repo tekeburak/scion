@@ -4,12 +4,16 @@
 //! submission order, rebases each head onto `main` through [`rebase`] and
 //! moves `main` with one compare-and-swap. Submitting returns at once, so
 //! landers never queue behind each other's round trips; the worker never
-//! waits on a client.
+//! waits on a client. A client that asks to wait is told when its request
+//! is finished, without polling.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
-use scion_store::{LandOutcome, MetadataStore, ObjectStore, StoreError};
+use scion_store::{
+    ChangeRequest, ChangeRequestStatus, LandOutcome, MetadataStore, ObjectStore, StoreError,
+};
 use scion_types::{Changeset, ChangesetId};
 use tokio::sync::Notify;
 use tonic::Status;
@@ -17,11 +21,24 @@ use tonic::Status;
 use crate::control::{Rebased, rebase};
 use crate::store_status;
 
+/// Longest a waiting `SubmitChangeRequest` or `GetChangeRequest` holds its
+/// reply; below the client's 30-second deadline, so a long queue answers
+/// with the request still open and the client asks again.
+const MAX_WAIT: Duration = Duration::from_secs(20);
+
 /// The land workers of every repository this server has seen requests for.
 pub(crate) struct LandWorkers {
     meta: Arc<dyn MetadataStore>,
     objects: Arc<dyn ObjectStore>,
-    wakers: Mutex<HashMap<String, Arc<Notify>>>,
+    workers: Mutex<HashMap<String, Arc<Worker>>>,
+}
+
+/// One repository's worker: woken by submits, announcing every finished
+/// request to the clients waiting on one.
+#[derive(Default)]
+struct Worker {
+    wake: Notify,
+    finished: Notify,
 }
 
 impl LandWorkers {
@@ -29,27 +46,71 @@ impl LandWorkers {
         Self {
             meta,
             objects,
-            wakers: Mutex::new(HashMap::new()),
+            workers: Mutex::new(HashMap::new()),
         }
+    }
+
+    /// `repo`'s worker, started if it is not running.
+    fn worker(&self, repo: &str) -> Arc<Worker> {
+        let mut workers = self.workers.lock().expect("poisoned");
+        workers
+            .entry(repo.to_owned())
+            .or_insert_with(|| {
+                let worker = Arc::new(Worker::default());
+                tokio::spawn(work(
+                    self.meta.clone(),
+                    self.objects.clone(),
+                    repo.to_owned(),
+                    worker.clone(),
+                ));
+                worker
+            })
+            .clone()
     }
 
     /// Wake `repo`'s worker, starting it first if it is not running. A wake
     /// while the worker is busy is kept, so the request it announces is
     /// claimed before the worker sleeps again.
     pub(crate) fn wake(&self, repo: &str) {
-        let mut wakers = self.wakers.lock().expect("poisoned");
-        let notify = wakers.entry(repo.to_owned()).or_insert_with(|| {
-            let notify = Arc::new(Notify::new());
-            tokio::spawn(work(
-                self.meta.clone(),
-                self.objects.clone(),
-                repo.to_owned(),
-                notify.clone(),
-            ));
-            notify
-        });
-        notify.notify_one();
+        self.worker(repo).wake.notify_one();
     }
+
+    /// Request `id` of `repo` once it is finished, or as it is after
+    /// [`MAX_WAIT`]; `None` if there is no such request.
+    pub(crate) async fn wait(
+        &self,
+        repo: &str,
+        id: u64,
+    ) -> Result<Option<ChangeRequest>, StoreError> {
+        let deadline = tokio::time::Instant::now() + MAX_WAIT;
+        let cr = self.meta.get_change_request(repo, id).await?;
+        if !cr.as_ref().is_some_and(is_open) {
+            return Ok(cr);
+        }
+        // Only an open request, so of a repository that exists, reaches its
+        // worker.
+        let worker = self.worker(repo);
+        loop {
+            // Listening before reading, so a finish between the read and
+            // the sleep still wakes it.
+            let finished = worker.finished.notified();
+            tokio::pin!(finished);
+            finished.as_mut().enable();
+            let cr = self.meta.get_change_request(repo, id).await?;
+            if !cr.as_ref().is_some_and(is_open)
+                || tokio::time::timeout_at(deadline, finished).await.is_err()
+            {
+                return Ok(cr);
+            }
+        }
+    }
+}
+
+fn is_open(cr: &ChangeRequest) -> bool {
+    matches!(
+        cr.status,
+        ChangeRequestStatus::Pending | ChangeRequestStatus::Landing
+    )
 }
 
 /// `repo`'s worker: land every pending request, then sleep until woken.
@@ -59,12 +120,12 @@ async fn work(
     meta: Arc<dyn MetadataStore>,
     objects: Arc<dyn ObjectStore>,
     repo: String,
-    notify: Arc<Notify>,
+    worker: Arc<Worker>,
 ) {
     let mut resume = true;
     loop {
-        notify.notified().await;
-        resume = match land_pending(&*meta, &*objects, &repo, resume).await {
+        worker.wake.notified().await;
+        resume = match land_pending(&*meta, &*objects, &repo, resume, &worker.finished).await {
             Ok(()) => false,
             Err(e) => {
                 eprintln!("scion-server: land worker for {repo:?}: {e}");
@@ -79,6 +140,7 @@ async fn land_pending(
     objects: &dyn ObjectStore,
     repo: &str,
     resume: bool,
+    finished: &Notify,
 ) -> Result<(), Status> {
     if resume {
         while let Some(cr) = meta
@@ -90,6 +152,7 @@ async fn land_pending(
             meta.finish_change_request(repo, cr.id, outcome)
                 .await
                 .map_err(store_status)?;
+            finished.notify_waiters();
         }
     }
     while let Some(cr) = meta
@@ -101,6 +164,7 @@ async fn land_pending(
         meta.finish_change_request(repo, cr.id, outcome)
             .await
             .map_err(store_status)?;
+        finished.notify_waiters();
     }
     Ok(())
 }

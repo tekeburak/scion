@@ -232,18 +232,24 @@ async fn add_commit_land_end_to_end() {
     assert!(scn(&a, &["log", "-r", "main", "-n", "1"]).contains(&c1.to_hex()));
     assert!(scn(&a, &["blame", "README"]).ends_with(&format!("{} four\n", &c2.to_hex()[..12])));
 
-    assert!(scn(&a, &["land"]).starts_with(&format!("landed {c2} on main (version ")));
-    assert_eq!(scn(&a, &["land"]), format!("main is already at {c2}\n"));
+    assert_eq!(scn(&a, &["land"]), format!("landed {c2} on main\n"));
+    assert_eq!(
+        scn(&a, &["land"]),
+        format!("nothing to land: main already has the changes of {c2}\n")
+    );
     assert!(scn(&b, &["log", "-r", "main", "-n", "1"]).contains(&c2.to_hex()));
 
-    // b still sits on c1: its commit does not descend from main any more.
+    // b still sits on c1 and rewrites the line a extended: a conflict.
     std::fs::write(b.join("README"), b"diverged\n").unwrap();
     let (ok, out, err) = scn_try(&b, &["commit", "-m", "diverge"]);
     assert!(ok, "{err}");
     let c3 = id_after(&out, "committed ");
     let (ok, _, err) = scn_try(&b, &["land"]);
     assert!(
-        !ok && err.contains("cannot land") && err.contains("fast-forward"),
+        !ok && err.contains("cannot land")
+            && err.contains("conflicts with main")
+            && err.contains("\n  README\n")
+            && err.contains("scn update"),
         "{err}"
     );
     assert!(!scn(&b, &["log", "-r", "main", "-n", "1"]).contains(&c3.to_hex()));
@@ -330,35 +336,46 @@ async fn two_clones_land_alternately_with_update() {
     let (a, b) = (dir.path().join("a"), dir.path().join("b"));
 
     for round in 0..3 {
-        // a lands first; b's commit no longer fast-forwards until updated.
-        std::fs::write(a.join(format!("a{round}.txt")), format!("{round}\n")).unwrap();
-        scn(&a, &["add", "."]);
-        let (ok, _, err) = scn_try(&a, &["commit", "-m", &format!("a {round}")]);
-        assert!(ok, "{err}");
-        std::fs::write(b.join(format!("b{round}.txt")), format!("{round}\n")).unwrap();
-        scn(&b, &["add", "."]);
-        let (ok, _, err) = scn_try(&b, &["commit", "-m", &format!("b {round}")]);
-        assert!(ok, "{err}");
-
-        // a may have to catch up with b's previous round first.
-        scn(&a, &["update"]);
-        scn(&a, &["land"]);
-        let (ok, _, err) = scn_try(&b, &["land"]);
-        assert!(!ok && err.contains("fast-forward"), "{err}");
-        let out = scn(&b, &["update"]);
-        assert!(out.contains("(1 changesets rebased)"), "{out}");
+        // Both commit on whatever they last saw and land at once, with no
+        // update in between; the server rebases whichever comes second.
+        for (wc, who) in [(&a, "a"), (&b, "b")] {
+            std::fs::write(wc.join(format!("{who}{round}.txt")), format!("{round}\n")).unwrap();
+            scn(wc, &["add", "."]);
+            let (ok, _, err) = scn_try(wc, &["commit", "-m", &format!("{who} {round}")]);
+            assert!(ok, "{err}");
+        }
+        let (la, lb) = std::thread::scope(|t| {
+            let la = t.spawn(|| scn(&a, &["land"]));
+            let lb = t.spawn(|| scn(&b, &["land"]));
+            (la.join().unwrap(), lb.join().unwrap())
+        });
         assert!(
-            b.join(format!("a{round}.txt")).is_file(),
-            "a's file arrived"
+            la.starts_with("landed ") && lb.starts_with("landed "),
+            "{la}{lb}"
         );
-        assert_eq!(scn(&b, &["status"]), "");
-        assert!(scn(&b, &["land"]).starts_with("landed "));
+        // A rebased one now sits on its landed copy, which has the other's
+        // file whichever landed first.
+        for (wc, out) in [(&a, &la), (&b, &lb)] {
+            if let Some((_, landed)) = out.trim_end().split_once(" as ") {
+                let head = id_after(&scn(wc, &["log", "-n", "1"]), "changeset ");
+                assert_eq!(head.to_hex(), landed);
+            }
+            assert_eq!(scn(wc, &["status"]), "");
+        }
+        assert!(la.contains(" as ") || lb.contains(" as "), "{la}{lb}");
         assert!(main_is_linear(&b));
     }
-    // a catches up without anything to replay.
-    let out = scn(&a, &["update"]);
-    assert!(out.contains("(0 changesets rebased)"), "{out}");
-    assert!(a.join("b2.txt").is_file());
+    // A fresh clone of main has every round of both.
+    scn(dir.path(), &["clone", &server, REPO, "c"]);
+    for round in 0..3 {
+        for who in ["a", "b"] {
+            assert!(dir.path().join(format!("c/{who}{round}.txt")).is_file());
+        }
+    }
+    // Whichever stayed behind catches up without anything to replay.
+    scn(&a, &["update"]);
+    scn(&b, &["update"]);
+    assert!(a.join("b2.txt").is_file() && b.join("a2.txt").is_file());
     assert_eq!(scn(&a, &["update"]).trim_end(), {
         let head = id_after(&scn(&a, &["log", "-n", "1"]), "changeset ");
         format!("{head} already contains main")
@@ -402,4 +419,35 @@ async fn two_clones_land_alternately_with_update() {
     assert_eq!(std::fs::read(b.join("b0.txt")).unwrap(), b"0\n");
     assert_eq!(std::fs::read(b.join("README")).unwrap(), b"one\nB\nthree\n");
     assert_eq!(scn(&b, &["status"]), "");
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn land_without_waiting_and_read_the_request_back() {
+    let (server, ..) = serve().await;
+    let dir = tempfile::tempdir().unwrap();
+    scn(dir.path(), &["clone", &server, REPO, "a"]);
+    let a = dir.path().join("a");
+    std::fs::write(a.join("late.txt"), b"late\n").unwrap();
+    scn(&a, &["add", "late.txt"]);
+    let (ok, out, err) = scn_try(&a, &["commit", "-m", "late"]);
+    assert!(ok, "{err}");
+    let late = id_after(&out, "committed ");
+    let out = scn(&a, &["land", "--no-wait"]);
+    let id = out
+        .strip_prefix("submitted request ")
+        .and_then(|r| r.split_once(' '))
+        .expect(&out)
+        .0
+        .to_owned();
+    assert!(out.ends_with(&format!("scn land --status {id}\n")), "{out}");
+    let status = loop {
+        let st = scn(&a, &["land", "--status", &id]);
+        if !st.contains(": pending,") && !st.contains(": landing,") {
+            break st;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    };
+    assert_eq!(status, format!("request {id}: landed {late} on main\n"));
+    let (ok, _, err) = scn_try(&a, &["land", "--status", "999999"]);
+    assert!(!ok && err.contains("999999"), "{err}");
 }

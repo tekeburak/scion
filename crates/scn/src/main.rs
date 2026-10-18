@@ -9,10 +9,11 @@
 //!
 //! Writing: `add` marks untracked files for the next commit (there are no
 //! ignore files); `commit` creates a changeset on the server and makes it the
-//! working copy's anonymous head; `land` fast-forwards `main` to that head.
-//! `update` has the server rebase that head onto `main` (or another
-//! revision) so it lands as a fast-forward again; `checkout` moves the
-//! working copy to any changeset. There is no branch command: work is shared
+//! working copy's anonymous head; `land` submits that head as a change
+//! request, which the server rebases onto `main` and lands, and moves the
+//! working copy to the landed changeset. `update` has the server rebase the
+//! head onto `main` (or another revision) ahead of landing, which a conflict
+//! needs; `checkout` moves the working copy to any changeset. There is no branch command: work is shared
 //! by changeset id.
 //!
 //! A revision is `@` (the working copy's current head), a 64-hex changeset
@@ -28,8 +29,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, Subcommand};
 use scion_client::{
-    Config, FileStatus, MAIN_REF, Remote, RemoteError, SparseProfile, State, Workspace,
-    read_working_file, status,
+    Config, FileStatus, MAIN_REF, Remote, RemoteChangeRequest, RemoteError, RequestStatus,
+    SparseProfile, State, SwitchError, Workspace, read_working_file, status,
 };
 use scion_types::{Changeset, ChangesetId, FileChange, FileType, Identity, RepoPath, Timestamp};
 
@@ -108,8 +109,16 @@ enum Command {
         #[arg(long, env = "SCN_AUTHOR", value_name = "NAME <EMAIL>")]
         author: String,
     },
-    /// Fast-forward `main` to the current head.
-    Land,
+    /// Land the current head on `main`: the server rebases it onto `main`
+    /// and lands it, or names the paths that conflict.
+    Land {
+        /// Submit and print the request id without waiting for the outcome.
+        #[arg(long, conflicts_with = "status")]
+        no_wait: bool,
+        /// Show a submitted request instead of landing.
+        #[arg(long, value_name = "ID")]
+        status: Option<u64>,
+    },
     /// Rebase the current head onto a revision on the server and move the
     /// working copy there; refused with local edits, and a conflict changes
     /// nothing.
@@ -476,25 +485,107 @@ async fn commit(out: &mut impl Write, message: &str, author: &str) -> Result<()>
     Ok(())
 }
 
-async fn land(out: &mut impl Write) -> Result<()> {
+/// `paths`, one per line, indented.
+fn path_list(paths: &[RepoPath]) -> String {
+    paths.iter().fold(String::new(), |mut out, p| {
+        out.push_str("\n  ");
+        out.push_str(p.as_str());
+        out
+    })
+}
+
+/// One line (plus conflicting paths) saying where `cr` is.
+fn describe(cr: &RemoteChangeRequest) -> String {
+    let (id, head) = (cr.id, cr.head);
+    match &cr.status {
+        RequestStatus::Pending => format!("request {id}: pending, {head}"),
+        RequestStatus::Landing => format!("request {id}: landing, {head}"),
+        RequestStatus::Landed(landed) if *landed == head => {
+            format!("request {id}: landed {head} on {MAIN_REF}")
+        }
+        RequestStatus::Landed(landed) => {
+            format!("request {id}: landed {head} on {MAIN_REF} as {landed}")
+        }
+        RequestStatus::NeedsRebase(paths) => format!(
+            "request {id}: needs rebase, {head} conflicts with {MAIN_REF} in:{}",
+            path_list(paths)
+        ),
+        RequestStatus::Rejected => {
+            format!("request {id}: rejected, {head} would change nothing on {MAIN_REF}")
+        }
+    }
+}
+
+async fn land(out: &mut impl Write, no_wait: bool) -> Result<()> {
     let mut s = Session::open().await?;
     let repo = s.config.repo.clone();
     let head = s.state.current_head;
-    let main = s.remote.get_ref(&repo, MAIN_REF).await?;
-    if main.target == head {
-        writeln!(out, "{MAIN_REF} is already at {head}")?;
+    let mut cr = s
+        .remote
+        .submit_change_request(&repo, head, !no_wait)
+        .await?;
+    if no_wait {
+        writeln!(
+            out,
+            "submitted request {} for {head}; follow it with: scn land --status {}",
+            cr.id, cr.id
+        )?;
         return Ok(());
     }
-    let version = match s.remote.move_ref(&repo, MAIN_REF, head, main.version).await {
-        Ok(v) => v,
-        Err(RemoteError::Rpc(st)) if st.code() == tonic::Code::FailedPrecondition => {
-            return Err(format!("cannot land: {}", st.message()).into());
+    // A long queue answers before the request is finished; ask again.
+    while !cr.status.is_finished() {
+        cr = s.remote.get_change_request(&repo, cr.id, true).await?;
+    }
+    let landed = match cr.status {
+        RequestStatus::Landed(landed) => landed,
+        RequestStatus::NeedsRebase(paths) => {
+            return Err(format!(
+                "cannot land: {head} conflicts with {MAIN_REF}, which is unchanged (request {}):{}\n\
+                 bring it onto {MAIN_REF} with `scn update`, then land again",
+                cr.id,
+                path_list(&paths)
+            )
+            .into());
         }
-        Err(e) => return Err(e.into()),
+        RequestStatus::Rejected => {
+            writeln!(
+                out,
+                "nothing to land: {MAIN_REF} already has the changes of {head}"
+            )?;
+            return Ok(());
+        }
+        RequestStatus::Pending | RequestStatus::Landing => unreachable!("finished above"),
     };
-    s.state.base = head;
+    if landed == head {
+        writeln!(out, "landed {head} on {MAIN_REF}")?;
+    } else {
+        writeln!(out, "landed {head} on {MAIN_REF} as {landed}")?;
+        // The working copy follows the rebased copy, so the next commit
+        // builds on what landed.
+        match scion_client::switch(&s.ws, &s.remote, landed, false).await {
+            Ok(()) => {}
+            Err(SwitchError::Dirty(_)) => {
+                writeln!(
+                    out,
+                    "the working copy stays at {head}: it has local changes; \
+                     commit them and run `scn update`"
+                )?;
+                return Ok(());
+            }
+            Err(e) => return Err(e.into()),
+        }
+        s.state = s.ws.read_state()?;
+    }
+    s.state.base = landed;
     s.ws.write_state(&s.state)?;
-    writeln!(out, "landed {head} on {MAIN_REF} (version {version})")?;
+    Ok(())
+}
+
+async fn land_status(out: &mut impl Write, id: u64) -> Result<()> {
+    let mut s = Session::open().await?;
+    let repo = s.config.repo.clone();
+    let cr = s.remote.get_change_request(&repo, id, false).await?;
+    writeln!(out, "{}", describe(&cr))?;
     Ok(())
 }
 
@@ -542,7 +633,10 @@ async fn run(cli: Cli) -> Result<()> {
         Command::Blame { path, rev } => blame(&mut out, &path, &rev).await?,
         Command::Add { paths } => add(&mut out, &paths)?,
         Command::Commit { message, author } => commit(&mut out, &message, &author).await?,
-        Command::Land => land(&mut out).await?,
+        Command::Land {
+            status: Some(id), ..
+        } => land_status(&mut out, id).await?,
+        Command::Land { no_wait, .. } => land(&mut out, no_wait).await?,
         Command::Update { rev } => update(&mut out, &rev).await?,
         Command::Checkout { rev, force } => checkout(&mut out, &rev, force).await?,
     }

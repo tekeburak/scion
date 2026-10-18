@@ -230,12 +230,18 @@ message BlameRun {
 message SubmitChangeRequestRequest {
   string repo = 1;
   bytes head = 2;
+  // Reply once the request is finished (LANDED, NEEDS_REBASE or REJECTED),
+  // or with its current status after at most 20 seconds; otherwise reply at
+  // once with it PENDING.
+  bool wait = 3;
 }
 
 // An unknown repository or request is NOT_FOUND.
 message GetChangeRequestRequest {
   string repo = 1;
   uint64 id = 2;
+  // As in SubmitChangeRequestRequest.
+  bool wait = 3;
 }
 
 enum ChangeRequestStatus {

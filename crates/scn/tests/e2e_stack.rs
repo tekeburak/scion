@@ -180,23 +180,35 @@ async fn init_clone_commit_land_on_postgres_and_s3() {
     );
     assert!(b.join("srv/web/index.html").is_file());
 
-    // Two clones land alternately; `update` replays the loser on the server.
-    // `a` is sparse, so `b`'s files at the root never reach it.
+    two_clones_land_at_once(&a, &b);
+}
+
+/// Two clones commit non-overlapping edits and land at the same time,
+/// with no `update` in between: the server rebases whichever comes second.
+/// `a` is sparse, so `b`'s files at the root never reach it.
+fn two_clones_land_at_once(a: &Path, b: &Path) {
     for round in 0..2 {
         std::fs::write(a.join(format!("srv/api/a{round}.rs")), b"// a\n").unwrap();
-        scn(&a, &["add", "srv/api"]);
-        scn(&a, &["commit", "-m", &format!("a {round}")]);
+        scn(a, &["add", "srv/api"]);
+        scn(a, &["commit", "-m", &format!("a {round}")]);
         std::fs::write(b.join(format!("b{round}.txt")), b"b\n").unwrap();
-        scn(&b, &["add", "."]);
-        scn(&b, &["commit", "-m", &format!("b {round}")]);
+        scn(b, &["add", "."]);
+        scn(b, &["commit", "-m", &format!("b {round}")]);
 
-        scn(&a, &["update"]);
-        scn(&a, &["land"]);
-        scn(&b, &["update"]);
-        assert!(b.join(format!("srv/api/a{round}.rs")).is_file());
-        assert!(scn(&b, &["land"]).starts_with("landed "));
+        let (la, lb) = std::thread::scope(|t| {
+            let la = t.spawn(|| scn(a, &["land"]));
+            let lb = scn(b, &["land"]);
+            (la.join().unwrap(), lb)
+        });
+        assert!(
+            la.starts_with("landed ") && lb.starts_with("landed "),
+            "{la}{lb}"
+        );
         assert!(!a.join(format!("b{round}.txt")).exists());
     }
-    let log = scn(&b, &["log", "-r", "main", "-n", "1000"]);
+    let log = scn(b, &["log", "-r", "main", "-n", "1000"]);
     assert!(!log.contains("Parents:"), "main stays linear: {log}");
+    for msg in ["a 0", "b 0", "a 1", "b 1"] {
+        assert!(log.contains(&format!("    {msg}\n")), "{msg} landed: {log}");
+    }
 }

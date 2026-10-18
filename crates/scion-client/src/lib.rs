@@ -33,7 +33,8 @@ pub use checkout::{CheckoutError, MAIN_REF, checkout, clone};
 pub use commit::{CommitError, commit};
 pub use index::{Index, IndexEntry};
 pub use remote::{
-    BlameRun, DiffEntry, FileEntry, RPC_DEADLINE, Rebased, Remote, RemoteError, RemoteRef,
+    BlameRun, DiffEntry, FileEntry, RPC_DEADLINE, Rebased, Remote, RemoteChangeRequest,
+    RemoteError, RemoteRef, RequestStatus,
 };
 pub use sparse::{SparseError, SparseProfile};
 pub use status::{FileStatus, StatusError, read_working_file, status};

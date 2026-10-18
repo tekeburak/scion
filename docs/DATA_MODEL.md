@@ -209,7 +209,9 @@ base          = "d41c…"          # last known merge-base with main (a cache)
   `base` to `rev`. Both touch only the files that differ, and both refuse local edits.
 - Because the object store is append-only and there is no GC, an anonymous head cannot be lost
   by forgetting it; it can always be re-attached by id.
-- Sharing work means sharing an id, or (Phase 5, planned) submitting a change request.
+- Sharing work means sharing an id, or landing it: `scn land` submits a change request, the
+  server rebases the head onto `main` and moves `main`, and the working copy follows the
+  landed changeset.
 
 ## Generation numbers
 

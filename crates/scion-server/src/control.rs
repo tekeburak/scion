@@ -629,12 +629,20 @@ impl ControlService for ControlServer {
             .await
             .map_err(store_status)?
             .ok_or_else(|| Status::not_found(format!("ref \"main\" in {:?}", req.repo)))?;
-        let cr = self
+        let mut cr = self
             .meta
             .submit_change_request(&req.repo, head, main.target)
             .await
             .map_err(store_status)?;
         self.workers.wake(&req.repo);
+        if req.wait {
+            cr = self
+                .workers
+                .wait(&req.repo, cr.id)
+                .await
+                .map_err(store_status)?
+                .ok_or_else(|| Status::internal(format!("change request {} vanished", cr.id)))?;
+        }
         Ok(Response::new(change_request(cr)))
     }
 
@@ -643,14 +651,13 @@ impl ControlService for ControlServer {
         request: Request<GetChangeRequestRequest>,
     ) -> Result<Response<ChangeRequest>, Status> {
         let req = request.into_inner();
-        let cr = self
-            .meta
-            .get_change_request(&req.repo, req.id)
-            .await
-            .map_err(store_status)?
-            .ok_or_else(|| {
-                Status::not_found(format!("change request {} in {:?}", req.id, req.repo))
-            })?;
+        let cr = if req.wait {
+            self.workers.wait(&req.repo, req.id).await
+        } else {
+            self.meta.get_change_request(&req.repo, req.id).await
+        }
+        .map_err(store_status)?
+        .ok_or_else(|| Status::not_found(format!("change request {} in {:?}", req.id, req.repo)))?;
         Ok(Response::new(change_request(cr)))
     }
 }
