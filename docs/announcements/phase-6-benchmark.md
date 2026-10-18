@@ -1,9 +1,12 @@
 # Announcement drafts: the real-repository benchmark (Phase 6.13)
 
 **Status: draft. Not posted anywhere.** Updated when Phase 6 had merged in full, through
-6.18 (#85), and again after the server side of change requests (5.1 to 5.4, #93). Every number below is a median from the README's [Benchmarks](../../README.md#benchmarks)
+6.18 (#85), after the server side of change requests (5.1 to 5.4, #93), and after `scn land`
+started submitting change requests (5.5, #99). Every number below is a median from the README's [Benchmarks](../../README.md#benchmarks)
 table (`docs/bench-real.csv`, commit `ba08ff9`, three runs); re-check them against the README
-before posting. Like the README,
+before posting. The commit + `land` row was measured at `ba08ff9`, before `scn land` went
+through change requests; re-run `scripts/bench-real` and re-check that row before quoting it.
+Like the README,
 these drafts describe the benchmark slice without naming the project it comes from.
 
 ## Show HN
@@ -35,9 +38,8 @@ Medians: sparse clone 75 ms against git's 646 ms, `status` 11 ms against 292 ms,
 29 ms. Where git wins: import into an empty bucket is 15× git's time (5.3× with the objects
 already in the bucket), and a cold path `log` is 8.7× and a cold `blame` 4.0× git's, because
 each pointer hop is an object-store round trip. What is missing: no authentication
-(Phase 7), no cache or daemon tiers (Phase 4), `scn land` does not go through change requests
-yet although the server already lands them with a serial worker (Phase 5), no release
-binaries yet (Phase 9), no Windows, offline mode or git wire
+(Phase 7), no cache or daemon tiers (Phase 4), no listing of change requests, server-side
+merge or revert yet (Phase 5), no release binaries yet (Phase 9), no Windows, offline mode or git wire
 compatibility. It is one machine and three runs, it is not production-ready, and for most
 repositories git is the right tool.
 
@@ -67,8 +69,9 @@ Status: the MVP works, git import works, the benchmark is published with its CSV
 Docker compose quickstart with no git repository. On the server, change requests now land
 through one serial worker per repository: rebased onto `main`, moved in with one
 compare-and-swap, conflicts reported by path, and a request interrupted by a restart lands
-exactly once. Next is `scn land` on top of them, then auth, release binaries and the cache
-tiers. Not
+exactly once, and `scn land` submits the head and waits for that outcome, so two clones land
+at the same time with no `update` in between. Next are listing requests, "when did this
+land", server-side merge and revert, then auth, release binaries and the cache tiers. Not
 production-ready. Feedback on the derived-data design and the benchmark method is very welcome.
 
 ## Türkçe (5 cümle)
@@ -83,6 +86,6 @@ Medyan değerlerle sparse clone 75 ms (git 646 ms), `status` 11 ms (git 292 ms),
 Git'in önde olduğu yerler de açıkça yazılı: boş bucket'a içe aktarma git'in 15 katı (nesneler
 zaten varken 5,3 katı), soğuk `log` 8,7 katı, soğuk `blame` 4,0 katı sürüyor; çünkü her
 işaretçi adımı nesne deposuna bir gidiş-dönüş.
-Kimlik doğrulama ve önbellek katmanları henüz yok, change request'leri sunucu tarafında
-seri bir land worker işliyor ama `scn land` onları henüz kullanmıyor; proje üretime hazır değil
+Kimlik doğrulama ve önbellek katmanları henüz yok; `scn land` artık bir change request açıyor
+ve sunucudaki seri land worker onu `main`'e rebase edip işliyor, ama proje üretime hazır değil
 ve çoğu repo için doğru araç hâlâ git.
