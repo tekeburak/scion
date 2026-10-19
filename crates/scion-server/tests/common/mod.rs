@@ -5,10 +5,11 @@
 use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use scion_derived::test_util::REPO;
 use scion_proto::v1::control_service_client::ControlServiceClient;
 use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_server::TokenKey;
-use scion_store::{MetadataStore, ObjectStore};
+use scion_store::{Grant, MetadataStore, ObjectStore, Role, SERVER_GRANTS};
 use tokio::net::TcpListener;
 use tonic::metadata::{Ascii, MetadataValue};
 use tonic::service::Interceptor;
@@ -50,9 +51,23 @@ impl Interceptor for Bearer {
     }
 }
 
+/// A whole-repository grant of `role` to `principal`.
+pub fn grant(principal: &str, role: Role) -> Grant {
+    Grant {
+        principal: principal.to_owned(),
+        path_prefix: String::new(),
+        role,
+    }
+}
+
 /// Serve `meta` and `objects` with [`key`] on a free port; returns a channel
-/// to it.
+/// to it. `sp:test`, the principal of [`token`], is an admin of the server
+/// and of [`REPO`] if it exists.
 pub async fn serve(meta: Arc<dyn MetadataStore>, objects: Arc<dyn ObjectStore>) -> Channel {
+    let admin = grant("sp:test", Role::Admin);
+    meta.put_grant(SERVER_GRANTS, &admin).await.unwrap();
+    // Not every test creates REPO.
+    let _ = meta.put_grant(REPO, &admin).await;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(scion_server::serve(listener, meta, objects, key()));

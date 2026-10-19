@@ -65,6 +65,7 @@ async fn client_and_server_interoperate() {
     let id = client
         .put_blob(PutBlobRequest {
             data: b"hello".to_vec(),
+            repo: "r".into(),
         })
         .await
         .unwrap()
@@ -72,7 +73,10 @@ async fn client_and_server_interoperate() {
         .id;
     assert_eq!(id, b"hello");
     let data = client
-        .get_blob(GetBlobRequest { id })
+        .get_blob(GetBlobRequest {
+            id,
+            repo: "r".into(),
+        })
         .await
         .unwrap()
         .into_inner()
@@ -80,7 +84,10 @@ async fn client_and_server_interoperate() {
     assert_eq!(data, b"hello");
 
     let err = client
-        .get_tree(GetTreeRequest { id: vec![0; 32] })
+        .get_tree(GetTreeRequest {
+            id: vec![0; 32],
+            repo: "r".into(),
+        })
         .await
         .unwrap_err();
     assert_eq!(err.code(), tonic::Code::NotFound);

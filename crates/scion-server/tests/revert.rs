@@ -190,6 +190,11 @@ async fn unknown_changesets_are_not_found() {
             })
             .await
             .unwrap_err();
-        assert_eq!(err.code(), Code::NotFound, "{repo} {head} {target}");
+        let want = if repo == REPO {
+            Code::NotFound
+        } else {
+            Code::PermissionDenied
+        };
+        assert_eq!(err.code(), want, "{repo} {head} {target}");
     }
 }

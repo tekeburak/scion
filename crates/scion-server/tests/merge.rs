@@ -163,6 +163,11 @@ async fn unknown_heads_are_not_found() {
             })
             .await
             .unwrap_err();
-        assert_eq!(err.code(), Code::NotFound, "{repo} {ours} {theirs}");
+        let want = if repo == REPO {
+            Code::NotFound
+        } else {
+            Code::PermissionDenied
+        };
+        assert_eq!(err.code(), want, "{repo} {ours} {theirs}");
     }
 }

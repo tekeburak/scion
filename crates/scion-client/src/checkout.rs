@@ -48,6 +48,7 @@ pub(crate) struct File {
 /// it reaches.
 async fn list_files(
     remote: &Remote,
+    repo: &str,
     root: TreeId,
     sparse: &SparseProfile,
 ) -> Result<Vec<File>, RemoteError> {
@@ -56,7 +57,7 @@ async fn list_files(
     while !level.is_empty() {
         let trees: Vec<_> = stream::iter(level.into_iter().map(|(dir, id)| {
             let mut remote = remote.clone();
-            async move { Ok::<_, RemoteError>((dir, remote.get_tree(id).await?)) }
+            async move { Ok::<_, RemoteError>((dir, remote.get_tree(repo, id).await?)) }
         }))
         .buffer_unordered(FETCH_CONCURRENCY)
         .try_collect()
@@ -132,19 +133,21 @@ pub(crate) async fn write_file(
     })
 }
 
-/// Materialize the part of tree `tree` that `sparse` includes under `root`,
-/// which must not already hold any of those files. Returns the new index.
+/// Materialize the part of `repo`'s tree `tree` that `sparse` includes under
+/// `root`, which must not already hold any of those files. Returns the new
+/// index.
 pub async fn checkout(
     remote: &Remote,
+    repo: &str,
     root: &Path,
     tree: TreeId,
     sparse: &SparseProfile,
 ) -> Result<Index, CheckoutError> {
-    let files = list_files(remote, tree, sparse).await?;
+    let files = list_files(remote, repo, tree, sparse).await?;
     let entries: BTreeMap<RepoPath, IndexEntry> = stream::iter(files.into_iter().map(|file| {
         let mut remote = remote.clone();
         async move {
-            let data = remote.get_blob(file.id).await?;
+            let data = remote.get_blob(repo, file.id).await?;
             let entry = write_file(root, &file, data).await?;
             Ok::<_, CheckoutError>((file.path, entry))
         }
@@ -179,7 +182,7 @@ pub async fn clone(
         },
     )?;
     ws.write_sparse(&sparse)?;
-    let index = checkout(&remote, dest, main.root_tree, &sparse).await?;
+    let index = checkout(&remote, repo, dest, main.root_tree, &sparse).await?;
     ws.write_index(&index)?;
     ws.write_state(&State {
         current_head: main.target,

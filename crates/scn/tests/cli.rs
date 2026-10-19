@@ -22,6 +22,20 @@ fn token() -> String {
     scion_server::token(&key(), "sp:test", hour, std::time::SystemTime::now()).unwrap()
 }
 
+/// Make `sp:test`, the principal of [`token`], an admin of the server and of
+/// `repo` if it exists.
+async fn admit(meta: &dyn scion_store::MetadataStore, repo: &str) {
+    let admin = scion_store::Grant {
+        principal: "sp:test".into(),
+        path_prefix: String::new(),
+        role: scion_store::Role::Admin,
+    };
+    meta.put_grant(scion_store::SERVER_GRANTS, &admin)
+        .await
+        .unwrap();
+    let _ = meta.put_grant(repo, &admin).await;
+}
+
 fn tracked(content: &[u8]) -> FileChange {
     FileChange::Tracked {
         content: BlobId::hash(content),
@@ -65,6 +79,7 @@ async fn serve() -> (String, ChangesetId, ChangesetId) {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    admit(&*store, REPO).await;
     tokio::spawn(scion_server::serve(listener, store.clone(), store, key()));
     (format!("http://{addr}"), c0, c1)
 }
@@ -348,6 +363,7 @@ async fn init_clone_commit_land_without_git() {
     let store = Arc::new(MemoryStore::new());
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let server = format!("http://{}", listener.local_addr().unwrap());
+    admit(&*store, REPO).await;
     tokio::spawn(scion_server::serve(listener, store.clone(), store, key()));
     let dir = tempfile::tempdir().unwrap();
 
@@ -516,6 +532,7 @@ async fn merge_a_release_fix_and_land_it() {
     store.create_ref(REPO, "release/1", fix).await.unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let server = format!("http://{}", listener.local_addr().unwrap());
+    admit(&*store, REPO).await;
     tokio::spawn(scion_server::serve(listener, store.clone(), store, key()));
 
     let dir = tempfile::tempdir().unwrap();

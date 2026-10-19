@@ -76,7 +76,7 @@ async fn every_rpc_needs_a_valid_token() {
     ];
 
     let rpcs = every_rpc();
-    assert_eq!(rpcs.len(), 19, "{rpcs:?}");
+    assert_eq!(rpcs.len(), 20, "{rpcs:?}");
     for rpc in &rpcs {
         for (why, bearer) in &refused {
             assert_eq!(

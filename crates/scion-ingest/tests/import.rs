@@ -27,6 +27,20 @@ fn token() -> String {
     scion_server::token(&key(), "sp:test", hour, std::time::SystemTime::now()).unwrap()
 }
 
+/// Make `sp:test`, the principal of [`token`], an admin of the server and of
+/// `repo` if it exists.
+async fn admit(meta: &dyn scion_store::MetadataStore, repo: &str) {
+    let admin = scion_store::Grant {
+        principal: "sp:test".into(),
+        path_prefix: String::new(),
+        role: scion_store::Role::Admin,
+    };
+    meta.put_grant(scion_store::SERVER_GRANTS, &admin)
+        .await
+        .unwrap();
+    let _ = meta.put_grant(repo, &admin).await;
+}
+
 const REPO: &str = "mono";
 
 /// path → (git mode, contents) of commit `rev`'s tree, from `git ls-tree`.
@@ -105,6 +119,7 @@ async fn checkouts_equal_git_trees() {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let server = format!("http://{}", listener.local_addr().unwrap());
+    admit(&*store, REPO).await;
     tokio::spawn(scion_server::serve(
         listener,
         store.clone(),
@@ -129,7 +144,7 @@ async fn checkouts_equal_git_trees() {
         let sha = ObjectId::try_from(cs.extra[GIT_SHA].as_slice()).unwrap();
         let root = deriver.derive::<RootTree>(id).await.unwrap().0;
         let out = tmp.path().join(format!("at-{seen}"));
-        checkout(&remote, &out, root, &SparseProfile::full())
+        checkout(&remote, REPO, &out, root, &SparseProfile::full())
             .await
             .unwrap();
         assert_eq!(

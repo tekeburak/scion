@@ -1,5 +1,6 @@
 //! `ObjectService` over an [`ObjectStore`]. Requests come from clients, so ids
 //! and tree bytes are validated here; the store verifies what it reads back.
+//! Every request needs `reader` in the repository it names.
 
 use std::sync::Arc;
 
@@ -9,15 +10,17 @@ use scion_proto::v1::{
     GetBlobRequest, GetBlobResponse, GetTreeRequest, GetTreeResponse, PutBlobRequest,
     PutBlobResponse, PutTreeRequest, PutTreeResponse,
 };
-use scion_store::ObjectStore;
+use scion_store::{MetadataStore, ObjectStore, Role};
 use scion_types::{BlobId, Decode, Encode, Tree, TreeId};
 use tonic::{Request, Response, Status};
 
+use crate::auth::authorize;
 use crate::store_status;
 
 /// Serves trees and blobs by id from an object store.
 #[derive(Clone)]
 pub(crate) struct ObjectServer {
+    meta: Arc<dyn MetadataStore>,
     objects: Arc<dyn ObjectStore>,
 }
 
@@ -28,9 +31,9 @@ impl std::fmt::Debug for ObjectServer {
 }
 
 impl ObjectServer {
-    /// Serve objects from `objects`.
-    pub(crate) fn new(objects: Arc<dyn ObjectStore>) -> Self {
-        Self { objects }
+    /// Serve objects from `objects`, to principals with grants in `meta`.
+    pub(crate) fn new(meta: Arc<dyn MetadataStore>, objects: Arc<dyn ObjectStore>) -> Self {
+        Self { meta, objects }
     }
 }
 
@@ -48,6 +51,7 @@ impl ObjectService for ObjectServer {
         &self,
         request: Request<GetTreeRequest>,
     ) -> Result<Response<GetTreeResponse>, Status> {
+        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
         let id = tree_id(&request.get_ref().id)?;
         let tree = self
             .objects
@@ -64,6 +68,7 @@ impl ObjectService for ObjectServer {
         &self,
         request: Request<GetBlobRequest>,
     ) -> Result<Response<GetBlobResponse>, Status> {
+        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
         let id = blob_id(&request.get_ref().id)?;
         let data = self
             .objects
@@ -80,6 +85,7 @@ impl ObjectService for ObjectServer {
         &self,
         request: Request<PutBlobRequest>,
     ) -> Result<Response<PutBlobResponse>, Status> {
+        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
         let data = Bytes::from(request.into_inner().data);
         let id = self.objects.put_blob(data).await.map_err(store_status)?;
         Ok(Response::new(PutBlobResponse {
@@ -91,6 +97,7 @@ impl ObjectService for ObjectServer {
         &self,
         request: Request<PutTreeRequest>,
     ) -> Result<Response<PutTreeResponse>, Status> {
+        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
         let tree = Tree::decode(&request.get_ref().tree)
             .map_err(|e| Status::invalid_argument(format!("tree: {e}")))?;
         let id = self.objects.put_tree(&tree).await.map_err(store_status)?;

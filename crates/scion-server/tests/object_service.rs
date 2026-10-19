@@ -6,6 +6,7 @@ mod common;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+use scion_derived::test_util::REPO;
 use scion_proto::v1::{GetBlobRequest, GetTreeRequest, PutBlobRequest, PutTreeRequest};
 use scion_store::{MemoryStore, ObjectStorage};
 use scion_types::{BlobId, Decode, Encode, FileType, PathComponent, Tree, TreeEntry, TreeId};
@@ -17,7 +18,7 @@ use tonic_health::pb::health_client::HealthClient;
 
 async fn start() -> Channel {
     common::serve(
-        Arc::new(MemoryStore::new()),
+        Arc::new(MemoryStore::with_repo(REPO)),
         Arc::new(ObjectStorage::in_memory()),
     )
     .await
@@ -29,6 +30,7 @@ async fn blobs_and_trees_round_trip() {
 
     let id = client
         .put_blob(PutBlobRequest {
+            repo: REPO.into(),
             data: b"fn main() {}\n".to_vec(),
         })
         .await
@@ -37,7 +39,10 @@ async fn blobs_and_trees_round_trip() {
         .id;
     assert_eq!(id, BlobId::hash(b"fn main() {}\n").as_bytes());
     let data = client
-        .get_blob(GetBlobRequest { id: id.clone() })
+        .get_blob(GetBlobRequest {
+            id: id.clone(),
+            repo: REPO.into(),
+        })
         .await
         .unwrap()
         .into_inner()
@@ -56,6 +61,7 @@ async fn blobs_and_trees_round_trip() {
     };
     let tree_id = client
         .put_tree(PutTreeRequest {
+            repo: REPO.into(),
             tree: tree.encode_to_vec(),
         })
         .await
@@ -64,7 +70,10 @@ async fn blobs_and_trees_round_trip() {
         .id;
     assert_eq!(tree_id, tree.id().as_bytes());
     let bytes = client
-        .get_tree(GetTreeRequest { id: tree_id })
+        .get_tree(GetTreeRequest {
+            id: tree_id,
+            repo: REPO.into(),
+        })
         .await
         .unwrap()
         .into_inner()
@@ -77,11 +86,20 @@ async fn missing_objects_are_not_found() {
     let mut client = common::objects(start().await);
     let id = TreeId::hash(b"absent").as_bytes().to_vec();
     let err = client
-        .get_tree(GetTreeRequest { id: id.clone() })
+        .get_tree(GetTreeRequest {
+            id: id.clone(),
+            repo: REPO.into(),
+        })
         .await
         .unwrap_err();
     assert_eq!(err.code(), Code::NotFound);
-    let err = client.get_blob(GetBlobRequest { id }).await.unwrap_err();
+    let err = client
+        .get_blob(GetBlobRequest {
+            id,
+            repo: REPO.into(),
+        })
+        .await
+        .unwrap_err();
     assert_eq!(err.code(), Code::NotFound);
 }
 
@@ -89,12 +107,16 @@ async fn missing_objects_are_not_found() {
 async fn malformed_input_is_rejected() {
     let mut client = common::objects(start().await);
     let err = client
-        .get_blob(GetBlobRequest { id: vec![1, 2, 3] })
+        .get_blob(GetBlobRequest {
+            id: vec![1, 2, 3],
+            repo: REPO.into(),
+        })
         .await
         .unwrap_err();
     assert_eq!(err.code(), Code::InvalidArgument);
     let err = client
         .put_tree(PutTreeRequest {
+            repo: REPO.into(),
             tree: b"not a tree".to_vec(),
         })
         .await

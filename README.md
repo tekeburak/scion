@@ -54,11 +54,12 @@ Scion is that design, built on boring infrastructure:
 
 Scion is **alpha** software. The server, the CLI, git import and the real-repository benchmark
 work and are exercised end to end in CI on Postgres + S3. Every request needs a token
-signed by the server, but **per-repository roles are not enforced yet**: any valid token can
-do anything, so give tokens only to people you trust. Landing goes through change requests and a serial
+signed by the server and a role in the repository it touches; tokens come from the operator
+until GitHub sign-in arrives, and a grant limited to a directory still covers the whole
+repository for now. Landing goes through change requests and a serial
 land worker, and every request can be listed and traced to the changeset it landed;
-merges and reverts run on the server. The cache and daemon tiers, access control and released
-binaries follow (see [What's next](#whats-next)).
+merges and reverts run on the server. The cache and daemon tiers, sign-in, directory-scoped
+access and released binaries follow (see [What's next](#whats-next)).
 
 What works today:
 
@@ -85,6 +86,11 @@ What works today:
   copies kept for `blame`, the git sha kept in the changeset), resumes from checkpoints, syncs
   incrementally, refuses a rewritten upstream, and `verify` compares every imported tree with
   `git ls-tree`.
+- **Access control**: every request carries a token signed by the server, and each repository
+  has readers, writers and admins (`scion-server grant`). Reads need `reader`; committing,
+  landing, merging and reverting need `writer`; moving `main` or a `release/*` ref directly
+  needs `admin`; `scn init` needs a server-wide admin and makes its caller the new repository's
+  admin.
 - **Benchmarks** against git on a pinned slice of a real repository, from clone and `blame`
   to 16 writers landing at once, with the numbers [below](#benchmarks).
 
@@ -97,9 +103,12 @@ repository:
 # Postgres, S3 (RustFS) and scion-server on 127.0.0.1:7420; the first run builds the server
 docker compose -f deploy/docker-compose.yml up -d --wait
 cargo install --locked --path crates/scn   # scion-proto's build needs protoc on PATH
-# every request carries a token; the local server signs one for you
+# every request carries a token; the local server signs one for you, and lets
+# its principal create repositories
 export SCN_TOKEN=$(docker compose -f deploy/docker-compose.yml exec -T scion-server \
     scion-server token sp:dev --ttl 30d)
+docker compose -f deploy/docker-compose.yml exec -T scion-server \
+    scion-server grant '*' sp:dev admin
 
 scn init http://127.0.0.1:7420 demo        # an empty repository with main at its root
 scn clone http://127.0.0.1:7420 demo
@@ -168,6 +177,8 @@ cargo build --release -p scion-ingest -p scn
 export PATH=$PWD/target/release:$PATH
 export SCN_TOKEN=$(docker compose -f deploy/docker-compose.yml exec -T scion-server \
     scion-server token sp:dev --ttl 30d)
+docker compose -f deploy/docker-compose.yml exec -T scion-server \
+    scion-server grant '*' sp:dev admin
 
 # scion-ingest works on the stores directly
 export DATABASE_URL=postgres://scion:scion@127.0.0.1:5432/scion
@@ -300,10 +311,9 @@ Read these numbers with their limits:
 
 ## What's next
 
-Access control is under way. The server already has its signed, stateless token format and a
-store of per-repository and per-directory grants (reader, writer, admin), but nothing checks
-them yet: operator commands, GitHub device-flow login, service principals and enforcement at
-the server boundary come next, together with fuzzing and a hermetic simulation. After that, in
+Access control is under way. Every request is authenticated and checked against the
+repository's roles; directory-scoped grants, GitHub device-flow login and managing access from
+`scn` come next, together with fuzzing and a hermetic simulation. After that, in
 order: released binaries, a
 server image and a production compose profile; the regional cache and per-node daemon tiers
 with manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan,

@@ -391,16 +391,13 @@ fn print_file_diff(
 
 async fn init(out: &mut impl Write, server: &str, repo: &str) -> Result<()> {
     let mut remote = Remote::connect(server).await?;
-    let root = remote
-        .create_changeset(&Changeset::repository_root(repo))
-        .await?;
-    match remote.create_ref(repo, MAIN_REF, root).await {
-        Ok(_) => {}
+    let root = match remote.init_repo(repo).await {
+        Ok(root) => root,
         Err(RemoteError::Rpc(st)) if st.code() == tonic::Code::AlreadyExists => {
             return Err(format!("repository {repo} already exists on {server}").into());
         }
         Err(e) => return Err(e.into()),
-    }
+    };
     writeln!(
         out,
         "created {repo} on {server} ({MAIN_REF} at {root}); next: scn clone {server} {repo}"
@@ -484,7 +481,7 @@ async fn diff_working_copy(out: &mut impl Write) -> Result<()> {
             FileStatus::Added => None,
             FileStatus::Modified | FileStatus::Deleted => {
                 let e = index.entries[&path];
-                Some((e.kind, s.remote.get_blob(e.id).await?))
+                Some((e.kind, s.remote.get_blob(&s.config.repo, e.id).await?))
             }
         };
         let new = match st {
@@ -505,11 +502,11 @@ async fn diff_revisions(out: &mut impl Write, from: &str, to: &str) -> Result<()
     let repo = s.config.repo.clone();
     for e in s.remote.diff(&repo, Some(old), new).await? {
         let old = match e.old {
-            Some(f) => Some((f.kind, s.remote.get_blob(f.id).await?)),
+            Some(f) => Some((f.kind, s.remote.get_blob(&repo, f.id).await?)),
             None => None,
         };
         let new = match e.new {
-            Some(f) => Some((f.kind, s.remote.get_blob(f.id).await?)),
+            Some(f) => Some((f.kind, s.remote.get_blob(&repo, f.id).await?)),
             None => None,
         };
         print_file_diff(out, &e.path, &old, &new)?;
@@ -534,7 +531,7 @@ async fn blame(out: &mut impl Write, path: &str, rev: &str) -> Result<()> {
             else {
                 return Err(format!("server history has no content for {path}").into());
             };
-            Ok::<_, Box<dyn std::error::Error>>(other.get_blob(*content).await?)
+            Ok::<_, Box<dyn std::error::Error>>(other.get_blob(&repo, *content).await?)
         },
     )?;
     let mut lines = data.split_inclusive(|b| *b == b'\n');

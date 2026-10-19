@@ -149,10 +149,11 @@ async fn apply(
         remove(root, path)?;
         index.entries.remove(path);
     }
+    let repo = &repo;
     let written: Vec<_> = stream::iter(plan.into_values().flatten().map(|f| {
         let mut remote = remote.clone();
         async move {
-            let data = remote.get_blob(f.id).await?;
+            let data = remote.get_blob(repo, f.id).await?;
             let entry = write_file(root, &f, data).await?;
             Ok::<_, SwitchError>((f.path, entry))
         }
@@ -369,12 +370,12 @@ pub async fn update_with_markers(
         let write = match (ours.get(&t.path), t.new) {
             (None, None) => Some(Write::Remove),
             (Some(None), None) => None,
-            (None, Some(new)) => Some(Write::File(new.kind, r.get_blob(new.id).await?)),
+            (None, Some(new)) => Some(Write::File(new.kind, r.get_blob(&repo, new.id).await?)),
             // Deleted on one side, changed on the other: the changed file
             // stays for the resolver to keep or delete.
             (Some(None), Some(new)) => {
                 conflicts.insert(t.path.clone());
-                Some(Write::File(new.kind, r.get_blob(new.id).await?))
+                Some(Write::File(new.kind, r.get_blob(&repo, new.id).await?))
             }
             (Some(Some(_)), None) => {
                 conflicts.insert(t.path.clone());
@@ -392,10 +393,13 @@ pub async fn update_with_markers(
                     continue;
                 };
                 let base_bytes = match t.old {
-                    Some(b) => r.get_blob(b.id).await?,
+                    Some(b) => r.get_blob(&repo, b.id).await?,
                     None => Vec::new(),
                 };
-                let (o_bytes, t_bytes) = (r.get_blob(o.id).await?, r.get_blob(new.id).await?);
+                let (o_bytes, t_bytes) = (
+                    r.get_blob(&repo, o.id).await?,
+                    r.get_blob(&repo, new.id).await?,
+                );
                 let merged = scion_diff3::merge(&base_bytes, &o_bytes, &t_bytes);
                 if !merged.is_clean() {
                     conflicts.insert(t.path.clone());

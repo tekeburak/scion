@@ -8,9 +8,10 @@ use scion_proto::v1::control_service_client::ControlServiceClient;
 use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_proto::v1::{
     BlameRequest, CreateChangesetRequest, DiffRequest, FindLandingRequest, GetBlobRequest,
-    GetChangeRequestRequest, GetRefRequest, GetTreeRequest, ListChangeRequestsRequest, LogRequest,
-    LogResponse, MergeBaseRequest, MergeRequest, MoveRefRequest, PathLogRequest, PutBlobRequest,
-    RebaseRequest, RevertRequest, SubmitChangeRequestRequest,
+    GetChangeRequestRequest, GetRefRequest, GetTreeRequest, InitRepoRequest,
+    ListChangeRequestsRequest, LogRequest, LogResponse, MergeBaseRequest, MergeRequest,
+    MoveRefRequest, PathLogRequest, PutBlobRequest, RebaseRequest, RevertRequest,
+    SubmitChangeRequestRequest,
 };
 use scion_types::{
     BlobId, Changeset, ChangesetId, Decode, Encode, FileType, Identity, RepoPath, Timestamp, Tree,
@@ -322,24 +323,26 @@ impl Remote {
         })
     }
 
-    /// Fetch one tree.
-    pub async fn get_tree(&mut self, id: TreeId) -> Result<Tree, RemoteError> {
+    /// Fetch one tree, for `repo`.
+    pub async fn get_tree(&mut self, repo: &str, id: TreeId) -> Result<Tree, RemoteError> {
         let resp = self
             .objects
             .get_tree(GetTreeRequest {
                 id: id.as_bytes().to_vec(),
+                repo: repo.to_owned(),
             })
             .await?
             .into_inner();
         Tree::decode(&resp.tree).map_err(|_| RemoteError::Malformed("tree"))
     }
 
-    /// Fetch one blob.
-    pub async fn get_blob(&mut self, id: BlobId) -> Result<Vec<u8>, RemoteError> {
+    /// Fetch one blob, for `repo`.
+    pub async fn get_blob(&mut self, repo: &str, id: BlobId) -> Result<Vec<u8>, RemoteError> {
         Ok(self
             .objects
             .get_blob(GetBlobRequest {
                 id: id.as_bytes().to_vec(),
+                repo: repo.to_owned(),
             })
             .await?
             .into_inner()
@@ -571,14 +574,30 @@ impl Remote {
             .collect()
     }
 
-    /// Upload one blob; returns its id.
-    pub async fn put_blob(&mut self, data: Vec<u8>) -> Result<BlobId, RemoteError> {
+    /// Upload one blob for `repo`; returns its id.
+    pub async fn put_blob(&mut self, repo: &str, data: Vec<u8>) -> Result<BlobId, RemoteError> {
         let resp = self
             .objects
-            .put_blob(PutBlobRequest { data })
+            .put_blob(PutBlobRequest {
+                data,
+                repo: repo.to_owned(),
+            })
             .await?
             .into_inner();
         BlobId::try_from_slice(&resp.id).map_err(|_| RemoteError::Malformed("blob id"))
+    }
+
+    /// Create repository `repo` with `main` at its root changeset, the
+    /// caller its admin; returns the root. `ALREADY_EXISTS` if it exists.
+    pub async fn init_repo(&mut self, repo: &str) -> Result<ChangesetId, RemoteError> {
+        let resp = self
+            .control
+            .init_repo(InitRepoRequest {
+                repo: repo.to_owned(),
+            })
+            .await?
+            .into_inner();
+        changeset_id(&resp.main, "main")
     }
 
     /// Create `cs` on the server; its blobs must be uploaded first.

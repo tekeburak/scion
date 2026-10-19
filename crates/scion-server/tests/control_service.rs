@@ -301,5 +301,5 @@ async fn bad_input_and_unknown_changesets_are_rejected() {
         })
         .await
         .unwrap_err();
-    assert_eq!(err.code(), Code::NotFound);
+    assert_eq!(err.code(), Code::PermissionDenied);
 }

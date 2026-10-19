@@ -174,10 +174,12 @@ every changeset). It exists once its **root changeset** has been stored: the cha
 `Changeset::repository_root(repo)` returns, with no parents, author `scion` with an empty email,
 author date `0 +0000`, no committer, message `Create repository`, no file changes and no
 `extra`. It depends only on the name, so every client builds the same one. `scn init <server>
-<repo>` sends it through `CreateChangeset`, which is the only write that creates a repository,
-and then creates `main` at it through `MoveRef`. Every other write naming a repository that does
-not exist, from a client or from `scion-ingest`, fails with `NOT_FOUND`, so a misspelled name
-never starts a new repository.
+<repo>` calls `InitRepo`, the only RPC that creates a repository (it needs a server-wide
+`admin` grant): the server stores the root changeset, creates `main` at it and makes the caller
+the repository's `admin`. `CreateChangeset` refuses a root changeset. Every other write naming a
+repository that does not exist fails, from a client with `PERMISSION_DENIED` (nobody holds a
+role there) and from `scion-ingest` with `NOT_FOUND`, so a misspelled name never starts a new
+repository.
 
 ## Refs and anonymous heads
 

@@ -67,6 +67,7 @@ fn has_markers(path: &std::path::Path) -> bool {
 async fn upload(
     ws: &Workspace,
     remote: &Remote,
+    repo: &str,
     path: &RepoPath,
 ) -> Result<IndexEntry, CommitError> {
     let file = ws.root().join(path.as_str());
@@ -74,7 +75,7 @@ async fn upload(
     let meta = std::fs::symlink_metadata(&file).map_err(io_err)?;
     let (kind, data) = read_working_file(&file).map_err(io_err)?;
     let size = data.len() as u64;
-    let id = remote.clone().put_blob(data).await?;
+    let id = remote.clone().put_blob(repo, data).await?;
     Ok(IndexEntry {
         id,
         kind,
@@ -120,9 +121,10 @@ pub async fn commit(
         return Err(CommitError::NothingToCommit);
     }
 
+    let repo = config.repo.as_str();
     let uploaded: Vec<(RepoPath, IndexEntry)> =
         stream::iter(upload_paths.into_iter().map(|path| async move {
-            let entry = upload(ws, remote, &path).await?;
+            let entry = upload(ws, remote, repo, &path).await?;
             Ok::<_, CommitError>((path, entry))
         }))
         .buffer_unordered(FETCH_CONCURRENCY)

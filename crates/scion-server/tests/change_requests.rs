@@ -106,7 +106,7 @@ async fn unknown_head_repository_or_request_is_not_found() {
     );
     assert_eq!(
         code(c.submit_change_request(submit("nope", root)).await),
-        Code::NotFound
+        Code::PermissionDenied
     );
     assert_eq!(
         code(c.get_change_request(get(REPO, 1)).await),
@@ -120,7 +120,7 @@ async fn unknown_head_repository_or_request_is_not_found() {
         .id;
     assert_eq!(
         code(c.get_change_request(get("nope", id)).await),
-        Code::NotFound
+        Code::PermissionDenied
     );
     assert_eq!(
         code(
@@ -196,7 +196,7 @@ async fn lists_newest_first() {
             c.list_change_requests(list("nope", ChangeRequestStatus::Unspecified, 10))
                 .await
         ),
-        Code::NotFound
+        Code::PermissionDenied
     );
     let mut bad = list(REPO, ChangeRequestStatus::Unspecified, 10);
     bad.status = 99;

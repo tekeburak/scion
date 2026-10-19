@@ -47,6 +47,15 @@ async fn serve() -> String {
     .await
     .expect("connect to postgres");
     meta.migrate().await.unwrap();
+    // `sp:test`, the principal of [`token`], creates the repositories.
+    let admin = scion_store::Grant {
+        principal: "sp:test".into(),
+        path_prefix: String::new(),
+        role: scion_store::Role::Admin,
+    };
+    scion_store::MetadataStore::put_grant(&meta, scion_store::SERVER_GRANTS, &admin)
+        .await
+        .unwrap();
     let s3 = AmazonS3Builder::new()
         .with_endpoint(env_or("SCION_TEST_S3_ENDPOINT", "http://localhost:9000"))
         .with_bucket_name(env_or("SCION_TEST_S3_BUCKET", "scion-objects"))

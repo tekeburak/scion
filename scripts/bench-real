@@ -412,6 +412,8 @@ say "building release binaries"
 (cd "$ROOT" && cargo build -q --release -p scion-server -p scion-ingest -p scn)
 SCN_TOKEN=$(SCION_TOKEN_KEY=$TOKEN_KEY "$BIN/scion-server" token sp:bench --ttl 2d)
 export SCN_TOKEN
+# sp:bench creates each run's repositories, and so administers them.
+"$BIN/scion-server" grant '*' sp:bench admin >/dev/null
 IMPL_A=$WORK/impl-a-${IMPL_A_COMMIT:0:12}
 IMPL_B=$WORK/impl-b-${IMPL_B_COMMIT:0:12}
 if [ -n "$IMPL_A_URL" ]; then build_impl "$IMPL_A_URL" "$IMPL_A_COMMIT" "$IMPL_A"; setup_impl_a

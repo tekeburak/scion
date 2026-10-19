@@ -88,10 +88,10 @@ pub async fn routes(
         .set_serving::<ControlServiceServer<ControlServer>>()
         .await;
     let control_service =
-        ControlServiceServer::new(ControlServer::new(meta, objects.clone(), workers))
+        ControlServiceServer::new(ControlServer::new(meta.clone(), objects.clone(), workers))
             .max_decoding_message_size(MAX_MESSAGE_BYTES)
             .max_encoding_message_size(MAX_MESSAGE_BYTES);
-    let object_service = ObjectServiceServer::new(ObjectServer::new(objects))
+    let object_service = ObjectServiceServer::new(ObjectServer::new(meta.clone(), objects))
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
     let authenticate = Authenticate(key);

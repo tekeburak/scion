@@ -13,7 +13,9 @@ package scion.v1;
 // ---------------------------------------------------------------------------
 // Object plane: immutable trees and blobs by id. Implemented by scion-server,
 // scion-cache and scion-daemon, so a client need not know the topology.
-// A missing object is NOT_FOUND.
+// A missing object is NOT_FOUND. Objects are shared by every repository, but
+// each request names the repository it reads or writes for, and the caller
+// needs `reader` there.
 // ---------------------------------------------------------------------------
 
 service ObjectService {
@@ -25,6 +27,7 @@ service ObjectService {
 
 message GetTreeRequest {
   bytes id = 1;
+  string repo = 2;
 }
 
 message GetTreeResponse {
@@ -34,6 +37,7 @@ message GetTreeResponse {
 
 message GetBlobRequest {
   bytes id = 1;
+  string repo = 2;
 }
 
 message GetBlobResponse {
@@ -43,6 +47,7 @@ message GetBlobResponse {
 
 message PutBlobRequest {
   bytes data = 1;
+  string repo = 2;
 }
 
 message PutBlobResponse {
@@ -52,6 +57,7 @@ message PutBlobResponse {
 message PutTreeRequest {
   // Canonical encoding (`SCTR`).
   bytes tree = 1;
+  string repo = 2;
 }
 
 message PutTreeResponse {
@@ -60,10 +66,14 @@ message PutTreeResponse {
 
 // ---------------------------------------------------------------------------
 // Control plane: served only by scion-server. Every request names its
-// repository; one server serves many.
+// repository; one server serves many. Each RPC needs a role in it: `reader`
+// for reads, `writer` for CreateChangeset, Rebase, Merge, Revert and
+// SubmitChangeRequest, `admin` for MoveRef; InitRepo needs `admin` on the
+// server (grants of repository `*`). A missing role is PERMISSION_DENIED.
 // ---------------------------------------------------------------------------
 
 service ControlService {
+  rpc InitRepo(InitRepoRequest) returns (InitRepoResponse);
   rpc GetRef(GetRefRequest) returns (GetRefResponse);
   rpc CreateChangeset(CreateChangesetRequest) returns (CreateChangesetResponse);
   rpc MoveRef(MoveRefRequest) returns (MoveRefResponse);
@@ -81,6 +91,18 @@ service ControlService {
   rpc FindLanding(FindLandingRequest) returns (FindLandingResponse);
 }
 
+// Create a repository with `main` at its root changeset and make the caller
+// its admin. ALREADY_EXISTS if it exists.
+message InitRepoRequest {
+  string repo = 1;
+}
+
+message InitRepoResponse {
+  // The root changeset `main` points at.
+  bytes main = 1;
+  uint64 version = 2;
+}
+
 // Server refs are only `main` and `release/*`. An unknown ref is NOT_FOUND.
 message GetRefRequest {
   string repo = 1;
@@ -96,7 +118,8 @@ message GetRefResponse {
 }
 
 // The changeset's blobs (and any trees) must already be in the object store.
-// The repository is the changeset's own `repo` field.
+// The repository is the changeset's own `repo` field. A repository's root
+// changeset is InitRepo's, and refused here.
 message CreateChangesetRequest {
   // Canonical encoding (`SCCS`).
   bytes changeset = 1;

@@ -8,8 +8,8 @@ use std::sync::Arc;
 
 use scion_derived::test_util::{REPO, changeset, tracked};
 use scion_derived::{Blame, Deriver, PathHistory, RootTree, SkipList};
-use scion_proto::v1::{CreateChangesetRequest, LogRequest, PutBlobRequest};
-use scion_store::{MemoryStore, MetadataStore, ObjectStore};
+use scion_proto::v1::{CreateChangesetRequest, InitRepoRequest, LogRequest, PutBlobRequest};
+use scion_store::{MemoryStore, MetadataStore, ObjectStore, Role};
 use scion_types::{Changeset, ChangesetId, Decode, Encode, FileChange, RepoPath, TreeId};
 use tonic::Code;
 
@@ -41,6 +41,7 @@ impl Server {
         self.objects
             .put_blob(PutBlobRequest {
                 data: content.to_vec(),
+                repo: REPO.into(),
             })
             .await
             .unwrap();
@@ -126,7 +127,7 @@ async fn rejects_missing_blobs_unknown_parents_and_garbage() {
 
     let mut nameless = changeset(vec![], files(&[("a.txt", b"ok\n")]), "nameless");
     nameless.repo = String::new();
-    assert_eq!(s.create(&nameless).await, Err(Code::InvalidArgument));
+    assert_eq!(s.create(&nameless).await, Err(Code::PermissionDenied));
 
     let err = s
         .control
@@ -162,12 +163,13 @@ async fn deletions_need_no_blob() {
 }
 
 #[tokio::test]
-async fn only_the_repository_root_creates_a_repository() {
+async fn init_repo_creates_a_repository_with_its_caller_as_admin() {
     let mut s = start().await;
     s.upload(b"one\n").await;
     let mut typo = changeset(vec![], files(&[("a.txt", b"one\n")]), "root");
     typo.repo = "tt".into();
-    assert_eq!(s.create(&typo).await, Err(Code::NotFound));
+    // No grant exists in a repository that does not exist.
+    assert_eq!(s.create(&typo).await, Err(Code::PermissionDenied));
     let move_typo = |expected_version| scion_proto::v1::MoveRefRequest {
         repo: "tt".into(),
         name: "main".into(),
@@ -176,7 +178,7 @@ async fn only_the_repository_root_creates_a_repository() {
     };
     for expected in [None, Some(0)] {
         let err = s.control.move_ref(move_typo(expected)).await.unwrap_err();
-        assert_eq!(err.code(), Code::NotFound, "{expected:?}: {err}");
+        assert_eq!(err.code(), Code::PermissionDenied, "{expected:?}: {err}");
     }
     assert!(
         s.store
@@ -186,9 +188,19 @@ async fn only_the_repository_root_creates_a_repository() {
             .is_none()
     );
 
+    let init = || InitRepoRequest { repo: "tt".into() };
+    let resp = s.control.init_repo(init()).await.unwrap().into_inner();
     let root = Changeset::repository_root("tt");
-    let (id, tree) = s.create(&root).await.unwrap();
-    assert_eq!((id, tree), (root.id(), scion_types::Tree::empty().id()));
-    assert_eq!(s.create(&root).await, Ok((id, tree)), "idempotent");
+    assert_eq!(resp.main, root.id().as_bytes());
+    let main = s.store.get_ref("tt", "main").await.unwrap().unwrap();
+    assert_eq!((main.target, main.version), (root.id(), resp.version));
+    assert_eq!(
+        s.store.grants_for("tt", "sp:test").await.unwrap(),
+        [common::grant("sp:test", Role::Admin)]
+    );
+    let again = s.control.init_repo(init()).await.unwrap_err();
+    assert_eq!(again.code(), Code::AlreadyExists, "{again}");
     assert!(s.create(&typo).await.is_ok(), "the repository exists now");
+    // A root is InitRepo's alone.
+    assert_eq!(s.create(&root).await, Err(Code::InvalidArgument));
 }

@@ -47,6 +47,20 @@ fn token() -> String {
     scion_server::token(&key(), "sp:test", hour, std::time::SystemTime::now()).unwrap()
 }
 
+/// Make `sp:test`, the principal of [`token`], an admin of the server and of
+/// `repo` if it exists.
+async fn admit(meta: &dyn scion_store::MetadataStore, repo: &str) {
+    let admin = scion_store::Grant {
+        principal: "sp:test".into(),
+        path_prefix: String::new(),
+        role: scion_store::Role::Admin,
+    };
+    meta.put_grant(scion_store::SERVER_GRANTS, &admin)
+        .await
+        .unwrap();
+    let _ = meta.put_grant(repo, &admin).await;
+}
+
 const REPO: &str = "bench";
 const DIRS: usize = 10;
 const FILE_BYTES: usize = 4096;
@@ -152,7 +166,10 @@ async fn put_blob(remote: &Remote, data: Vec<u8>) {
     remote
         .objects
         .clone()
-        .put_blob(PutBlobRequest { data })
+        .put_blob(PutBlobRequest {
+            data,
+            repo: REPO.into(),
+        })
         .await
         .unwrap();
 }
@@ -210,6 +227,7 @@ async fn serve() -> String {
     let store = Arc::new(MemoryStore::with_repo(REPO));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
+    admit(&*store, REPO).await;
     tokio::spawn(scion_server::serve(listener, store.clone(), store, key()));
     format!("http://{addr}")
 }

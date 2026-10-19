@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime};
 
 use scion_server::TokenKey;
-use scion_store::MemoryStore;
+use scion_store::{Grant, MemoryStore, MetadataStore, Role, SERVER_GRANTS};
 use tokio::net::TcpListener;
 use tonic::body::Body;
 use tonic::codegen::http::Request;
@@ -31,6 +31,15 @@ fn token(name: &str, principal: &str) -> String {
 /// under `name`. Returns its address.
 async fn serve(name: &'static str, seen: Seen) -> String {
     let store = Arc::new(MemoryStore::new());
+    // `sp:a` and `sp:b` may create repositories.
+    for principal in ["sp:a", "sp:b"] {
+        let admin = Grant {
+            principal: principal.into(),
+            path_prefix: String::new(),
+            role: Role::Admin,
+        };
+        store.put_grant(SERVER_GRANTS, &admin).await.unwrap();
+    }
     let routes = scion_server::routes(store.clone(), store, key(name))
         .await
         .unwrap();
@@ -92,7 +101,11 @@ async fn every_rpc_carries_the_token_of_the_working_copy_server() {
     let a = serve("a", seen.clone()).await;
     let b = serve("b", seen.clone()).await;
     let config = tempfile::tempdir().unwrap();
-    let (ta, tb, tc) = (token("a", "sp:a"), token("b", "sp:b"), token("a", "sp:c"));
+    let (ta, tb) = (token("a", "sp:a"), token("b", "sp:b"));
+    // Another token of `sp:a`, later expiry.
+    let tc = key("a")
+        .issue("sp:a", SystemTime::now() + Duration::from_secs(7200))
+        .unwrap();
     for (server, token) in [(&a, &ta), (&b, &tb)] {
         // The file name `scn` derives from the server address, under the
         // config directory it is given.
@@ -155,10 +168,10 @@ async fn every_rpc_carries_the_token_of_the_working_copy_server() {
             "GetChangeRequest",
             "GetRef",
             "GetTree",
+            "InitRepo",
             "ListChangeRequests",
             "Log",
             "Merge",
-            "MoveRef",
             "PathLog",
             "PutBlob",
             "Rebase",
