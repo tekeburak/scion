@@ -47,14 +47,14 @@ Postgres + S3. `scn` can `init` a repository, `clone --sparse`, `status`, `log`,
 onto `main` and lands), `update` (the server rebases the head onto `main`) and `checkout`
 any changeset. The README [Getting started](../README.md#getting-started) section runs that
 loop on the compose stack with only Docker and the Rust toolchain installed. Change requests
-are in progress (Phase 5): `scn land` submits one (`SubmitChangeRequest`) and waits while the
+are done (Phase 5): `scn land` submits one (`SubmitChangeRequest`) and waits while the
 serial land worker of the repository rebases and lands it, so concurrent heads land from the
 CLI with no manual `update`, `scn requests` lists them newest first, and `scn log --landed`
 shows which request landed each changeset and when. Merges and reverts run on the server:
 `scn merge <rev>` merges a revision such as a `release/*` fix into your head, `scn revert
 <rev>` undoes a changeset on it, and `scn update --conflicts` writes conflict markers to
-resolve locally instead of refusing. Still to come in this phase: a benchmark of many writers
-landing at once.
+resolve locally instead of refusing. With 16 writers landing at once, the README's
+Benchmarks section shows the total at a fifth of git's push-and-retry loop.
 Git import (Phase 6) works and a benchmark script runs it against git on a real
 repository; the README's Benchmarks section shows the results. A cold `blame` or path `log` (the first call
 for a revision) takes several times git's time; the 6.12 criteria bound how many.

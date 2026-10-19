@@ -53,7 +53,7 @@ ROADMAP = [
     ("2", "Derived data, diff, merge, rebase", "done"),
     ("3", "scion-server + scn CLI", "done"),
     ("6", "git import, init / update / checkout", "done"),
-    ("5", "Change requests, land worker", "planned"),
+    ("5", "Change requests, land worker", "done"),
     ("7", "IAM, fuzzing, simulation", "planned"),
     ("9", "Release and onboarding", "planned"),
     ("4", "Cache + daemon tiers", "planned"),
@@ -61,8 +61,8 @@ ROADMAP = [
 ]
 # Phases run in the order listed: git import comes right after the server and CLI so real
 # repositories can be tested and benchmarked.
-STATUS_DONE = "Done: git import, scn init, clone --sparse, status, log, blame, commit, land, update, checkout"
-STATUS_NEXT = "next: change requests and the land worker, then IAM, release, cache tiers, virtual checkouts"
+STATUS_DONE = "Done: git import, clone --sparse, status, log, blame, commit, change requests + land worker, merge, revert"
+STATUS_NEXT = "next: IAM, fuzzing and simulation, then release, cache tiers, virtual checkouts"
 
 
 def t(x, y, s, size=20, fill=TEXT, weight=400, anchor="start", mono=False, extra=""):
@@ -166,18 +166,18 @@ def architecture_svg():
     # tiers
     b.append(box(470, 470, 250, 120, stroke=TEAL, dashed=True))
     b.append(t(595, 518, "scion-daemon", 22, TEXT, 700, "middle", mono=True))
-    b.append(t(595, 548, "per node · Phase 4", 16, MUTED, 400, "middle"))
+    b.append(t(595, 548, "per node · planned", 16, MUTED, 400, "middle"))
     b.append(t(595, 572, "seeds from snapshot manifest", 15, MUTED, 400, "middle"))
     b.append(box(810, 330, 260, 120, stroke=TEAL, dashed=True))
     b.append(t(940, 378, "scion-cache", 22, TEXT, 700, "middle", mono=True))
-    b.append(t(940, 408, "regional · Phase 4", 16, MUTED, 400, "middle"))
+    b.append(t(940, 408, "regional · planned", 16, MUTED, 400, "middle"))
     b.append(t(940, 432, "memory + disk", 15, MUTED, 400, "middle"))
 
     b.append(box(1150, 190, 380, 260, stroke=AMBER, sw=3))
     b.append(t(1340, 238, "scion-server", 26, TEXT, 700, "middle", mono=True))
     b.append(t(1340, 268, "authoritative", 17, MUTED, 400, "middle"))
     for i, s in enumerate(["control-plane RPCs", "object origin", "derived-data computation",
-                           "serial land worker (Phase 5)"]):
+                           "serial land worker"]):
         b.append(t(1180, 312 + i * 32, "• " + s, 18, TEXT))
 
     # stores

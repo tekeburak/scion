@@ -5,7 +5,7 @@ ones. The README describes what Scion does today and what comes next in product 
 names no phase; this file is where the numbering lives.
 
 <p align="center">
-  <img src="assets/roadmap.svg" width="800" alt="Phases 0 to 3 and 6 done; then phases 5, 7, 9, 4 and 8 planned in that order">
+  <img src="assets/roadmap.svg" width="800" alt="Phases 0 to 3, 6 and 5 done; then phases 7, 9, 4 and 8 planned in that order">
 </p>
 
 | Phase | Scope | Status |
@@ -16,7 +16,7 @@ names no phase; this file is where the numbering lives.
 | 2 | Derived data (trees, path history, blame, skip lists), diff / merge-base / rebase / merge | done |
 | 3 | `scion-server` (gRPC) + `scn` CLI | done |
 | 6 | git → Scion ingestion, benchmarks on a real repository, `scn init` / `update` / `checkout`, bounded cold derivation | done |
-| 5 | Server-side rebase/merge UX, change requests, serial land worker | in progress |
+| 5 | Server-side rebase/merge UX, change requests, serial land worker | done |
 | 7 | IAM (GitHub device-flow login, service principals, repo + directory ACLs), fuzzing, hermetic simulation | planned |
 | 9 | Release and onboarding: versioned binaries, server image, production compose profile, five-minute quickstart | planned |
 | 4 | `scion-cache` and `scion-daemon` tiers, manifest-based seeding | planned |

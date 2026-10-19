@@ -107,19 +107,45 @@ scn land                                   # the server lands it on main
 scn log
 ```
 
-If another clone landed first, the server rebases your change onto the new `main` as it lands
-it, and your working copy moves to the landed changeset. Only a change that edits the same
-lines is refused: `scn land` names the conflicting paths and `main` is untouched. `scn land
---no-wait` returns the request id at once and `scn land --status <id>` reads its outcome
-later; `scn requests` lists the newest requests with their status, head, landed changeset and
-age (`--status needs-rebase` shows only the conflicted ones), and `scn log --landed` adds to
-each changeset the request that landed it and when, even when the server rebased it to a new
-id. After a code change, rebuild
+After a code change, rebuild
 the server with `docker compose -f deploy/docker-compose.yml up -d --wait --build`.
 `docker compose -f deploy/docker-compose.yml down -v` deletes every repository; the next `up`
 starts a new server with it. A `scion-server` run outside compose must be restarted after
 `down -v` too: it keeps an in-memory memo of the objects the bucket holds, and that memo
 outlives the bucket.
+
+### Land with change requests
+
+`scn land` submits your head as a change request. One land worker per repository takes
+requests in the order they arrive, rebases each onto the current `main` on the server and
+moves `main` with a single compare-and-swap, so writers never wait on each other's round
+trips and nobody has to `update` before landing. Continuing in the `demo` repository from
+above, two working copies land at the same moment:
+
+```sh
+cd ..                                      # out of the demo working copy
+export SCN_AUTHOR="Ada <ada@example.com>"
+scn clone http://127.0.0.1:7420 demo alice
+scn clone http://127.0.0.1:7420 demo bob
+echo "from alice" >alice/alice.txt
+echo "from bob" >bob/bob.txt
+(cd alice && scn add alice.txt && scn commit -m "add alice.txt")
+(cd bob && scn add bob.txt && scn commit -m "add bob.txt")
+
+(cd alice && scn land) & (cd bob && scn land) & wait   # both land; no update in between
+(cd bob && scn requests)                   # newest first: id, status, head, landed, age
+(cd alice && scn update && scn log --landed -n 2)   # each with the request that landed it
+```
+
+The request that arrives second is rebased onto the first and lands as a new changeset;
+`scn land` prints both ids (`landed <head> on main as <new id>`) and moves that working copy
+to the landed changeset. Only a change to the same lines as one already on `main` is refused:
+`scn land` names the conflicting paths, `main` is untouched, and `scn update --conflicts`
+writes conflict markers into those files to resolve and `commit` before landing again.
+`scn land --no-wait` prints the request id at once and `scn land --status <id>` reads its
+outcome later; `scn requests --status needs-rebase` lists only the conflicted requests, and
+`scn log --landed` finds the request behind a changeset even when the server rebased it to a
+new id.
 
 ### Import a git repository
 
