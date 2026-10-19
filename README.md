@@ -311,13 +311,15 @@ Read these numbers with their limits:
 
 ## What's next
 
-Access control is under way. Every request is authenticated and checked against the
-repository's roles; directory-scoped grants, GitHub device-flow login and managing access from
-`scn` come next, together with fuzzing and a hermetic simulation. After that, in
-order: released binaries, a
-server image and a production compose profile; the regional cache and per-node daemon tiers
-with manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan,
-with acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
+Access control is under way. Every request needs a token signed by the server: an operator
+issues one with `scion-server token` (for a person or a service principal such as CI) and `scn`
+sends it from `SCN_TOKEN`. Each request also needs a role in its repository (reader, writer,
+admin), granted with `scion-server grant` and removed with `revoke`. Next come directory-scoped
+grants, GitHub device-flow login (`scn login`) and managing access from `scn`, together with
+fuzzing and a hermetic simulation. After that, in order: released binaries, a server image and
+a production compose profile; the regional cache and per-node daemon tiers with
+manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan, with
+acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Repository layout
 

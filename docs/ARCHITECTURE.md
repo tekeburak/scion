@@ -238,7 +238,14 @@ objects are shared), `writer` for `CreateChangeset`, `Rebase`, `Merge`, `Revert`
 requests, `admin` for `MoveRef`, and a server-wide `admin` for `InitRepo`, which makes its
 caller the new repository's admin. A missing role is PERMISSION_DENIED, also for a repository
 that does not exist. Every grant of a repository counts whatever its `path_prefix` for now;
-directory scope and sign-in are the rest of the plan below.
+directory scope is still to come.
+
+Until `scn login` exists, the operator bootstraps access with `scion-server` subcommands that
+work on the stores directly, with no server running: `grant <repo|*> <principal> <role>
+[--path <dir>]`, `revoke <repo|*> <principal> [--path <dir>]` and `token <principal> --ttl
+<duration>`, which prints a token (principals are `github:<login>` or `sp:<name>`). `scn`
+sends `SCN_TOKEN` if it is set, else the per-server file `$XDG_CONFIG_HOME/scn/tokens/<server>`
+that `scn login` will write. The rest of this section is the plan.
 
 Clients authenticate with **GitHub device-flow login** (`scn login`): the CLI shows a device
 code, the server exchanges the resulting GitHub identity for a short-lived Scion token, and
