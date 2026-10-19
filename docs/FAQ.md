@@ -53,8 +53,8 @@ CLI with no manual `update`, `scn requests` lists them newest first, and `scn lo
 shows which request landed each changeset and when. Merges and reverts run on the server:
 `scn merge <rev>` merges a revision such as a `release/*` fix into your head, `scn revert
 <rev>` undoes a changeset on it, and `scn update --conflicts` writes conflict markers to
-resolve locally instead of refusing. Still to come in this phase: a benchmark of many writers
-landing at once.
+resolve locally instead of refusing. A benchmark of 16 writers landing at once is in the
+README (numbers below); what remains in this phase is documentation.
 Git import (Phase 6) works and a benchmark script runs it against git on a real
 repository; the README's Benchmarks section shows the results. A cold `blame` or path `log` (the first call
 for a revision) takes several times git's time; the 6.12 criteria bound how many.

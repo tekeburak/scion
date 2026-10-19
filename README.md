@@ -84,8 +84,8 @@ What works today:
   copies kept for `blame`, the git sha kept in the changeset), resumes from checkpoints, syncs
   incrementally, refuses a rewritten upstream, and `verify` compares every imported tree with
   `git ls-tree`.
-- **Benchmarks** against git on a pinned slice of a real repository, with the numbers
-  [below](#benchmarks).
+- **Benchmarks** against git on a pinned slice of a real repository, from clone and `blame`
+  to 16 writers landing at once, with the numbers [below](#benchmarks).
 
 ## Getting started
 
@@ -246,6 +246,10 @@ Read these numbers with their limits:
   bound. Warm, with the objects already stored, it is 7× git.
 - **Cold `log` and `blame`** pay one object-store round trip per pointer hop, which git's
   local packfile never does. Warm, both are at or below git.
+- **A single commit + land** goes through a change request and the serial land worker, so on
+  its own it takes 1.4× git's local commit and push. The worker pays off under contention: 16
+  writers landing at once finish in 0.20× git's time, because no writer repeats another's
+  fetch, rebase and push.
 - One machine, three runs, shared cloud VM: medians move by several milliseconds between
   runs. The CSV with every sample is [docs/bench-real.csv](docs/bench-real.csv); render it with
   `python3 scripts/render-assets.py`. Older synthetic workloads against an in-process server
