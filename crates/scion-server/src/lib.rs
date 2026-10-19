@@ -85,6 +85,7 @@ fn store_status(e: StoreError) -> Status {
     match e {
         StoreError::Corrupt(_) => Status::data_loss(e.to_string()),
         StoreError::RepoNotFound(_) => Status::not_found(e.to_string()),
+        StoreError::ReservedRepoName(_) => Status::invalid_argument(e.to_string()),
         _ => Status::internal(e.to_string()),
     }
 }

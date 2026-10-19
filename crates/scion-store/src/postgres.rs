@@ -17,8 +17,8 @@ use sqlx::{Executor, Postgres};
 
 use crate::recent::Recent;
 use crate::{
-    ChangeRequest, ChangeRequestStatus, DerivedPointer, LandOutcome, MetadataStore, RefState,
-    Result, StoreError, is_allowed_ref_name,
+    ChangeRequest, ChangeRequestStatus, DerivedPointer, Grant, LandOutcome, MetadataStore,
+    RefState, Result, Role, SERVER_GRANTS, StoreError, is_allowed_ref_name,
 };
 
 /// Embedded migrations from the repository's `migrations/` directory.
@@ -121,6 +121,14 @@ impl PostgresStore {
     /// never created. A repository row is never deleted, so its id is
     /// memoised.
     async fn repo(&self, name: &str) -> Result<i64> {
+        if name == SERVER_GRANTS {
+            return Err(StoreError::RepoNotFound(name.to_owned()));
+        }
+        self.grant_repo(name).await
+    }
+
+    /// [`repo`](Self::repo), also accepting [`SERVER_GRANTS`].
+    async fn grant_repo(&self, name: &str) -> Result<i64> {
         if let Some(id) = self.repo_ids.get(&name.to_owned()).await {
             return Ok(id);
         }
@@ -334,6 +342,9 @@ fn find_landings_sql() -> String {
 #[async_trait]
 impl MetadataStore for PostgresStore {
     async fn create_repo(&self, name: &str) -> Result<()> {
+        if name == SERVER_GRANTS {
+            return Err(StoreError::ReservedRepoName(name.to_owned()));
+        }
         sqlx::query("INSERT INTO repos (name) VALUES ($1) ON CONFLICT (name) DO NOTHING")
             .bind(name)
             .execute(&self.pool)
@@ -924,6 +935,56 @@ impl MetadataStore for PostgresStore {
         .fetch_all(&self.pool)
         .await?;
         Ok(rows.into_iter().map(|(name,)| name).collect())
+    }
+
+    async fn put_grant(&self, repo: &str, grant: &Grant) -> Result<()> {
+        let repo_id = self.grant_repo(repo).await?;
+        sqlx::query(
+            "INSERT INTO grants (repo, principal, path_prefix, role) VALUES ($1, $2, $3, $4) \
+             ON CONFLICT (repo, principal, path_prefix) DO UPDATE SET role = EXCLUDED.role",
+        )
+        .bind(repo_id)
+        .bind(&grant.principal)
+        .bind(&grant.path_prefix)
+        .bind(grant.role.as_str())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn delete_grant(&self, repo: &str, principal: &str, path_prefix: &str) -> Result<bool> {
+        let repo_id = self.grant_repo(repo).await?;
+        let done = sqlx::query(
+            "DELETE FROM grants WHERE repo = $1 AND principal = $2 AND path_prefix = $3",
+        )
+        .bind(repo_id)
+        .bind(principal)
+        .bind(path_prefix)
+        .execute(&self.pool)
+        .await?;
+        Ok(done.rows_affected() > 0)
+    }
+
+    async fn grants_for(&self, repo: &str, principal: &str) -> Result<Vec<Grant>> {
+        let rows: Vec<(String, String)> = sqlx::query_as(
+            "SELECT g.path_prefix, g.role FROM grants g JOIN repos r ON r.id = g.repo \
+             WHERE r.name = $1 AND g.principal = $2 ORDER BY g.path_prefix",
+        )
+        .bind(repo)
+        .bind(principal)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|(path_prefix, role)| {
+                let role = Role::parse(&role)
+                    .ok_or_else(|| StoreError::Corrupt(format!("grant role {role:?}")))?;
+                Ok(Grant {
+                    principal: principal.to_owned(),
+                    path_prefix,
+                    role,
+                })
+            })
+            .collect()
     }
 }
 

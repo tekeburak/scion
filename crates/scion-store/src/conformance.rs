@@ -15,7 +15,10 @@ use scion_types::{
     Timestamp, Tree, TreeEntry,
 };
 
-use crate::{ChangeRequestStatus, LandOutcome, MetadataStore, ObjectStore, StoreError};
+use crate::{
+    ChangeRequestStatus, Grant, LandOutcome, MetadataStore, ObjectStore, Role, SERVER_GRANTS,
+    StoreError,
+};
 
 const REPO: &str = "conformance";
 
@@ -297,6 +300,80 @@ pub async fn checkpoints<S: MetadataStore>(s: &S) {
         s.ingest_checkpoints("other").await.unwrap(),
         vec![],
         "scoped by repo"
+    );
+}
+
+/// Grants are per repository, replace the role of the same principal and
+/// prefix, and can be stored under [`SERVER_GRANTS`], which no repository
+/// can take.
+pub async fn grants<S: MetadataStore>(s: &S) {
+    let grant = |principal: &str, path_prefix: &str, role| Grant {
+        principal: principal.to_owned(),
+        path_prefix: path_prefix.to_owned(),
+        role,
+    };
+    let alice = "github:alice";
+    assert!(matches!(
+        s.put_grant(REPO, &grant(alice, "", Role::Reader)).await,
+        Err(StoreError::RepoNotFound(n)) if n == REPO
+    ));
+    assert!(matches!(
+        s.create_repo(SERVER_GRANTS).await,
+        Err(StoreError::ReservedRepoName(_))
+    ));
+    assert!(matches!(
+        s.create_ref(SERVER_GRANTS, "main", ChangesetId::from_bytes([1; 32]))
+            .await,
+        Err(StoreError::RepoNotFound(_))
+    ));
+
+    s.create_repo(REPO).await.unwrap();
+    s.create_repo("other").await.unwrap();
+    assert_eq!(s.grants_for(REPO, alice).await.unwrap(), vec![]);
+    s.put_grant(REPO, &grant(alice, "lib", Role::Writer))
+        .await
+        .unwrap();
+    s.put_grant(REPO, &grant(alice, "", Role::Writer))
+        .await
+        .unwrap();
+    s.put_grant(REPO, &grant(alice, "", Role::Reader))
+        .await
+        .unwrap();
+    s.put_grant(REPO, &grant("sp:ci", "", Role::Admin))
+        .await
+        .unwrap();
+    s.put_grant(SERVER_GRANTS, &grant(alice, "", Role::Admin))
+        .await
+        .unwrap();
+    assert_eq!(
+        s.grants_for(REPO, alice).await.unwrap(),
+        vec![
+            grant(alice, "", Role::Reader),
+            grant(alice, "lib", Role::Writer)
+        ],
+        "sorted by prefix, the later role wins"
+    );
+    assert_eq!(
+        s.grants_for(SERVER_GRANTS, alice).await.unwrap(),
+        vec![grant(alice, "", Role::Admin)]
+    );
+    assert_eq!(
+        s.grants_for("other", alice).await.unwrap(),
+        vec![],
+        "scoped by repo"
+    );
+    assert_eq!(s.grants_for("missing", alice).await.unwrap(), vec![]);
+
+    assert!(s.delete_grant(REPO, alice, "lib").await.unwrap());
+    assert!(!s.delete_grant(REPO, alice, "lib").await.unwrap());
+    assert!(!s.delete_grant("other", alice, "").await.unwrap());
+    assert_eq!(
+        s.grants_for(REPO, alice).await.unwrap(),
+        vec![grant(alice, "", Role::Reader)]
+    );
+    assert_eq!(
+        s.grants_for(REPO, "sp:ci").await.unwrap(),
+        vec![grant("sp:ci", "", Role::Admin)]
     );
 }
 
@@ -669,6 +746,10 @@ macro_rules! conformance_tests {
                 $crate::conformance::checkpoints(&$ctor.await).await;
             }
             #[tokio::test]
+            async fn grants() {
+                $crate::conformance::grants(&$ctor.await).await;
+            }
+            #[tokio::test]
             async fn change_requests() {
                 $crate::conformance::change_requests(&$ctor.await).await;
             }
@@ -728,6 +809,10 @@ macro_rules! metadata_conformance_tests {
             #[tokio::test]
             async fn checkpoints() {
                 $crate::conformance::checkpoints(&$ctor.await).await;
+            }
+            #[tokio::test]
+            async fn grants() {
+                $crate::conformance::grants(&$ctor.await).await;
             }
             #[tokio::test]
             async fn change_requests() {

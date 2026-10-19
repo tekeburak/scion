@@ -8,8 +8,8 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use proptest::prelude::*;
 use scion_store::{
-    ChangeRequest, ChangeRequestStatus, DerivedPointer, LandOutcome, MemoryStore, MetadataStore,
-    ObjectStore, RefState,
+    ChangeRequest, ChangeRequestStatus, DerivedPointer, Grant, LandOutcome, MemoryStore,
+    MetadataStore, ObjectStore, RefState,
 };
 use scion_types::{
     BlobId, Changeset, ChangesetId, FileChange, FileType, Identity, RepoPath, Timestamp, Tree,
@@ -301,5 +301,22 @@ impl MetadataStore for CountingMeta<'_> {
 
     async fn repos_with_open_change_requests(&self) -> scion_store::Result<Vec<String>> {
         self.inner.repos_with_open_change_requests().await
+    }
+
+    async fn put_grant(&self, repo: &str, grant: &Grant) -> scion_store::Result<()> {
+        self.inner.put_grant(repo, grant).await
+    }
+
+    async fn delete_grant(
+        &self,
+        repo: &str,
+        principal: &str,
+        path_prefix: &str,
+    ) -> scion_store::Result<bool> {
+        self.inner.delete_grant(repo, principal, path_prefix).await
+    }
+
+    async fn grants_for(&self, repo: &str, principal: &str) -> scion_store::Result<Vec<Grant>> {
+        self.inner.grants_for(repo, principal).await
     }
 }

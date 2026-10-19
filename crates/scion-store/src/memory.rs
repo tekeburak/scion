@@ -9,8 +9,8 @@ use bytes::Bytes;
 use scion_types::{BlobId, Changeset, ChangesetId, Tree, TreeId};
 
 use crate::{
-    ChangeRequest, ChangeRequestStatus, DerivedPointer, LandOutcome, MetadataStore, ObjectStore,
-    RefState, Result, StoreError, is_allowed_ref_name,
+    ChangeRequest, ChangeRequestStatus, DerivedPointer, Grant, LandOutcome, MetadataStore,
+    ObjectStore, RefState, Result, Role, SERVER_GRANTS, StoreError, is_allowed_ref_name,
 };
 
 #[derive(Debug, Default)]
@@ -24,6 +24,8 @@ struct Metadata {
     /// `BIGSERIAL`.
     change_requests: HashMap<String, BTreeMap<u64, ChangeRequest>>,
     last_request_id: u64,
+    /// By `(repo, principal, path_prefix)`.
+    grants: BTreeMap<(String, String, String), Role>,
 }
 
 #[derive(Debug, Default)]
@@ -68,11 +70,22 @@ impl Metadata {
             Err(StoreError::RepoNotFound(repo.to_owned()))
         }
     }
+
+    fn check_grant_repo(&self, repo: &str) -> Result<()> {
+        if repo == SERVER_GRANTS || self.repos.contains(repo) {
+            Ok(())
+        } else {
+            Err(StoreError::RepoNotFound(repo.to_owned()))
+        }
+    }
 }
 
 #[async_trait]
 impl MetadataStore for MemoryStore {
     async fn create_repo(&self, name: &str) -> Result<()> {
+        if name == SERVER_GRANTS {
+            return Err(StoreError::ReservedRepoName(name.to_owned()));
+        }
         let mut m = self.meta.write().expect("poisoned");
         m.repos.insert(name.to_owned());
         Ok(())
@@ -358,6 +371,42 @@ impl MetadataStore for MemoryStore {
             .collect();
         repos.sort();
         Ok(repos)
+    }
+
+    async fn put_grant(&self, repo: &str, grant: &Grant) -> Result<()> {
+        let mut m = self.meta.write().expect("poisoned");
+        m.check_grant_repo(repo)?;
+        let key = (
+            repo.to_owned(),
+            grant.principal.clone(),
+            grant.path_prefix.clone(),
+        );
+        m.grants.insert(key, grant.role);
+        Ok(())
+    }
+
+    async fn delete_grant(&self, repo: &str, principal: &str, path_prefix: &str) -> Result<bool> {
+        let mut m = self.meta.write().expect("poisoned");
+        m.check_grant_repo(repo)?;
+        let key = (
+            repo.to_owned(),
+            principal.to_owned(),
+            path_prefix.to_owned(),
+        );
+        Ok(m.grants.remove(&key).is_some())
+    }
+
+    async fn grants_for(&self, repo: &str, principal: &str) -> Result<Vec<Grant>> {
+        let m = self.meta.read().expect("poisoned");
+        Ok(m.grants
+            .iter()
+            .filter(|((r, p, _), _)| r == repo && p == principal)
+            .map(|((_, p, prefix), role)| Grant {
+                principal: p.clone(),
+                path_prefix: prefix.clone(),
+                role: *role,
+            })
+            .collect())
     }
 }
 

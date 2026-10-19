@@ -23,8 +23,8 @@ use object_store::{
 };
 use scion_ingest::{GitRepo, import};
 use scion_store::{
-    ChangeRequest, ChangeRequestStatus, DerivedPointer, LandOutcome, MemoryStore, MetadataStore,
-    ObjectStorage, RefState,
+    ChangeRequest, ChangeRequestStatus, DerivedPointer, Grant, LandOutcome, MemoryStore,
+    MetadataStore, ObjectStorage, RefState,
 };
 use scion_types::{Changeset, ChangesetId};
 
@@ -306,6 +306,26 @@ impl MetadataStore for CountingMeta {
     async fn repos_with_open_change_requests(&self) -> scion_store::Result<Vec<String>> {
         self.tick();
         self.inner.repos_with_open_change_requests().await
+    }
+
+    async fn put_grant(&self, repo: &str, grant: &Grant) -> scion_store::Result<()> {
+        self.tick();
+        self.inner.put_grant(repo, grant).await
+    }
+
+    async fn delete_grant(
+        &self,
+        repo: &str,
+        principal: &str,
+        path_prefix: &str,
+    ) -> scion_store::Result<bool> {
+        self.tick();
+        self.inner.delete_grant(repo, principal, path_prefix).await
+    }
+
+    async fn grants_for(&self, repo: &str, principal: &str) -> scion_store::Result<Vec<Grant>> {
+        self.tick();
+        self.inner.grants_for(repo, principal).await
     }
 }
 

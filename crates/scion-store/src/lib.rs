@@ -4,7 +4,8 @@
 //! (metadata) and Cloud Storage (objects):
 //!
 //! * [`MetadataStore`]: changesets (the write-ahead log), refs (a single-row
-//!   compare-and-swap each), derived-data pointers and change requests.
+//!   compare-and-swap each), derived-data pointers, change requests and
+//!   access grants.
 //! * [`ObjectStore`]: immutable, content-addressed blobs and trees.
 //!
 //! Implementations:
@@ -42,6 +43,8 @@ pub use refs::{RefState, is_allowed_ref_name};
 pub enum StoreError {
     #[error("repository {0:?} does not exist (create it with `scn init`)")]
     RepoNotFound(String),
+    #[error("{0:?} is reserved and cannot name a repository")]
+    ReservedRepoName(String),
     #[error("ref {0:?} already exists")]
     RefExists(String),
     #[error("ref {0:?} not found")]
@@ -164,11 +167,66 @@ impl LandOutcome {
     }
 }
 
-/// Changesets, refs, derived-data pointers and change requests.
+/// The reserved repository name under which server-wide grants are stored.
+/// [`MetadataStore::create_repo`] refuses it and every other method treats it
+/// as an unknown repository, except the grant methods.
+pub const SERVER_GRANTS: &str = "*";
+
+/// What a grant allows. Each role includes the ones before it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Role {
+    /// Read changesets, trees, blobs and derived data.
+    Reader,
+    /// Also create changesets, merges, reverts and change requests.
+    Writer,
+    /// Also move refs directly and manage grants.
+    Admin,
+}
+
+impl Role {
+    const ALL: [Self; 3] = [Self::Reader, Self::Writer, Self::Admin];
+
+    /// The name used in the schema and on the command line.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Reader => "reader",
+            Self::Writer => "writer",
+            Self::Admin => "admin",
+        }
+    }
+
+    /// The role [`as_str`](Self::as_str) spells `s`.
+    #[must_use]
+    pub fn parse(s: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|r| r.as_str() == s)
+    }
+}
+
+impl std::fmt::Display for Role {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+/// One principal's role on the paths of a repository under `path_prefix`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Grant {
+    /// `github:<login>` or `sp:<name>`.
+    pub principal: String,
+    /// A directory of the repository, without a trailing `/`; empty for the
+    /// whole repository.
+    pub path_prefix: String,
+    /// What the principal may do there.
+    pub role: Role,
+}
+
+/// Changesets, refs, derived-data pointers, change requests and grants.
 #[async_trait]
 pub trait MetadataStore: Send + Sync {
     /// Create repository `name`; a no-op if it exists. Every other write
     /// fails with [`StoreError::RepoNotFound`] until this has run.
+    /// [`SERVER_GRANTS`] is [`StoreError::ReservedRepoName`].
     async fn create_repo(&self, name: &str) -> Result<()>;
 
     /// Store changesets in order. Idempotent: storing a changeset again is a
@@ -328,6 +386,19 @@ pub trait MetadataStore: Send + Sync {
     /// The repositories with a `pending` or `landing` request, sorted: the
     /// ones whose land worker has work when the server starts.
     async fn repos_with_open_change_requests(&self) -> Result<Vec<String>>;
+
+    /// Record `grant` in `repo` (a repository or [`SERVER_GRANTS`]),
+    /// replacing the role of an existing grant to the same principal and
+    /// prefix.
+    async fn put_grant(&self, repo: &str, grant: &Grant) -> Result<()>;
+
+    /// Remove the grant of `principal` on `path_prefix` in `repo`; `false` if
+    /// there was none.
+    async fn delete_grant(&self, repo: &str, principal: &str, path_prefix: &str) -> Result<bool>;
+
+    /// Every grant of `principal` in `repo`, by path prefix; empty for an
+    /// unknown repository.
+    async fn grants_for(&self, repo: &str, principal: &str) -> Result<Vec<Grant>>;
 }
 
 /// Immutable content-addressed objects.
