@@ -6,11 +6,22 @@ use std::path::Path;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use scion_client::{CheckoutError, RemoteError, SparseProfile, Workspace, clone};
+use scion_client::{CheckoutError, Remote, RemoteError, SparseProfile, Workspace, clone};
 use scion_derived::test_util::{REPO, changeset};
 use scion_store::{MemoryStore, MetadataStore, ObjectStore};
 use scion_types::{BlobId, ChangesetId, FileChange, FileType, RepoPath};
 use tokio::net::TcpListener;
+
+/// The key the test server signs tokens with.
+fn key() -> scion_server::TokenKey {
+    scion_server::TokenKey::from_hex(&"5c".repeat(32)).unwrap()
+}
+
+/// A token of [`key`], valid for an hour.
+fn token() -> String {
+    let hour = std::time::Duration::from_secs(3600);
+    scion_server::token(&key(), "sp:test", hour, std::time::SystemTime::now()).unwrap()
+}
 
 const FILES: &[(&str, &[u8], FileType)] = &[
     ("README", b"hello\n", FileType::Regular),
@@ -49,8 +60,13 @@ async fn serve() -> (String, ChangesetId) {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(scion_server::serve(listener, store.clone(), store));
+    tokio::spawn(scion_server::serve(listener, store.clone(), store, key()));
     (format!("http://{addr}"), id)
+}
+
+/// A connection to `server` with [`token`].
+async fn remote(server: &str) -> Remote {
+    Remote::with_token(server, &token()).await.unwrap()
 }
 
 /// Every file under `root` outside `.scn/`, relative and sorted.
@@ -81,9 +97,15 @@ async fn full_clone_materializes_every_file() {
     let (server, main) = serve().await;
     let dir = tempfile::tempdir().unwrap();
     let dest = dir.path().join("wc");
-    let ws = clone(&server, REPO, &dest, SparseProfile::full())
-        .await
-        .unwrap();
+    let ws = clone(
+        remote(&server).await,
+        &server,
+        REPO,
+        &dest,
+        SparseProfile::full(),
+    )
+    .await
+    .unwrap();
 
     let mut expected: Vec<&str> = FILES.iter().map(|(p, ..)| *p).collect();
     expected.sort_unstable();
@@ -133,9 +155,15 @@ async fn sparse_clone_materializes_only_the_profile() {
         RepoPath::new("srv/api").unwrap(),
         RepoPath::new("README").unwrap(),
     ]);
-    let ws = clone(&server, REPO, dir.path(), sparse.clone())
-        .await
-        .unwrap();
+    let ws = clone(
+        remote(&server).await,
+        &server,
+        REPO,
+        dir.path(),
+        sparse.clone(),
+    )
+    .await
+    .unwrap();
     assert_eq!(
         listing(dir.path()),
         ["README", "srv/api/lib/util.rs", "srv/api/main.rs"]
@@ -150,12 +178,27 @@ async fn refuses_non_empty_destinations_and_unknown_repos() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("stray"), b"x").unwrap();
     assert!(matches!(
-        clone(&server, REPO, dir.path(), SparseProfile::full()).await,
+        clone(
+            remote(&server).await,
+            &server,
+            REPO,
+            dir.path(),
+            SparseProfile::full()
+        )
+        .await,
         Err(CheckoutError::NotEmpty(_))
     ));
 
     let empty = tempfile::tempdir().unwrap();
-    match clone(&server, "no-such-repo", empty.path(), SparseProfile::full()).await {
+    match clone(
+        remote(&server).await,
+        &server,
+        "no-such-repo",
+        empty.path(),
+        SparseProfile::full(),
+    )
+    .await
+    {
         Err(CheckoutError::Remote(RemoteError::Rpc(status))) => {
             assert_eq!(status.code(), tonic::Code::NotFound);
         }

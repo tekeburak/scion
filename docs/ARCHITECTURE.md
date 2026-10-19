@@ -226,13 +226,15 @@ tier ever holds a materialized copy of the repository.
 
 ### Identity and access (phase 7)
 
-*In progress.* Today the server has no authentication; run it only where every client is
-trusted. Two pieces exist but nothing calls them yet: the token format (`scion-server`'s
-`token` module: a principal and an expiry written with the canonical primitives and signed
-with a keyed BLAKE3 MAC under a 32-byte server key, so verifying one needs no table) and the
-`grants` table (`repo`, `principal`, `path_prefix`, `role` of `reader`, `writer` or `admin`;
-server-wide grants live under the reserved repository `*`). The rest of this section is the
-plan.
+*In progress.* Every control and object request carries `authorization: Bearer <token>`,
+and one interceptor in `scion-server` refuses a missing, altered, foreign or expired token
+with UNAUTHENTICATED; health checks need none. A token is a principal and an expiry written
+with the canonical primitives and signed with a keyed BLAKE3 MAC under the 32-byte server key
+(`SCION_TOKEN_KEY`, without which the server does not start), so verifying one needs no
+table. The `grants` table (`repo`, `principal`, `path_prefix`, `role` of `reader`, `writer`
+or `admin`; server-wide grants live under the reserved repository `*`) exists but is not
+consulted yet: today any valid token can do anything, so run a server only where every token
+holder is trusted. The rest of this section is the plan.
 
 Clients authenticate with **GitHub device-flow login** (`scn login`): the CLI shows a device
 code, the server exchanges the resulting GitHub identity for a short-lived Scion token, and

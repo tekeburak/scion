@@ -36,6 +36,17 @@ use scion_types::{
 };
 use tokio::net::TcpListener;
 
+/// The key the server signs tokens with.
+fn key() -> scion_server::TokenKey {
+    scion_server::TokenKey::from_hex(&"5c".repeat(32)).unwrap()
+}
+
+/// A token of [`key`], valid for an hour.
+fn token() -> String {
+    let hour = std::time::Duration::from_secs(3600);
+    scion_server::token(&key(), "sp:test", hour, std::time::SystemTime::now()).unwrap()
+}
+
 const REPO: &str = "bench";
 const DIRS: usize = 10;
 const FILE_BYTES: usize = 4096;
@@ -199,7 +210,7 @@ async fn serve() -> String {
     let store = Arc::new(MemoryStore::with_repo(REPO));
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(scion_server::serve(listener, store.clone(), store));
+    tokio::spawn(scion_server::serve(listener, store.clone(), store, key()));
     format!("http://{addr}")
 }
 
@@ -234,7 +245,7 @@ async fn run_once(files: &Files, git_s: &mut [Vec<Duration>; 4], scn_s: &mut [Ve
     let src = tmp.path().join("src");
     write_fixture(&src, files);
     let server = serve().await;
-    let remote = Remote::connect(&server).await.unwrap();
+    let remote = Remote::with_token(&server, &token()).await.unwrap();
 
     // Import.
     timed(&mut git_s[0], || {
@@ -279,7 +290,13 @@ async fn run_once(files: &Files, git_s: &mut [Vec<Duration>; 4], scn_s: &mut [Ve
     let scn_full = tmp.path().join("scn-full");
     timed_async(
         &mut scn_s[2],
-        clone(&server, REPO, &scn_full, SparseProfile::full()),
+        clone(
+            remote.clone(),
+            &server,
+            REPO,
+            &scn_full,
+            SparseProfile::full(),
+        ),
     )
     .await
     .unwrap();
@@ -308,6 +325,7 @@ async fn run_once(files: &Files, git_s: &mut [Vec<Duration>; 4], scn_s: &mut [Ve
     timed_async(
         &mut scn_s[3],
         clone(
+            remote.clone(),
             &server,
             REPO,
             &scn_sparse,

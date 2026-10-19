@@ -11,6 +11,17 @@ use scion_store::{MemoryStore, MetadataStore, ObjectStore};
 use scion_types::{BlobId, ChangesetId, FileChange, FileType, RepoPath};
 use tokio::net::TcpListener;
 
+/// The key the test server signs tokens with.
+fn key() -> scion_server::TokenKey {
+    scion_server::TokenKey::from_hex(&"5c".repeat(32)).unwrap()
+}
+
+/// A token of [`key`], valid for an hour.
+fn token() -> String {
+    let hour = std::time::Duration::from_secs(3600);
+    scion_server::token(&key(), "sp:test", hour, std::time::SystemTime::now()).unwrap()
+}
+
 fn tracked(content: &[u8]) -> FileChange {
     FileChange::Tracked {
         content: BlobId::hash(content),
@@ -54,13 +65,14 @@ async fn serve() -> (String, ChangesetId, ChangesetId) {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(scion_server::serve(listener, store.clone(), store));
+    tokio::spawn(scion_server::serve(listener, store.clone(), store, key()));
     (format!("http://{addr}"), c0, c1)
 }
 
 /// Run `scn args` in `dir`; panics unless it succeeds. Returns stdout.
 fn scn(dir: &Path, args: &[&str]) -> String {
     let out = Command::new(env!("CARGO_BIN_EXE_scn"))
+        .env("SCN_TOKEN", token())
         .current_dir(dir)
         .args(args)
         .output()
@@ -146,6 +158,7 @@ async fn errors_are_reported() {
     let dir = tempfile::tempdir().unwrap();
     let run = |args: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_scn"))
+            .env("SCN_TOKEN", token())
             .current_dir(dir.path())
             .args(args)
             .output()
@@ -158,12 +171,14 @@ async fn errors_are_reported() {
     scn(dir.path(), &["clone", &server, REPO, "wc"]);
     let wc = dir.path().join("wc");
     let out = Command::new(env!("CARGO_BIN_EXE_scn"))
+        .env("SCN_TOKEN", token())
         .current_dir(&wc)
         .args(["blame", "srv"])
         .output()
         .unwrap();
     assert!(!out.status.success(), "a directory has no blame");
     let out = Command::new(env!("CARGO_BIN_EXE_scn"))
+        .env("SCN_TOKEN", token())
         .current_dir(&wc)
         .args(["log", "-r", "no-such-label"])
         .output()
@@ -174,6 +189,7 @@ async fn errors_are_reported() {
 /// Run `scn args` in `dir` as author `Ada`; returns (success, stdout, stderr).
 fn scn_try(dir: &Path, args: &[&str]) -> (bool, String, String) {
     let out = Command::new(env!("CARGO_BIN_EXE_scn"))
+        .env("SCN_TOKEN", token())
         .current_dir(dir)
         .env("SCN_AUTHOR", "Ada <ada@example.com>")
         .args(args)
@@ -317,6 +333,7 @@ async fn commit_needs_an_author() {
     let wc = dir.path().join("wc");
     std::fs::write(wc.join("README"), b"x\n").unwrap();
     let out = Command::new(env!("CARGO_BIN_EXE_scn"))
+        .env("SCN_TOKEN", token())
         .current_dir(&wc)
         .env_remove("SCN_AUTHOR")
         .args(["commit", "-m", "m"])
@@ -331,7 +348,7 @@ async fn init_clone_commit_land_without_git() {
     let store = Arc::new(MemoryStore::new());
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let server = format!("http://{}", listener.local_addr().unwrap());
-    tokio::spawn(scion_server::serve(listener, store.clone(), store));
+    tokio::spawn(scion_server::serve(listener, store.clone(), store, key()));
     let dir = tempfile::tempdir().unwrap();
 
     let out = scn(dir.path(), &["init", &server, "fresh"]);
@@ -499,7 +516,7 @@ async fn merge_a_release_fix_and_land_it() {
     store.create_ref(REPO, "release/1", fix).await.unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let server = format!("http://{}", listener.local_addr().unwrap());
-    tokio::spawn(scion_server::serve(listener, store.clone(), store));
+    tokio::spawn(scion_server::serve(listener, store.clone(), store, key()));
 
     let dir = tempfile::tempdir().unwrap();
     scn(dir.path(), &["clone", &server, REPO, "a"]);
@@ -646,7 +663,9 @@ async fn resolve_a_conflict_through_markers_and_land() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn revert_a_landed_change_and_land_the_revert() {
     let (server, _, c1) = serve().await;
-    let mut remote = scion_client::Remote::connect(&server).await.unwrap();
+    let mut remote = scion_client::Remote::with_token(&server, &token())
+        .await
+        .unwrap();
     let before = remote.get_ref(REPO, "main").await.unwrap();
     assert_eq!(before.target, c1);
     let dir = tempfile::tempdir().unwrap();

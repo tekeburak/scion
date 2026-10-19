@@ -1,20 +1,19 @@
 //! The serial land worker over a real transport.
 
+mod common;
+
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
 use bytes::Bytes;
 use futures_util::future::join_all;
 use scion_derived::test_util::{REPO, changeset, tracked};
-use scion_proto::v1::control_service_client::ControlServiceClient;
 use scion_proto::v1::{
     ChangeRequest, ChangeRequestStatus, FindLandingRequest, GetChangeRequestRequest, GetRefRequest,
     LogRequest, SubmitChangeRequestRequest,
 };
 use scion_store::{MemoryStore, MetadataStore, ObjectStore};
 use scion_types::{Changeset, ChangesetId, Decode, RepoPath};
-use tokio::net::TcpListener;
-use tonic::transport::Channel;
 
 async fn commit(store: &MemoryStore, parent: ChangesetId, path: &str) -> ChangesetId {
     edit(store, parent, path, path).await
@@ -54,20 +53,13 @@ async fn advance(store: &MemoryStore, target: ChangesetId) {
         .unwrap();
 }
 
-async fn start(store: Arc<MemoryStore>) -> ControlServiceClient<Channel> {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(scion_server::serve(listener, store.clone(), store));
-    let channel = Channel::from_shared(format!("http://{addr}"))
-        .unwrap()
-        .connect()
-        .await
-        .unwrap();
-    ControlServiceClient::new(channel)
+async fn start(store: Arc<MemoryStore>) -> common::Control {
+    let channel = common::serve(store.clone(), store).await;
+    common::control(channel)
 }
 
 /// Request `id` once the worker has finished it.
-async fn finished(c: &mut ControlServiceClient<Channel>, id: u64) -> ChangeRequest {
+async fn finished(c: &mut common::Control, id: u64) -> ChangeRequest {
     let cr = c
         .get_change_request(GetChangeRequestRequest {
             repo: REPO.into(),
@@ -88,7 +80,7 @@ async fn finished(c: &mut ControlServiceClient<Channel>, id: u64) -> ChangeReque
 }
 
 /// `main`'s first-parent history, newest first.
-async fn main_log(c: &mut ControlServiceClient<Channel>) -> Vec<Changeset> {
+async fn main_log(c: &mut common::Control) -> Vec<Changeset> {
     let main = c
         .get_ref(GetRefRequest {
             repo: REPO.into(),
@@ -187,7 +179,7 @@ async fn requests_waiting_at_start_land_and_a_noop_is_rejected() {
     assert_eq!(main_log(&mut c).await.len(), 2);
 }
 
-async fn submit(c: &mut ControlServiceClient<Channel>, head: ChangesetId) -> ChangeRequest {
+async fn submit(c: &mut common::Control, head: ChangesetId) -> ChangeRequest {
     c.submit_change_request(SubmitChangeRequestRequest {
         repo: REPO.into(),
         head: head.as_bytes().to_vec(),

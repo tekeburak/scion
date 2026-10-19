@@ -1,14 +1,14 @@
 //! `ObjectService` and health over a real transport, backed by an in-memory
 //! object store.
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_proto::v1::{GetBlobRequest, GetTreeRequest, PutBlobRequest, PutTreeRequest};
 use scion_store::{MemoryStore, ObjectStorage};
 use scion_types::{BlobId, Decode, Encode, FileType, PathComponent, Tree, TreeEntry, TreeId};
-use tokio::net::TcpListener;
 use tonic::Code;
 use tonic::transport::Channel;
 use tonic_health::pb::HealthCheckRequest;
@@ -16,23 +16,16 @@ use tonic_health::pb::health_check_response::ServingStatus;
 use tonic_health::pb::health_client::HealthClient;
 
 async fn start() -> Channel {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(scion_server::serve(
-        listener,
+    common::serve(
         Arc::new(MemoryStore::new()),
         Arc::new(ObjectStorage::in_memory()),
-    ));
-    Channel::from_shared(format!("http://{addr}"))
-        .unwrap()
-        .connect()
-        .await
-        .unwrap()
+    )
+    .await
 }
 
 #[tokio::test]
 async fn blobs_and_trees_round_trip() {
-    let mut client = ObjectServiceClient::new(start().await);
+    let mut client = common::objects(start().await);
 
     let id = client
         .put_blob(PutBlobRequest {
@@ -81,7 +74,7 @@ async fn blobs_and_trees_round_trip() {
 
 #[tokio::test]
 async fn missing_objects_are_not_found() {
-    let mut client = ObjectServiceClient::new(start().await);
+    let mut client = common::objects(start().await);
     let id = TreeId::hash(b"absent").as_bytes().to_vec();
     let err = client
         .get_tree(GetTreeRequest { id: id.clone() })
@@ -94,7 +87,7 @@ async fn missing_objects_are_not_found() {
 
 #[tokio::test]
 async fn malformed_input_is_rejected() {
-    let mut client = ObjectServiceClient::new(start().await);
+    let mut client = common::objects(start().await);
     let err = client
         .get_blob(GetBlobRequest { id: vec![1, 2, 3] })
         .await

@@ -155,9 +155,11 @@ pub async fn checkout(
     Ok(Index { entries })
 }
 
-/// Clone `repo` from `server` into `dest` at the current `main`,
-/// materializing only what `sparse` includes. `dest` must be empty or absent.
+/// Clone `repo` from `server`, connected as `remote`, into `dest` at the
+/// current `main`, materializing only what `sparse` includes. `dest` must be
+/// empty or absent.
 pub async fn clone(
+    mut remote: Remote,
     server: &str,
     repo: &str,
     dest: &Path,
@@ -168,7 +170,6 @@ pub async fn clone(
             return Err(CheckoutError::NotEmpty(dest.to_owned()));
         }
     }
-    let mut remote = Remote::connect(server).await?;
     let main = remote.get_ref(repo, MAIN_REF).await?;
     let ws = Workspace::init(
         dest,

@@ -3273,6 +3273,7 @@ dependencies = [
  "tokio",
  "tonic",
  "tonic-health",
+ "tonic-prost",
 ]
 
 [[package]]

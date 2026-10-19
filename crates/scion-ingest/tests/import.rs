@@ -16,6 +16,17 @@ use scion_store::{MemoryStore, MetadataStore, ObjectStore};
 use scion_types::{BlobId, ChangesetId};
 use tokio::net::TcpListener;
 
+/// The key the test server signs tokens with.
+fn key() -> scion_server::TokenKey {
+    scion_server::TokenKey::from_hex(&"5c".repeat(32)).unwrap()
+}
+
+/// A token of [`key`], valid for an hour.
+fn token() -> String {
+    let hour = std::time::Duration::from_secs(3600);
+    scion_server::token(&key(), "sp:test", hour, std::time::SystemTime::now()).unwrap()
+}
+
 const REPO: &str = "mono";
 
 /// path → (git mode, contents) of commit `rev`'s tree, from `git ls-tree`.
@@ -94,17 +105,22 @@ async fn checkouts_equal_git_trees() {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let server = format!("http://{}", listener.local_addr().unwrap());
-    tokio::spawn(scion_server::serve(listener, store.clone(), store.clone()));
+    tokio::spawn(scion_server::serve(
+        listener,
+        store.clone(),
+        store.clone(),
+        key(),
+    ));
 
     // `main` clones to the git tree.
+    let remote = Remote::with_token(&server, &token()).await.unwrap();
     let wc = tmp.path().join("wc");
-    scion_client::clone(&server, REPO, &wc, SparseProfile::full())
+    scion_client::clone(remote.clone(), &server, REPO, &wc, SparseProfile::full())
         .await
         .unwrap();
     assert_eq!(disk_tree(&wc), git_tree(&dir, "main"));
 
     // So does every first-parent commit, checked out by id.
-    let remote = Remote::connect(&server).await.unwrap();
     let deriver = Deriver::new(REPO, &*store, &*store);
     let mut next: Option<ChangesetId> = Some(tip);
     let mut seen = 0;

@@ -1,21 +1,20 @@
 //! `SubmitChangeRequest`, `GetChangeRequest` and `ListChangeRequests` over a
 //! real transport.
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use scion_derived::test_util::{REPO, changeset, tracked};
-use scion_proto::v1::control_service_client::ControlServiceClient;
 use scion_proto::v1::{
     ChangeRequestStatus, GetChangeRequestRequest, ListChangeRequestsRequest,
     SubmitChangeRequestRequest,
 };
 use scion_store::{MemoryStore, MetadataStore, ObjectStore};
 use scion_types::{ChangesetId, RepoPath};
-use tokio::net::TcpListener;
 use tonic::Code;
-use tonic::transport::Channel;
 
 async fn commit(store: &MemoryStore, parents: Vec<ChangesetId>, msg: &str) -> ChangesetId {
     let content = msg.as_bytes();
@@ -30,16 +29,9 @@ async fn commit(store: &MemoryStore, parents: Vec<ChangesetId>, msg: &str) -> Ch
         .unwrap()
 }
 
-async fn start(store: Arc<MemoryStore>) -> ControlServiceClient<Channel> {
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(scion_server::serve(listener, store.clone(), store));
-    let channel = Channel::from_shared(format!("http://{addr}"))
-        .unwrap()
-        .connect()
-        .await
-        .unwrap();
-    ControlServiceClient::new(channel)
+async fn start(store: Arc<MemoryStore>) -> common::Control {
+    let channel = common::serve(store.clone(), store).await;
+    common::control(channel)
 }
 
 fn submit(repo: &str, head: ChangesetId) -> SubmitChangeRequestRequest {

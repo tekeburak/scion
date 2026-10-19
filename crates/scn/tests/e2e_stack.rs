@@ -22,6 +22,17 @@ use scion_store::{ObjectStorage, PostgresStore};
 use scion_types::ChangesetId;
 use tokio::net::TcpListener;
 
+/// The key the test server signs tokens with.
+fn key() -> scion_server::TokenKey {
+    scion_server::TokenKey::from_hex(&"5c".repeat(32)).unwrap()
+}
+
+/// A token of [`key`], valid for an hour.
+fn token() -> String {
+    let hour = std::time::Duration::from_secs(3600);
+    scion_server::token(&key(), "sp:test", hour, std::time::SystemTime::now()).unwrap()
+}
+
 fn env_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_owned())
 }
@@ -53,6 +64,7 @@ async fn serve() -> String {
         listener,
         Arc::new(meta),
         Arc::new(objects),
+        key(),
     ));
     format!("http://{addr}")
 }
@@ -60,6 +72,7 @@ async fn serve() -> String {
 /// Run `scn args` in `dir`; panics unless it succeeds. Returns stdout.
 fn scn(dir: &Path, args: &[&str]) -> String {
     let out = Command::new(env!("CARGO_BIN_EXE_scn"))
+        .env("SCN_TOKEN", token())
         .current_dir(dir)
         .env("SCN_AUTHOR", "E2E <e2e@example.com>")
         .args(args)
@@ -120,6 +133,7 @@ async fn init_clone_commit_land_on_postgres_and_s3() {
         &["init", &server, &repo],
     ] {
         let out = Command::new(env!("CARGO_BIN_EXE_scn"))
+            .env("SCN_TOKEN", token())
             .current_dir(dir.path())
             .args(args)
             .output()
@@ -193,7 +207,7 @@ async fn merge_a_release_fix(server: &str, repo: &str, a: &Path, b: &Path) {
     readme.extend_from_slice(b"fixed\n");
     std::fs::write(b.join("README"), &readme).unwrap();
     let fix = committed(&scn(b, &["commit", "-m", "fix"]));
-    scion_client::Remote::connect(server)
+    scion_client::Remote::with_token(server, &token())
         .await
         .unwrap()
         .create_ref(repo, "release/1", fix)

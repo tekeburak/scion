@@ -3,6 +3,8 @@
 #
 # Usage:
 #   docker compose -f deploy/docker-compose.yml up -d --wait   # scn init http://127.0.0.1:7420 <repo>
+#   export SCN_TOKEN=$(docker compose -f deploy/docker-compose.yml exec -T scion-server \
+#       scion-server token sp:dev --ttl 30d)
 #   cargo test -p scion-store --features integration
 #   cargo test -p scn --features integration --test e2e_stack
 #
@@ -83,6 +85,9 @@ services:
       AWS_SECRET_ACCESS_KEY: scionscion
       AWS_REGION: us-east-1
       SCION_LISTEN: 0.0.0.0:7420
+      # Signs and checks tokens. This default is for the loopback-only local
+      # stack; set SCION_TOKEN_KEY (`openssl rand -hex 32`) anywhere else.
+      SCION_TOKEN_KEY: ${SCION_TOKEN_KEY:-6c6f63616c2d6f6e6c792d73636e2d6465762d6b65792d6e6f742d7365637265}
     ports:
       - "127.0.0.1:7420:7420"
     healthcheck:

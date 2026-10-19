@@ -53,8 +53,9 @@ Scion is that design, built on boring infrastructure:
 ## Status
 
 Scion is **alpha** software. The server, the CLI, git import and the real-repository benchmark
-work and are exercised end to end in CI on Postgres + S3. There is **no authentication yet**:
-run a server only on a network you trust. Landing goes through change requests and a serial
+work and are exercised end to end in CI on Postgres + S3. Every request needs a token
+signed by the server, but **per-repository roles are not enforced yet**: any valid token can
+do anything, so give tokens only to people you trust. Landing goes through change requests and a serial
 land worker, and every request can be listed and traced to the changeset it landed;
 merges and reverts run on the server. The cache and daemon tiers, access control and released
 binaries follow (see [What's next](#whats-next)).
@@ -96,6 +97,9 @@ repository:
 # Postgres, S3 (RustFS) and scion-server on 127.0.0.1:7420; the first run builds the server
 docker compose -f deploy/docker-compose.yml up -d --wait
 cargo install --locked --path crates/scn   # scion-proto's build needs protoc on PATH
+# every request carries a token; the local server signs one for you
+export SCN_TOKEN=$(docker compose -f deploy/docker-compose.yml exec -T scion-server \
+    scion-server token sp:dev --ttl 30d)
 
 scn init http://127.0.0.1:7420 demo        # an empty repository with main at its root
 scn clone http://127.0.0.1:7420 demo
@@ -110,7 +114,8 @@ scn log
 After a code change, rebuild
 the server with `docker compose -f deploy/docker-compose.yml up -d --wait --build`.
 `docker compose -f deploy/docker-compose.yml down -v` deletes every repository; the next `up`
-starts a new server with it. A `scion-server` run outside compose must be restarted after
+starts a new server with it. A token stays valid until its `--ttl` runs out, also across `down -v`. A `scion-server` run
+outside compose needs `SCION_TOKEN_KEY` (`openssl rand -hex 32`) and must be restarted after
 `down -v` too: it keeps an in-memory memo of the objects the bucket holds, and that memo
 outlives the bucket.
 
@@ -161,6 +166,8 @@ this repository:
 docker compose -f deploy/docker-compose.yml up -d --wait
 cargo build --release -p scion-ingest -p scn
 export PATH=$PWD/target/release:$PATH
+export SCN_TOKEN=$(docker compose -f deploy/docker-compose.yml exec -T scion-server \
+    scion-server token sp:dev --ttl 30d)
 
 # scion-ingest works on the stores directly
 export DATABASE_URL=postgres://scion:scion@127.0.0.1:5432/scion

@@ -3,6 +3,8 @@
 //! changeset that wrote it, and the merge can be replayed onto a newer
 //! `main` by `Rebase`.
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -10,13 +12,10 @@ use bytes::Bytes;
 use scion_derived::test_util::{REPO, changeset, tracked};
 use scion_derived::{Blame, Deriver};
 use scion_proto::v1::MergeRequest;
-use scion_proto::v1::control_service_client::ControlServiceClient;
 use scion_server::{Merged, Rebased, merge, rebase};
 use scion_store::{MemoryStore, MetadataStore, ObjectStore};
 use scion_types::{ChangesetId, FileChange, Identity, RepoPath, Timestamp};
-use tokio::net::TcpListener;
 use tonic::Code;
-use tonic::transport::Channel;
 
 fn path(p: &str) -> RepoPath {
     RepoPath::new(p).unwrap()
@@ -146,15 +145,8 @@ async fn a_conflict_names_the_paths() {
 async fn unknown_heads_are_not_found() {
     let (store, [_, main, _]) = release().await;
     let store = Arc::new(store);
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(scion_server::serve(listener, store.clone(), store));
-    let channel = Channel::from_shared(format!("http://{addr}"))
-        .unwrap()
-        .connect()
-        .await
-        .unwrap();
-    let mut client = ControlServiceClient::new(channel);
+    let channel = common::serve(store.clone(), store).await;
+    let mut client = common::control(channel);
     let unknown = ChangesetId::hash(b"unknown");
     for (repo, ours, theirs) in [
         (REPO, main, unknown),

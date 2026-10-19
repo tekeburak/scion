@@ -1,25 +1,24 @@
 //! Control-plane read RPCs over a real transport, backed by an in-memory
 //! metadata and object store.
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use scion_derived::test_util::{REPO, changeset, tracked};
-use scion_proto::v1::control_service_client::ControlServiceClient;
 use scion_proto::v1::{
     BlameRequest, BlameRun, DiffRequest, GetRefRequest, LogRequest, MergeBaseRequest,
     PathLogRequest,
 };
 use scion_store::{MemoryStore, MetadataStore, ObjectStore};
 use scion_types::{BlobId, Changeset, ChangesetId, Decode, RepoPath};
-use tokio::net::TcpListener;
 use tonic::Code;
-use tonic::transport::Channel;
 
 /// `root` ─ `left` (main), and `root` ─ `right` on the side.
 struct Repo {
-    client: ControlServiceClient<Channel>,
+    client: common::Control,
     root: ChangesetId,
     left: ChangesetId,
     right: ChangesetId,
@@ -66,16 +65,9 @@ async fn start() -> Repo {
     let right = commit(&store, vec![root], &[("c.txt", b"c\n")], "right").await;
     store.create_ref(REPO, "main", left).await.unwrap();
 
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(scion_server::serve(listener, store.clone(), store));
-    let channel = Channel::from_shared(format!("http://{addr}"))
-        .unwrap()
-        .connect()
-        .await
-        .unwrap();
+    let channel = common::serve(store.clone(), store).await;
     Repo {
-        client: ControlServiceClient::new(channel),
+        client: common::control(channel),
         root,
         left,
         right,

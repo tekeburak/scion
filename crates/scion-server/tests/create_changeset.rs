@@ -1,40 +1,31 @@
 //! `CreateChangeset` over a real transport: upload blobs through
 //! `ObjectService`, then create changesets through `ControlService`.
 
+mod common;
+
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use scion_derived::test_util::{REPO, changeset, tracked};
 use scion_derived::{Blame, Deriver, PathHistory, RootTree, SkipList};
-use scion_proto::v1::control_service_client::ControlServiceClient;
-use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_proto::v1::{CreateChangesetRequest, LogRequest, PutBlobRequest};
 use scion_store::{MemoryStore, MetadataStore, ObjectStore};
 use scion_types::{Changeset, ChangesetId, Decode, Encode, FileChange, RepoPath, TreeId};
-use tokio::net::TcpListener;
 use tonic::Code;
-use tonic::transport::Channel;
 
 struct Server {
     store: Arc<MemoryStore>,
-    control: ControlServiceClient<Channel>,
-    objects: ObjectServiceClient<Channel>,
+    control: common::Control,
+    objects: common::Objects,
 }
 
 async fn start() -> Server {
     let store = Arc::new(MemoryStore::with_repo(REPO));
-    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    tokio::spawn(scion_server::serve(listener, store.clone(), store.clone()));
-    let channel = Channel::from_shared(format!("http://{addr}"))
-        .unwrap()
-        .connect()
-        .await
-        .unwrap();
+    let channel = common::serve(store.clone(), store.clone()).await;
     Server {
         store,
-        control: ControlServiceClient::new(channel.clone()),
-        objects: ObjectServiceClient::new(channel),
+        control: common::control(channel.clone()),
+        objects: common::objects(channel),
     }
 }
 

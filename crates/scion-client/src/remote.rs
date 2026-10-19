@@ -263,12 +263,27 @@ impl Remote {
     /// Connect to `server` (e.g. `http://127.0.0.1:7070`). Every request
     /// carries the server's token (see [`token_path`]) if there is one.
     pub async fn connect(server: &str) -> Result<Self, RemoteError> {
-        let bearer = match token_for(server)? {
+        match token_for(server)? {
+            None => Self::open(server, None).await,
+            Some((token, from)) => Self::open(server, Some((&token, &from))).await,
+        }
+    }
+
+    /// Connect to `server` with `token`, whatever `SCN_TOKEN` and the token
+    /// files say.
+    pub async fn with_token(server: &str, token: &str) -> Result<Self, RemoteError> {
+        Self::open(server, Some((token, "the caller"))).await
+    }
+
+    /// Connect, sending `token` (and where it came from, for the error) if
+    /// given.
+    async fn open(server: &str, token: Option<(&str, &str)>) -> Result<Self, RemoteError> {
+        let bearer = match token {
             None => None,
             Some((token, from)) => Some(
                 format!("Bearer {token}")
                     .parse()
-                    .map_err(|_| RemoteError::BadToken(server.to_owned(), from))?,
+                    .map_err(|_| RemoteError::BadToken(server.to_owned(), from.to_owned()))?,
             ),
         };
         let channel = Endpoint::from_shared(server.to_owned())

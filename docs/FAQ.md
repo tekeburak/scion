@@ -40,8 +40,9 @@ changing any id or any client.
 
 ## Can I use it today?
 
-Not for real work: there is no authentication yet (Phase 7 is in progress: the token format
-and the grants table exist, but no request is checked) and no cache tier yet (Phase 4).
+Not for real work: access control is incomplete (Phase 7 is in progress: every request needs
+a valid token, but grants are not enforced yet, so any token can do anything) and there is no
+cache tier yet (Phase 4).
 The MVP (Phase 3) is done: `scion-server` serves the object and control gRPC services over
 Postgres + S3. `scn` can `init` a repository, `clone --sparse`, `status`, `log`, `diff`,
 `blame`, `add`, `commit` (an anonymous head), `land` (a change request the server rebases

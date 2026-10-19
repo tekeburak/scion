@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+mod auth;
 mod backfill;
 mod control;
 mod land;
@@ -23,8 +24,10 @@ use scion_store::{MetadataStore, ObjectStore, StoreError};
 use tokio::net::TcpListener;
 use tonic::Status;
 use tonic::service::Routes;
+use tonic::service::interceptor::InterceptedService;
 use tonic::transport::server::TcpIncoming;
 
+use auth::Authenticate;
 use control::ControlServer;
 use land::LandWorkers;
 use object::ObjectServer;
@@ -46,15 +49,17 @@ pub const MAX_MESSAGE_BYTES: usize = 64 << 20;
 
 /// Serve all services on `listener` until the future is dropped or the
 /// transport fails, first starting the land worker of every repository with
-/// requests waiting.
+/// requests waiting. Control and object requests need a token signed with
+/// `key`.
 pub async fn serve(
     listener: TcpListener,
     meta: Arc<dyn MetadataStore>,
     objects: Arc<dyn ObjectStore>,
+    key: TokenKey,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tonic::transport::Server::builder()
         .timeout(RPC_DEADLINE)
-        .add_routes(routes(meta, objects).await?)
+        .add_routes(routes(meta, objects, key).await?)
         // Without TCP_NODELAY a small reply waits for the client's delayed
         // ACK, about 40 ms on Linux, whenever two writes go out back to back.
         .serve_with_incoming(TcpIncoming::from(listener).with_nodelay(Some(true)))
@@ -64,10 +69,12 @@ pub async fn serve(
 
 /// The health, control and object services [`serve`] runs, for a server
 /// built with its own layers. Starts the land worker of every repository
-/// with requests waiting.
+/// with requests waiting. Control and object requests need a token signed
+/// with `key`; health checks need none.
 pub async fn routes(
     meta: Arc<dyn MetadataStore>,
     objects: Arc<dyn ObjectStore>,
+    key: TokenKey,
 ) -> Result<Routes, StoreError> {
     let workers = Arc::new(LandWorkers::new(meta.clone(), objects.clone()));
     for repo in meta.repos_with_open_change_requests().await? {
@@ -87,9 +94,13 @@ pub async fn routes(
     let object_service = ObjectServiceServer::new(ObjectServer::new(objects))
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let authenticate = Authenticate(key);
     Ok(Routes::new(health_service)
-        .add_service(control_service)
-        .add_service(object_service))
+        .add_service(InterceptedService::new(
+            control_service,
+            authenticate.clone(),
+        ))
+        .add_service(InterceptedService::new(object_service, authenticate)))
 }
 
 /// Map a store failure to a gRPC status.

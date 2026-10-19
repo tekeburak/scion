@@ -420,7 +420,8 @@ async fn clone(
         .iter()
         .map(|p| RepoPath::new(p.trim_end_matches('/')).map_err(|e| format!("--sparse {p}: {e}")))
         .collect::<Result<_, _>>()?;
-    let ws = scion_client::clone(server, repo, &dest, SparseProfile::new(paths)).await?;
+    let remote = Remote::connect(server).await?;
+    let ws = scion_client::clone(remote, server, repo, &dest, SparseProfile::new(paths)).await?;
     let head = ws.read_state()?.current_head;
     let files = ws.read_index()?.entries.len();
     writeln!(

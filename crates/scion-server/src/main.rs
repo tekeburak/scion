@@ -29,7 +29,8 @@
 //!   `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`,
 //!   `AWS_ALLOW_HTTP`, ...).
 //! * `SCION_LISTEN`: listen address, default `0.0.0.0:7420`.
-//! * `SCION_TOKEN_KEY`: the 32-byte token key in hex (`token` only, for now).
+//! * `SCION_TOKEN_KEY`: the 32-byte key tokens are signed with, in hex
+//!   (`openssl rand -hex 32`). `serve` and `token` refuse to run without it.
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -48,16 +49,24 @@ async fn metadata() -> Result<PostgresStore, Box<dyn std::error::Error + Send + 
     Ok(meta)
 }
 
+/// The token key from `SCION_TOKEN_KEY`.
+fn token_key() -> Result<TokenKey, Box<dyn std::error::Error + Send + Sync>> {
+    let key = std::env::var("SCION_TOKEN_KEY")
+        .map_err(|_| "SCION_TOKEN_KEY is not set (make one with `openssl rand -hex 32`)")?;
+    Ok(TokenKey::from_hex(&key)?)
+}
+
 async fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match Command::parse(args)? {
         Command::Serve => {
+            let key = token_key()?;
             let listen =
                 std::env::var("SCION_LISTEN").unwrap_or_else(|_| "0.0.0.0:7420".to_owned());
             let meta = metadata().await?;
             let objects = ObjectStorage::new(Arc::new(AmazonS3Builder::from_env().build()?));
             let listener = TcpListener::bind(&listen).await?;
             eprintln!("scion-server listening on {}", listener.local_addr()?);
-            scion_server::serve(listener, Arc::new(meta), Arc::new(objects)).await?;
+            scion_server::serve(listener, Arc::new(meta), Arc::new(objects), key).await?;
         }
         Command::Backfill { repo, ty } => {
             let meta = metadata().await?;
@@ -79,9 +88,7 @@ async fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + S
             println!("{done}");
         }
         Command::Token { principal, ttl } => {
-            let key = std::env::var("SCION_TOKEN_KEY").map_err(|_| "SCION_TOKEN_KEY is not set")?;
-            let key = TokenKey::from_hex(&key)?;
-            let token = scion_server::token(&key, &principal, ttl, SystemTime::now())?;
+            let token = scion_server::token(&token_key()?, &principal, ttl, SystemTime::now())?;
             println!("{token}");
         }
     }
