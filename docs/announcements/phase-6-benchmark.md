@@ -2,8 +2,9 @@
 
 **Status: draft. Not posted anywhere.** Updated when Phase 6 had merged in full, through
 6.18 (#85), after the server side of change requests (5.1 to 5.4, #93), and after `scn land`
-started submitting change requests (5.5, #99), listing them (5.6, #103) and finding which
-request landed a changeset (5.7, #106). Every number below is a median from the README's [Benchmarks](../../README.md#benchmarks)
+started submitting change requests (5.5, #99), listing them (5.6, #103), finding which
+request landed a changeset (5.7, #106), and after server-side merge (5.8, #109), conflict
+markers on `update` (5.9, #110) and server-side revert (5.10, #111). Every number below is a median from the README's [Benchmarks](../../README.md#benchmarks)
 table (`docs/bench-real.csv`, commit `ba08ff9`, three runs); re-check them against the README
 before posting. The commit + `land` row was measured at `ba08ff9`, before `scn land` went
 through change requests; re-run `scripts/bench-real` and re-check that row before quoting it.
@@ -19,7 +20,7 @@ one specific case: a single very large monorepo whose clients (CI jobs, agent sa
 developer machines) are always online and whose commits come mostly from coding agents.
 `scion-server` keeps metadata in Postgres and every blob and tree in an S3-compatible object
 store; the `scn` CLI can `init`, `clone --sparse`, `status`, `log`, `diff`, `blame`, `commit`,
-`land`, `update` (a server-side rebase onto `main`) and `checkout`; and `scion-ingest` imports a git history and verifies every imported tree against
+`land`, `update` (a server-side rebase onto `main`), `merge`, `revert` and `checkout`; and `scion-ingest` imports a git history and verifies every imported tree against
 `git ls-tree`. It is an independent project based on the design in Anthropic's post
 "Redesigning source control at Anthropic", and is not affiliated with Anthropic.
 
@@ -39,8 +40,8 @@ Medians: sparse clone 75 ms against git's 646 ms, `status` 11 ms against 292 ms,
 29 ms. Where git wins: import into an empty bucket is 15× git's time (5.3× with the objects
 already in the bucket), and a cold path `log` is 8.7× and a cold `blame` 4.0× git's, because
 each pointer hop is an object-store round trip. What is missing: no authentication
-(Phase 7), no cache or daemon tiers (Phase 4), no server-side merge or revert yet
-(Phase 5), no release binaries yet (Phase 9), no Windows, offline mode or git wire
+(Phase 7), no cache or daemon tiers (Phase 4), no benchmark of many writers landing at
+once yet (Phase 5), no release binaries yet (Phase 9), no Windows, offline mode or git wire
 compatibility. It is one machine and three runs, it is not production-ready, and for most
 repositories git is the right tool.
 
@@ -72,8 +73,11 @@ through one serial worker per repository: rebased onto `main`, moved in with one
 compare-and-swap, conflicts reported by path, and a request interrupted by a restart lands
 exactly once, and `scn land` submits the head and waits for that outcome, so two clones land
 at the same time with no `update` in between; `scn requests` lists them and `scn log
---landed` shows which request landed each changeset and when. Next are server-side merge and
-revert, then auth, release binaries and the cache tiers. Not
+--landed` shows which request landed each changeset and when. Merges (`scn merge`, e.g. a
+`release/*` fix into a head) and reverts (`scn revert`) run on the server and keep blame on
+the changesets that wrote the lines, and `scn update --conflicts` writes conflict markers
+instead of refusing. Next is a benchmark of many writers landing at once, then auth, release
+binaries and the cache tiers. Not
 production-ready. Feedback on the derived-data design and the benchmark method is very welcome.
 
 ## Türkçe (5 cümle)
@@ -90,5 +94,6 @@ zaten varken 5,3 katı), soğuk `log` 8,7 katı, soğuk `blame` 4,0 katı sürü
 işaretçi adımı nesne deposuna bir gidiş-dönüş.
 Kimlik doğrulama ve önbellek katmanları henüz yok; `scn land` artık bir change request açıyor
 ve sunucudaki seri land worker onu `main`'e rebase edip işliyor, `scn requests` bu istekleri
-listeliyor ve `scn log --landed` her changeset'i hangi isteğin ne zaman işlediğini gösteriyor, ama proje üretime hazır değil
+listeliyor, `scn log --landed` her changeset'i hangi isteğin ne zaman işlediğini gösteriyor,
+merge ve revert de sunucuda çalışıyor, ama proje üretime hazır değil
 ve çoğu repo için doğru araç hâlâ git.
