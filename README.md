@@ -293,9 +293,11 @@ Read these numbers with their limits:
 
 ## What's next
 
-In order: access
-control (GitHub device-flow login, service principals, repository
-and directory ACLs) together with fuzzing and a hermetic simulation; released binaries, a
+Access control is under way. The server already has its signed, stateless token format and a
+store of per-repository and per-directory grants (reader, writer, admin), but nothing checks
+them yet: operator commands, GitHub device-flow login, service principals and enforcement at
+the server boundary come next, together with fuzzing and a hermetic simulation. After that, in
+order: released binaries, a
 server image and a production compose profile; the regional cache and per-node daemon tiers
 with manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan,
 with acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
