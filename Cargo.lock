@@ -3258,8 +3258,10 @@ name = "scion-server"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "blake3",
  "bytes",
  "futures-util",
+ "hex",
  "object_store",
  "proptest",
  "scion-core",
@@ -3267,6 +3269,7 @@ dependencies = [
  "scion-proto",
  "scion-store",
  "scion-types",
+ "thiserror",
  "tokio",
  "tonic",
  "tonic-health",

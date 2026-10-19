@@ -14,9 +14,12 @@ scion-proto.workspace = true
 scion-derived.workspace = true
 scion-core.workspace = true
 async-trait.workspace = true
+blake3.workspace = true
 bytes.workspace = true
+hex.workspace = true
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 object_store = { version = "0.14.2", features = ["aws"] }
+thiserror.workspace = true
 tokio = { workspace = true, features = ["net"] }
 tonic.workspace = true
 tonic-health.workspace = true

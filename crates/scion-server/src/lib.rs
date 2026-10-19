@@ -11,6 +11,7 @@ mod control;
 mod land;
 mod object;
 mod staged;
+mod token;
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -30,6 +31,7 @@ pub use backfill::{BACKFILL_TYPES, backfill};
 pub use control::{
     MAX_LOG_LIMIT, Merged, Rebased, Reverted, create_changesets, merge, move_ref, rebase, revert,
 };
+pub use token::{TokenError, TokenKey};
 
 /// Upper bound on every RPC. A client may ask for less with `grpc-timeout`;
 /// it cannot get more.
