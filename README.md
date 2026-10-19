@@ -56,14 +56,14 @@ Scion is **alpha** software. The server, the CLI, git import and the real-reposi
 work and are exercised end to end in CI on Postgres + S3. There is **no authentication yet**:
 run a server only on a network you trust. Landing goes through change requests and a serial
 land worker, and every request can be listed and traced to the changeset it landed;
-server-side merge and revert are under construction, and the cache and daemon tiers, access
-control and released binaries follow (see [What's next](#whats-next)).
+merges and reverts run on the server. The cache and daemon tiers, access control and released
+binaries follow (see [What's next](#whats-next)).
 
 What works today:
 
 - **`scion-server`**: the control-plane and object gRPC services over Postgres + S3 — `log`,
   `diff`, `path_log`, `merge_base`, `blame`, `create_changeset`, `move_ref`, `rebase`, `merge`,
-  change requests — plus `backfill`, which derives a type for a repository's whole history
+  `revert`, change requests — plus `backfill`, which derives a type for a repository's whole history
   ahead of the first request.
 - **Change requests and the land worker**: a submitted head is landed by one serial worker
   per repository, in submission order, rebased onto the current `main` on the server and
@@ -76,7 +76,9 @@ What works today:
   commit instead of refusing), `requests` (the repository's change requests, newest
   first, by status), `log --landed` (which request landed each changeset, and when), `merge`
   (the server merges a revision such as a `release/*` fix into your head; blame credits the
-  fix to the changeset that wrote it) and `checkout` of any changeset. Two clones landing
+  fix to the changeset that wrote it), `revert` (the server undoes a changeset on your head,
+  refusing if its files changed since; blame keeps crediting the restored lines to their
+  authors) and `checkout` of any changeset. Two clones landing
   at the same time, with no `update` in between, is the CI end-to-end test.
 - **`scion-ingest`**: imports a git history into Scion (one changeset per commit, renames and
   copies kept for `blame`, the git sha kept in the changeset), resumes from checkpoints, syncs
@@ -255,7 +257,7 @@ Read these numbers with their limits:
 
 ## What's next
 
-In order: server-side revert, with a benchmark of many writers landing at once; then access
+In order: a benchmark of many writers landing at once; then access
 control (GitHub device-flow login, service principals, repository
 and directory ACLs) together with fuzzing and a hermetic simulation; released binaries, a
 server image and a production compose profile; the regional cache and per-node daemon tiers

@@ -1,5 +1,5 @@
-//! `checkout <rev>`, `update` and `merge`: move a working copy to another
-//! changeset.
+//! `checkout <rev>`, `update`, `merge` and `revert`: move a working copy to
+//! another changeset.
 //!
 //! `update --conflicts` is the one move that leaves local edits behind: when
 //! the server cannot replay the head, the working copy goes to the target
@@ -21,7 +21,7 @@ use scion_types::{BlobId, ChangesetId, FileType, Identity, RepoPath, Timestamp};
 
 use crate::checkout::{CheckoutError, FETCH_CONCURRENCY, File, write_file};
 use crate::index::Index;
-use crate::remote::{FileEntry, Merged, Rebased, Remote, RemoteError};
+use crate::remote::{FileEntry, Merged, Rebased, Remote, RemoteError, Reverted};
 use crate::status::{FileStatus, StatusError, status};
 use crate::workspace::{Workspace, WorkspaceError};
 
@@ -54,6 +54,14 @@ pub enum SwitchError {
     Conflict {
         changeset: ChangesetId,
         onto: ChangesetId,
+        paths: Vec<RepoPath>,
+    },
+    #[error(
+        "cannot revert {changeset}: changed again since; nothing was changed{}",
+        list(.paths)
+    )]
+    ChangedSince {
+        changeset: ChangesetId,
         paths: Vec<RepoPath>,
     },
 }
@@ -428,4 +436,42 @@ pub async fn update_with_markers(
     Ok(Marked::Conflicted {
         conflicts: conflicts.into_iter().collect(),
     })
+}
+
+/// Undo `target` on the working copy's head on the server, as a changeset by
+/// `author` at `date`, and move the working copy to it; returns the new
+/// head. Local edits are refused; when a path `target` changed was changed
+/// again since, nothing changes.
+pub async fn revert(
+    ws: &Workspace,
+    remote: &Remote,
+    target: ChangesetId,
+    (author, date): (&Identity, Timestamp),
+    message: &str,
+) -> Result<ChangesetId, SwitchError> {
+    let repo = ws.read_config()?.repo;
+    let mut state = ws.read_state()?;
+    let mut index = ws.read_index()?;
+    let edits = local_edits(ws, &index)?;
+    if !edits.is_empty() {
+        return Err(SwitchError::Dirty(edits));
+    }
+    let old = state.current_head;
+    let head = match remote
+        .clone()
+        .revert(&repo, (old, target), (author, date), message)
+        .await?
+    {
+        Reverted::Clean { reverted } => reverted,
+        Reverted::ChangedSince { paths } => {
+            return Err(SwitchError::ChangedSince {
+                changeset: target,
+                paths,
+            });
+        }
+    };
+    apply(ws, remote, &mut index, (old, head), &[], false).await?;
+    state.current_head = head;
+    ws.write_state(&state)?;
+    Ok(head)
 }

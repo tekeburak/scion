@@ -640,6 +640,64 @@ async fn resolve_a_conflict_through_markers_and_land() {
     assert!(c.join("a.txt").is_file() && c.join("b.txt").is_file());
 }
 
+/// A landed change is reverted and the revert lands: `main`'s tree is the
+/// one from before the change, and reverting it again is refused because
+/// its paths changed since.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn revert_a_landed_change_and_land_the_revert() {
+    let (server, _, c1) = serve().await;
+    let mut remote = scion_client::Remote::connect(&server).await.unwrap();
+    let before = remote.get_ref(REPO, "main").await.unwrap();
+    assert_eq!(before.target, c1);
+    let dir = tempfile::tempdir().unwrap();
+    scn(dir.path(), &["clone", &server, REPO, "wc"]);
+    let wc = dir.path().join("wc");
+
+    std::fs::write(wc.join("README"), b"rewritten\n").unwrap();
+    std::fs::write(wc.join("new.txt"), b"new\n").unwrap();
+    std::fs::remove_file(wc.join("srv/web/index.html")).unwrap();
+    scn(&wc, &["add", "new.txt"]);
+    let (ok, out, err) = scn_try(&wc, &["commit", "-m", "a bad idea\n\nlong body"]);
+    assert!(ok, "{err}");
+    let bad = id_after(&out, "committed ");
+    scn(&wc, &["land"]);
+
+    let (ok, out, err) = scn_try(&wc, &["revert", "main"]);
+    assert!(ok, "{err}");
+    assert!(out.starts_with(&format!("reverted {bad} as ")), "{out}");
+    let reverted = id_after(&out, " as ");
+    assert_eq!(
+        std::fs::read(wc.join("README")).unwrap(),
+        b"one\ntwo\nthree\n"
+    );
+    assert!(!wc.join("new.txt").exists());
+    assert!(wc.join("srv/web/index.html").is_file());
+    assert_eq!(scn(&wc, &["status"]), "");
+    let log = scn(&wc, &["log", "-n", "1"]);
+    assert!(
+        log.contains(&format!(
+            "    Revert \"a bad idea\"\n    \n    This reverts {bad}.\n"
+        )),
+        "{log}"
+    );
+
+    assert_eq!(scn(&wc, &["land"]), format!("landed {reverted} on main\n"));
+    let after = remote.get_ref(REPO, "main").await.unwrap();
+    assert_eq!(after.target, reverted);
+    assert_eq!(after.root_tree, before.root_tree);
+
+    // `bad`'s paths have changed since (the revert changed them back).
+    let (ok, _, err) = scn_try(&wc, &["revert", &bad.to_hex()]);
+    assert!(
+        !ok && err.contains("changed again since") && err.contains("\n  README"),
+        "{err}"
+    );
+    assert_eq!(
+        id_after(&scn(&wc, &["log", "-n", "1"]), "changeset "),
+        reverted
+    );
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn land_without_waiting_and_read_the_request_back() {
     let (server, ..) = serve().await;

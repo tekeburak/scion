@@ -9,7 +9,7 @@ use scion_proto::v1::{
     BlameRequest, CreateChangesetRequest, DiffRequest, FindLandingRequest, GetBlobRequest,
     GetChangeRequestRequest, GetRefRequest, GetTreeRequest, ListChangeRequestsRequest, LogRequest,
     LogResponse, MergeBaseRequest, MergeRequest, MoveRefRequest, PathLogRequest, PutBlobRequest,
-    RebaseRequest, SubmitChangeRequestRequest,
+    RebaseRequest, RevertRequest, SubmitChangeRequestRequest,
 };
 use scion_types::{
     BlobId, Changeset, ChangesetId, Decode, Encode, FileType, Identity, RepoPath, Timestamp, Tree,
@@ -83,6 +83,16 @@ pub enum Merged {
     Clean { merged: ChangesetId, created: bool },
     /// The heads conflict on `paths`; nothing was created.
     Conflict { paths: Vec<RepoPath> },
+}
+
+/// What the server's `Revert` did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reverted {
+    /// The changeset that undoes the reverted one.
+    Clean { reverted: ChangesetId },
+    /// These paths changed again since the reverted changeset; nothing was
+    /// created.
+    ChangedSince { paths: Vec<RepoPath> },
 }
 
 /// Consecutive lines last changed by one changeset.
@@ -406,6 +416,43 @@ impl Remote {
         Ok(Merged::Conflict {
             paths: resp
                 .conflicts
+                .into_iter()
+                .map(|p| RepoPath::new(p).map_err(|_| RemoteError::Malformed("path")))
+                .collect::<Result<_, _>>()?,
+        })
+    }
+
+    /// Undo `target` on `head` on the server, creating a changeset on
+    /// `head` written by `author` at `date`.
+    pub async fn revert(
+        &mut self,
+        repo: &str,
+        (head, target): (ChangesetId, ChangesetId),
+        (author, date): (&Identity, Timestamp),
+        message: &str,
+    ) -> Result<Reverted, RemoteError> {
+        let resp = self
+            .control
+            .revert(RevertRequest {
+                repo: repo.to_owned(),
+                head: head.as_bytes().to_vec(),
+                changeset: target.as_bytes().to_vec(),
+                author_name: author.name.clone(),
+                author_email: author.email.clone(),
+                author_unix_secs: date.unix_secs,
+                author_tz_offset_minutes: date.tz_offset_minutes,
+                message: message.to_owned(),
+            })
+            .await?
+            .into_inner();
+        if let Some(reverted) = resp.reverted {
+            return Ok(Reverted::Clean {
+                reverted: changeset_id(&reverted, "revert changeset")?,
+            });
+        }
+        Ok(Reverted::ChangedSince {
+            paths: resp
+                .changed_since
                 .into_iter()
                 .map(|p| RepoPath::new(p).map_err(|_| RemoteError::Malformed("path")))
                 .collect::<Result<_, _>>()?,

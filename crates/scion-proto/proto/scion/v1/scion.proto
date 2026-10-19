@@ -73,6 +73,7 @@ service ControlService {
   rpc MergeBase(MergeBaseRequest) returns (MergeBaseResponse);
   rpc Rebase(RebaseRequest) returns (RebaseResponse);
   rpc Merge(MergeRequest) returns (MergeResponse);
+  rpc Revert(RevertRequest) returns (RevertResponse);
   rpc Blame(BlameRequest) returns (BlameResponse);
   rpc SubmitChangeRequest(SubmitChangeRequestRequest) returns (ChangeRequest);
   rpc GetChangeRequest(GetChangeRequestRequest) returns (ChangeRequest);
@@ -238,6 +239,34 @@ message MergeResponse {
   bool created = 3;
   // On a conflict: the conflicting paths, sorted.
   repeated string conflicts = 4;
+}
+
+// Undo `changeset` on `head`: create a changeset with parent `head` that
+// sets every path `changeset` changed back to its state at `changeset`'s
+// first parent (the empty tree for a root). A restored file carries
+// `copy_from` (its path, that parent), so blame keeps crediting its lines
+// to the changesets that wrote them. Refused, creating nothing, when a path
+// was changed again between `changeset` and `head`. `changeset` must be an
+// ancestor of `head` and change at least one file (FAILED_PRECONDITION
+// otherwise); an unknown `head` or `changeset` is NOT_FOUND.
+message RevertRequest {
+  string repo = 1;
+  bytes head = 2;
+  bytes changeset = 3;
+  // The revert changeset's author, date and message.
+  string author_name = 4;
+  string author_email = 5;
+  int64 author_unix_secs = 6;
+  int32 author_tz_offset_minutes = 7;
+  string message = 8;
+}
+
+message RevertResponse {
+  // The revert changeset and its root tree; absent when refused.
+  optional bytes reverted = 1;
+  bytes root_tree = 2;
+  // When refused: the paths changed since `changeset`, sorted.
+  repeated string changed_since = 3;
 }
 
 // Line attribution of the file at `path` in `changeset`. A path that is not a

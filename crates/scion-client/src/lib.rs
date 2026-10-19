@@ -34,9 +34,11 @@ pub use commit::{CommitError, commit};
 pub use index::{Index, IndexEntry};
 pub use remote::{
     BlameRun, ChangeRequestStatus, DiffEntry, FileEntry, Merged, RPC_DEADLINE, Rebased, Remote,
-    RemoteChangeRequest, RemoteError, RemoteRef, RequestStatus,
+    RemoteChangeRequest, RemoteError, RemoteRef, RequestStatus, Reverted,
 };
 pub use sparse::{SparseError, SparseProfile};
 pub use status::{FileStatus, StatusError, read_working_file, status};
-pub use switch::{Marked, SwitchError, Updated, merge, switch, update, update_with_markers};
+pub use switch::{
+    Marked, SwitchError, Updated, merge, revert, switch, update, update_with_markers,
+};
 pub use workspace::{Config, Head, State, Workspace, WorkspaceError};

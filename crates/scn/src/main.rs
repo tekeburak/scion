@@ -16,7 +16,8 @@
 //! head onto `main` (or another revision) ahead of landing, which a conflict
 //! needs (`--conflicts` writes conflict markers to resolve instead of
 //! refusing); `merge` has the server merge another revision (a `release/*` fix,
-//! say) into the head; `checkout` moves the working copy to any changeset.
+//! say) into the head; `revert` has the server undo a changeset on the head;
+//! `checkout` moves the working copy to any changeset.
 //! There is no branch command: work is shared by changeset id.
 //!
 //! A revision is `@` (the working copy's current head), a 64-hex changeset
@@ -156,6 +157,19 @@ enum Command {
         /// Revision to merge, e.g. `release/1`.
         rev: String,
         /// Message of the merge changeset; defaults to `Merge <rev>`.
+        #[arg(short, long)]
+        message: Option<String>,
+        #[arg(long, env = "SCN_AUTHOR", value_name = "NAME <EMAIL>")]
+        author: String,
+    },
+    /// Undo a changeset on the current head on the server and move the
+    /// working copy to the revert; refused with local edits, and a path the
+    /// changeset changed that was changed again since changes nothing.
+    Revert {
+        /// Revision to undo; it must be in the current head's history.
+        rev: String,
+        /// Message of the revert changeset; defaults to `Revert "<subject>"`
+        /// and the reverted id.
         #[arg(short, long)]
         message: Option<String>,
         #[arg(long, env = "SCN_AUTHOR", value_name = "NAME <EMAIL>")]
@@ -788,6 +802,30 @@ async fn merge(out: &mut impl Write, rev: &str, message: Option<&str>, author: &
     Ok(())
 }
 
+async fn revert(
+    out: &mut impl Write,
+    rev: &str,
+    message: Option<&str>,
+    author: &str,
+) -> Result<()> {
+    let author = parse_identity(author)?;
+    let date = now()?;
+    let mut s = Session::open().await?;
+    let target = s.resolve(rev).await?;
+    let message = if let Some(m) = message {
+        m.to_owned()
+    } else {
+        let repo = s.config.repo.clone();
+        let [cs] = <[Changeset; 1]>::try_from(s.remote.log(&repo, target, 1).await?)
+            .map_err(|_| format!("no changeset {target}"))?;
+        let subject = cs.message.lines().next().unwrap_or_default();
+        format!("Revert \"{subject}\"\n\nThis reverts {target}.\n")
+    };
+    let head = scion_client::revert(&s.ws, &s.remote, target, (&author, date), &message).await?;
+    writeln!(out, "reverted {target} as {head}")?;
+    Ok(())
+}
+
 async fn checkout(out: &mut impl Write, rev: &str, force: bool) -> Result<()> {
     let mut s = Session::open().await?;
     let to = s.resolve(rev).await?;
@@ -831,6 +869,11 @@ async fn run(cli: Cli) -> Result<()> {
             message,
             author,
         } => merge(&mut out, &rev, message.as_deref(), &author).await?,
+        Command::Revert {
+            rev,
+            message,
+            author,
+        } => revert(&mut out, &rev, message.as_deref(), &author).await?,
         Command::Checkout { rev, force } => checkout(&mut out, &rev, force).await?,
     }
     out.flush()?;

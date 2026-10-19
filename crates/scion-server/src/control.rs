@@ -16,13 +16,13 @@ use scion_proto::v1::{
     FileEntry, FileType, FindLandingRequest, FindLandingResponse, GetChangeRequestRequest,
     GetRefRequest, GetRefResponse, Landing, ListChangeRequestsRequest, ListChangeRequestsResponse,
     LogRequest, LogResponse, MergeBaseRequest, MergeBaseResponse, MergeRequest, MergeResponse,
-    MoveRefRequest, MoveRefResponse, PathLogRequest, RebaseRequest, RebaseResponse,
-    SubmitChangeRequestRequest,
+    MoveRefRequest, MoveRefResponse, PathLogRequest, RebaseRequest, RebaseResponse, RevertRequest,
+    RevertResponse, SubmitChangeRequestRequest,
 };
 use scion_store::{MetadataStore, ObjectStore, StoreError, is_allowed_ref_name};
 use scion_types::{
     BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, Identity, RepoPath, Timestamp,
-    TreeId,
+    TreeEntry, TreeId,
 };
 use tonic::{Request, Response, Status};
 
@@ -518,6 +518,125 @@ pub async fn merge(
     })
 }
 
+/// What [`revert`] did.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reverted {
+    /// `reverted`, with root tree `root`, undoes the changeset on the head.
+    Clean { reverted: ChangesetId, root: TreeId },
+    /// These paths (sorted) changed between the changeset and the head;
+    /// nothing was created.
+    ChangedSince { paths: Vec<RepoPath> },
+}
+
+/// Undo `target`'s file changes on `head`, a descendant of it: create a
+/// changeset on `head` that puts every path `target` changed back as it was
+/// at `target`'s first parent, as `CreateChangeset` does; as the `Revert`
+/// RPC does. Costs three path lookups per file `target` changed, whatever
+/// lies between it and `head`.
+pub async fn revert(
+    meta: &dyn MetadataStore,
+    objects: &dyn ObjectStore,
+    repo: &str,
+    (head, target): (ChangesetId, ChangesetId),
+    (author, author_date): (Identity, Timestamp),
+    message: &str,
+) -> Result<Reverted, Status> {
+    let ctx = Deriver::new(repo, meta, objects);
+    if !SkipList::is_ancestor(&ctx, target, head)
+        .await
+        .map_err(derive_status)?
+    {
+        return Err(Status::failed_precondition(format!(
+            "{target} is not in the history of {head}"
+        )));
+    }
+    let cs = meta
+        .get_changeset(repo, target)
+        .await
+        .map_err(store_status)?
+        .ok_or_else(|| Status::data_loss(format!("indexed changeset {target} is missing")))?;
+    let parent = cs.first_parent();
+    let at_head = ctx.derive::<RootTree>(head).await.map_err(derive_status)?;
+    let at_target = ctx
+        .derive::<RootTree>(target)
+        .await
+        .map_err(derive_status)?;
+    let before = match parent {
+        Some(p) => Some(ctx.derive::<RootTree>(p).await.map_err(derive_status)?),
+        None => None,
+    };
+    let entries: Vec<_> = stream::iter(cs.file_changes.into_keys())
+        .map(|path| async move {
+            let (now, then) = futures_util::try_join!(
+                at_head.lookup(objects, &path),
+                at_target.lookup(objects, &path)
+            )?;
+            let old = match before {
+                Some(tree) => tree.lookup(objects, &path).await?,
+                None => None,
+            };
+            Ok::<_, DeriveError>((path, now, then, old))
+        })
+        .buffered(READ_CONCURRENCY)
+        .try_collect()
+        .await
+        .map_err(derive_status)?;
+
+    let mut changed_since = Vec::new();
+    let mut file_changes = std::collections::BTreeMap::new();
+    for (path, now, then, old) in entries {
+        if now != then {
+            changed_since.push(path);
+            continue;
+        }
+        // `then == old` only for a change that changed nothing.
+        if then == old {
+            continue;
+        }
+        let restored =
+            if let (Some(TreeEntry::Blob { id, kind, size }), Some(parent)) = (old, parent) {
+                FileChange::Tracked {
+                    content: id,
+                    kind,
+                    size,
+                    copy_from: Some((path.clone(), parent)),
+                }
+            } else if matches!(then, Some(TreeEntry::Blob { .. })) {
+                // Not a file before `target` (a directory or nothing).
+                FileChange::Deleted
+            } else {
+                continue;
+            };
+        file_changes.insert(path, restored);
+    }
+    if !changed_since.is_empty() {
+        return Ok(Reverted::ChangedSince {
+            paths: changed_since,
+        });
+    }
+    if file_changes.is_empty() {
+        return Err(Status::failed_precondition(format!(
+            "{target} changes no file"
+        )));
+    }
+    let cs = Changeset {
+        repo: repo.to_owned(),
+        parents: vec![head],
+        author,
+        author_date,
+        committer: None,
+        committer_date: None,
+        message: message.to_owned(),
+        file_changes,
+        extra: std::collections::BTreeMap::new(),
+    };
+    let [(reverted, root)] = create_changesets(meta, objects, &[cs])
+        .await?
+        .try_into()
+        .expect("one changeset in, one out");
+    Ok(Reverted::Clean { reverted, root })
+}
+
 #[tonic::async_trait]
 impl ControlService for ControlServer {
     async fn get_ref(
@@ -695,6 +814,40 @@ impl ControlService for ControlServer {
             Merged::Conflict { paths } => MergeResponse {
                 conflicts: paths.iter().map(|p| p.as_str().to_owned()).collect(),
                 ..MergeResponse::default()
+            },
+        };
+        Ok(Response::new(resp))
+    }
+
+    async fn revert(
+        &self,
+        request: Request<RevertRequest>,
+    ) -> Result<Response<RevertResponse>, Status> {
+        let req = request.into_inner();
+        let head = changeset_id(&req.head, "head")?;
+        let target = changeset_id(&req.changeset, "changeset")?;
+        let author = (
+            Identity::new(req.author_name, req.author_email),
+            Timestamp::new(req.author_unix_secs, req.author_tz_offset_minutes),
+        );
+        let resp = match revert(
+            &*self.meta,
+            &*self.objects,
+            &req.repo,
+            (head, target),
+            author,
+            &req.message,
+        )
+        .await?
+        {
+            Reverted::Clean { reverted, root } => RevertResponse {
+                reverted: Some(reverted.as_bytes().to_vec()),
+                root_tree: root.as_bytes().to_vec(),
+                ..RevertResponse::default()
+            },
+            Reverted::ChangedSince { paths } => RevertResponse {
+                changed_since: paths.iter().map(|p| p.as_str().to_owned()).collect(),
+                ..RevertResponse::default()
             },
         };
         Ok(Response::new(resp))

@@ -136,7 +136,7 @@ changeset touched, not the history.
 
 ### Landing changes
 
-*In progress, Phase 5.* Change requests are landed end to end, listed, and answer "when did X land"; merges are server-side, and `update` can resolve through conflict markers (5.1–5.9).
+*In progress, Phase 5.* Change requests are landed end to end, listed, and answer "when did X land"; merges and reverts are server-side, and `update` can resolve through conflict markers (5.1–5.10).
 
 **What `scn` does.** `scn land` submits the current head as a change request and waits for
 the outcome in the same call: the server holds the reply until the land worker finishes the
@@ -204,7 +204,18 @@ working copy's head and moves the working copy to the merge, refusing local edit
 nothing on a conflict. Landing a merge is like landing anything else: when `main` has moved,
 the rebase replays it against its first parent onto `main` and keeps its other parents.
 
-Server-side revert is *planned* (5.10). Testing happens post-merge and pre-deploy.
+**Server-side revert.** `Revert(repo, head, changeset)` creates a changeset on `head` that
+puts every path `changeset` changed back as it was at `changeset`'s first parent, or returns
+the paths that changed again between the two and creates nothing; `changeset` must be in
+`head`'s history. It costs three path lookups per file the reverted changeset touched (at
+`head`, at the changeset, at its parent), whatever lies between them. A restored file records
+`copy_from` (the same path, at that parent), so blame keeps crediting its lines to the
+changesets that wrote them rather than to the revert. `scn revert <rev>` reverts a revision
+on the working copy's head and moves the working copy to the revert, refusing local edits;
+landing it restores `main`'s tree from before the reverted change exactly when nothing else
+landed in between.
+
+Testing happens post-merge and pre-deploy.
 
 ### Snapshots and seeding
 
