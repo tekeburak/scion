@@ -76,11 +76,9 @@ async fn bootstraps_an_admin_and_a_service_principal_from_an_empty_database() {
         run(&meta, "revoke * sp:ci", now).await,
         Ok("revoked sp:ci on *".to_owned())
     );
-    assert!(
-        meta.grants_for(SERVER_GRANTS, "sp:ci")
-            .await
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        meta.grants_for(SERVER_GRANTS, "sp:ci").await.unwrap(),
+        Vec::<Grant>::new()
     );
     let err = run(&meta, "revoke * sp:ci", now).await.unwrap_err();
     assert_eq!(err, "sp:ci has no grant on *");
@@ -114,11 +112,9 @@ async fn grants_a_directory_of_an_existing_repository() {
             },
         ]
     );
-    assert!(
-        meta.grants_for(SERVER_GRANTS, "sp:ci")
-            .await
-            .unwrap()
-            .is_empty()
+    assert_eq!(
+        meta.grants_for(SERVER_GRANTS, "sp:ci").await.unwrap(),
+        Vec::<Grant>::new()
     );
 
     assert_eq!(
