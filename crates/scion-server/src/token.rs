@@ -90,7 +90,7 @@ pub enum TokenError {
 
 /// A principal is `github:<login>` or `sp:<name>`, the name made of ASCII
 /// letters, digits, `-`, `_` and `.`.
-fn check_principal(principal: &str) -> Result<(), TokenError> {
+pub(crate) fn check_principal(principal: &str) -> Result<(), TokenError> {
     let name = principal
         .strip_prefix("github:")
         .or_else(|| principal.strip_prefix("sp:"));
