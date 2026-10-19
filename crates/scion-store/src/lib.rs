@@ -134,11 +134,15 @@ pub struct ChangeRequest {
     pub head: ChangesetId,
     /// `main`'s changeset when the request was submitted.
     pub base: ChangesetId,
+    /// The principal that submitted it; the land worker lands only the
+    /// paths this principal may change.
+    pub submitter: String,
     /// Where the request is.
     pub status: ChangeRequestStatus,
     /// The changeset `main` moved to; set once `landed`.
     pub landed: Option<ChangesetId>,
-    /// Paths that conflict with `main`; non-empty only when `needs_rebase`.
+    /// When `needs_rebase`, the paths that conflict with `main`; when
+    /// `rejected`, the paths the submitter may not change, if any.
     pub conflicts: Vec<String>,
     /// When the request was recorded.
     pub submitted_at: SystemTime,
@@ -155,6 +159,8 @@ pub enum LandOutcome {
     NeedsRebase(Vec<String>),
     /// The rebase would land nothing.
     Rejected,
+    /// The change touches these paths, which the submitter may not change.
+    Denied(Vec<String>),
 }
 
 impl LandOutcome {
@@ -162,7 +168,7 @@ impl LandOutcome {
         match self {
             Self::Landed(_) => ChangeRequestStatus::Landed,
             Self::NeedsRebase(_) => ChangeRequestStatus::NeedsRebase,
-            Self::Rejected => ChangeRequestStatus::Rejected,
+            Self::Rejected | Self::Denied(_) => ChangeRequestStatus::Rejected,
         }
     }
 }
@@ -331,13 +337,14 @@ pub trait MetadataStore: Send + Sync {
     /// Every git commit imported into `repo` so far, with its changeset.
     async fn ingest_checkpoints(&self, repo: &str) -> Result<Vec<(Vec<u8>, ChangesetId)>>;
 
-    /// Record a `pending` request to land `head`, submitted while `main` was
-    /// at `base`.
+    /// Record a `pending` request by `submitter` to land `head`, submitted
+    /// while `main` was at `base`.
     async fn submit_change_request(
         &self,
         repo: &str,
         head: ChangesetId,
         base: ChangesetId,
+        submitter: &str,
     ) -> Result<ChangeRequest>;
 
     /// Read a change request of `repo`.

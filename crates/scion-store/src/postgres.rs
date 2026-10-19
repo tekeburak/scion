@@ -291,7 +291,7 @@ impl<'a> FileChangeColumns<'a> {
 /// [`ChangeRequestRow`] order.
 /// `submitted_at` and `landed_at` come back in microseconds since the Unix
 /// epoch, their precision.
-const CHANGE_REQUEST_COLUMNS: &str = "c.id, c.head_cs, c.base_cs, c.status::text, c.landed_cs, \
+const CHANGE_REQUEST_COLUMNS: &str = "c.id, c.head_cs, c.base_cs, c.submitter, c.status::text, c.landed_cs, \
      c.conflicts, (EXTRACT(EPOCH FROM c.submitted_at) * 1000000)::bigint, \
      (EXTRACT(EPOCH FROM c.landed_at) * 1000000)::bigint";
 
@@ -300,6 +300,7 @@ type ChangeRequestRow = (
     Vec<u8>,
     Vec<u8>,
     String,
+    String,
     Option<Vec<u8>>,
     Option<Vec<String>>,
     i64,
@@ -307,7 +308,7 @@ type ChangeRequestRow = (
 );
 
 fn change_request(
-    (id, head, base, status, landed, conflicts, submitted_us, landed_us): ChangeRequestRow,
+    (id, head, base, submitter, status, landed, conflicts, submitted_us, landed_us): ChangeRequestRow,
 ) -> Result<ChangeRequest> {
     let time = |us: i64| to_u64(us).map(|us| UNIX_EPOCH + Duration::from_micros(us));
     let cs = |bytes: &[u8]| {
@@ -318,6 +319,7 @@ fn change_request(
         id: to_u64(id)?,
         head: cs(&head)?,
         base: cs(&base)?,
+        submitter,
         status: ChangeRequestStatus::parse(&status)
             .ok_or_else(|| StoreError::Corrupt(format!("change request status {status:?}")))?,
         landed: landed.as_deref().map(cs).transpose()?,
@@ -768,15 +770,18 @@ impl MetadataStore for PostgresStore {
         repo: &str,
         head: ChangesetId,
         base: ChangesetId,
+        submitter: &str,
     ) -> Result<ChangeRequest> {
         let repo_id = self.repo(repo).await?;
         let row: ChangeRequestRow = sqlx::query_as(&format!(
-            "INSERT INTO change_requests AS c (repo, head_cs, base_cs) VALUES ($1, $2, $3) \
+            "INSERT INTO change_requests AS c (repo, head_cs, base_cs, submitter) \
+             VALUES ($1, $2, $3, $4) \
              RETURNING {CHANGE_REQUEST_COLUMNS}"
         ))
         .bind(repo_id)
         .bind(head.as_bytes().as_slice())
         .bind(base.as_bytes().as_slice())
+        .bind(submitter)
         .fetch_one(&self.pool)
         .await?;
         change_request(row)
@@ -898,7 +903,7 @@ impl MetadataStore for PostgresStore {
         let status = outcome.status();
         let (landed, conflicts) = match outcome {
             LandOutcome::Landed(cs) => (Some(cs.as_bytes().to_vec()), None),
-            LandOutcome::NeedsRebase(paths) => (None, Some(paths)),
+            LandOutcome::NeedsRebase(paths) | LandOutcome::Denied(paths) => (None, Some(paths)),
             LandOutcome::Rejected => (None, None),
         };
         let row: Option<ChangeRequestRow> = sqlx::query_as(&format!(
@@ -1019,7 +1024,7 @@ mod tests {
         };
         for i in 0..1_000 {
             let cr = store
-                .submit_change_request("plan", cs(i, 1), cs(0, 0))
+                .submit_change_request("plan", cs(i, 1), cs(0, 0), "sp:test")
                 .await
                 .unwrap();
             store.claim_next_change_request("plan").await.unwrap();

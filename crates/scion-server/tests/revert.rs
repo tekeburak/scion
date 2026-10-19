@@ -11,7 +11,7 @@ use bytes::Bytes;
 use scion_derived::test_util::{REPO, changeset, tracked};
 use scion_derived::{Blame, Deriver, RootTree};
 use scion_proto::v1::RevertRequest;
-use scion_server::{Reverted, revert};
+use scion_server::{Reverted, Scope, revert};
 use scion_store::{MemoryStore, MetadataStore, ObjectStore};
 use scion_types::{ChangesetId, FileChange, Identity, RepoPath, Timestamp};
 use tonic::Code;
@@ -61,9 +61,17 @@ async fn tree(store: &MemoryStore, cs: ChangesetId) -> RootTree {
 }
 
 async fn undo(store: &MemoryStore, head: ChangesetId, target: ChangesetId) -> ChangesetId {
-    match revert(store, store, REPO, (head, target), author(), "revert")
-        .await
-        .unwrap()
+    match revert(
+        store,
+        store,
+        REPO,
+        (head, target),
+        author(),
+        "revert",
+        &Scope::whole(),
+    )
+    .await
+    .unwrap()
     {
         Reverted::Clean { reverted, root } => {
             assert_eq!(root, tree(store, reverted).await.0);
@@ -147,9 +155,17 @@ async fn a_path_changed_since_is_refused() {
     let (store, [base, change, later]) = history().await;
     let edit = create(&store, Some(later), &[("f", Some("1\n2\n3\n4\n"))], "edit").await;
     assert_eq!(
-        revert(&store, &store, REPO, (edit, change), author(), "r")
-            .await
-            .unwrap(),
+        revert(
+            &store,
+            &store,
+            REPO,
+            (edit, change),
+            author(),
+            "r",
+            &Scope::whole()
+        )
+        .await
+        .unwrap(),
         Reverted::ChangedSince {
             paths: vec![path("f")]
         }
@@ -161,9 +177,17 @@ async fn a_path_changed_since_is_refused() {
         .await
         .unwrap();
     for (head, target) in [(side, change), (empty, empty)] {
-        let err = revert(&store, &store, REPO, (head, target), author(), "r")
-            .await
-            .unwrap_err();
+        let err = revert(
+            &store,
+            &store,
+            REPO,
+            (head, target),
+            author(),
+            "r",
+            &Scope::whole(),
+        )
+        .await
+        .unwrap_err();
         assert_eq!(err.code(), Code::FailedPrecondition, "{err}");
     }
 }

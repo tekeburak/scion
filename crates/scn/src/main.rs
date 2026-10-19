@@ -614,9 +614,13 @@ fn describe(cr: &RemoteChangeRequest) -> String {
             "request {id}: needs rebase, {head} conflicts with {MAIN_REF} in:{}",
             path_list(paths)
         ),
-        RequestStatus::Rejected => {
+        RequestStatus::Rejected(paths) if paths.is_empty() => {
             format!("request {id}: rejected, {head} would change nothing on {MAIN_REF}")
         }
+        RequestStatus::Rejected(paths) => format!(
+            "request {id}: rejected, its submitter may not change:{}",
+            path_list(paths)
+        ),
     }
 }
 
@@ -651,7 +655,16 @@ async fn land(out: &mut impl Write, no_wait: bool) -> Result<()> {
             )
             .into());
         }
-        RequestStatus::Rejected => {
+        RequestStatus::Rejected(paths) if !paths.is_empty() => {
+            return Err(format!(
+                "cannot land: you may not change these paths of {head} (request {}):{}\n\
+                 a repository admin can grant you access to them",
+                cr.id,
+                path_list(&paths)
+            )
+            .into());
+        }
+        RequestStatus::Rejected(_) => {
             writeln!(
                 out,
                 "nothing to land: {MAIN_REF} already has the changes of {head}"
@@ -730,7 +743,7 @@ async fn requests(out: &mut impl Write, status: Option<StatusArg>, limit: u32) -
             RequestStatus::Landing => ("landing", None),
             RequestStatus::Landed(cs) => ("landed", Some(*cs)),
             RequestStatus::NeedsRebase(_) => ("needs-rebase", None),
-            RequestStatus::Rejected => ("rejected", None),
+            RequestStatus::Rejected(_) => ("rejected", None),
         };
         let landed = landed.map_or_else(|| "-".to_owned(), short);
         let age = format_age(now.duration_since(cr.submitted_at).unwrap_or_default());

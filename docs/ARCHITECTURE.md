@@ -167,7 +167,7 @@ through these states, stored in the `change_requests` table and scoped by `repo`
 | `landing` | Claimed; being rebased onto `main` and landed. |
 | `landed` | On `main` as `landed_cs`. |
 | `needs_rebase` | Conflicts with `main` at the listed paths; `main` is untouched. |
-| `rejected` | Rebased onto `main`, it would land nothing. |
+| `rejected` | Rebased onto `main`, it would land nothing; or, with paths listed, it changes paths its submitter may not change. |
 
 Each repository with requests gets one **serial land worker** inside `scion-server`, started
 by its first submit (or at server start if requests are waiting) and woken by every later
@@ -237,8 +237,15 @@ table. Each RPC then needs a role in the repository it names, from the `grants` 
 objects are shared), `writer` for `CreateChangeset`, `Rebase`, `Merge`, `Revert` and change
 requests, `admin` for `MoveRef`, and a server-wide `admin` for `InitRepo`, which makes its
 caller the new repository's admin. A missing role is PERMISSION_DENIED, also for a repository
-that does not exist. Every grant of a repository counts whatever its `path_prefix` for now;
-directory scope is still to come.
+that does not exist. A grant with a `path_prefix` holds its role only under that directory:
+every path a `CreateChangeset`, `Merge`, `Revert` or `Rebase` would change must be under a
+prefix where the caller is a writer, and `PathLog` and `Blame` need the path under one where it
+is a reader, while `Diff` returns only such paths; a refusal names the first path outside.
+Objects are fetched by id and checked per repository only, and `MoveRef` needs `admin` on the
+whole repository. The land worker reads the submitter's grants (recorded with the request)
+when it lands and holds the rebased stack to them, so a grant revoked since the submit counts
+and a stack someone else created cannot widen what the submitter may change; such a request
+ends `rejected` with the paths outside.
 
 Until `scn login` exists, the operator bootstraps access with `scion-server` subcommands that
 work on the stores directly, with no server running: `grant <repo|*> <principal> <role>

@@ -247,8 +247,11 @@ impl MetadataStore for CountingMeta<'_> {
         repo: &str,
         head: ChangesetId,
         base: ChangesetId,
+        submitter: &str,
     ) -> scion_store::Result<ChangeRequest> {
-        self.inner.submit_change_request(repo, head, base).await
+        self.inner
+            .submit_change_request(repo, head, base, submitter)
+            .await
     }
 
     async fn get_change_request(

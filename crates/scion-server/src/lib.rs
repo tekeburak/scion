@@ -32,6 +32,7 @@ use control::ControlServer;
 use land::LandWorkers;
 use object::ObjectServer;
 
+pub use auth::Scope;
 pub use backfill::{BACKFILL_TYPES, backfill};
 pub use control::{
     MAX_LOG_LIMIT, Merged, Rebased, Reverted, create_changesets, merge, move_ref, rebase, revert,

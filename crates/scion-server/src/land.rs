@@ -12,12 +12,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use scion_store::{
-    ChangeRequest, ChangeRequestStatus, LandOutcome, MetadataStore, ObjectStore, StoreError,
+    ChangeRequest, ChangeRequestStatus, LandOutcome, MetadataStore, ObjectStore, Role, StoreError,
 };
 use scion_types::{Changeset, ChangesetId};
 use tokio::sync::Notify;
 use tonic::Status;
 
+use crate::auth::Scope;
 use crate::control::{Rebased, rebase};
 use crate::store_status;
 
@@ -148,7 +149,7 @@ async fn land_pending(
             .await
             .map_err(store_status)?
         {
-            let outcome = land(meta, objects, repo, cr.head, true).await?;
+            let outcome = land(meta, objects, repo, &cr, true).await?;
             meta.finish_change_request(repo, cr.id, outcome)
                 .await
                 .map_err(store_status)?;
@@ -160,7 +161,7 @@ async fn land_pending(
         .await
         .map_err(store_status)?
     {
-        let outcome = land(meta, objects, repo, cr.head, false).await?;
+        let outcome = land(meta, objects, repo, &cr, false).await?;
         meta.finish_change_request(repo, cr.id, outcome)
             .await
             .map_err(store_status)?;
@@ -169,8 +170,11 @@ async fn land_pending(
     Ok(())
 }
 
-/// Rebase `head` onto `main` and move `main` to the result by CAS. A lost
-/// CAS means another writer (`MoveRef`, an import) moved `main` meanwhile,
+/// Rebase `cr`'s head onto `main` and move `main` to the result by CAS,
+/// unless it changes a path its submitter may not change. The submitter's
+/// grants are read now, so one revoked since the submit counts, and
+/// changesets someone else created are held to the submitter's grants. A
+/// lost CAS means another writer (`MoveRef`, an import) moved `main` meanwhile,
 /// so the rebased stack is replayed onto the new `main`; each retry follows
 /// a move of `main`, never a timer.
 ///
@@ -182,16 +186,23 @@ async fn land(
     meta: &dyn MetadataStore,
     objects: &dyn ObjectStore,
     repo: &str,
-    mut head: ChangesetId,
+    cr: &ChangeRequest,
     resumed: bool,
 ) -> Result<LandOutcome, Status> {
+    let scope = Scope::of(meta, repo, &cr.submitter, Role::Writer).await?;
+    let mut head = cr.head;
     loop {
         let main = meta
             .get_ref(repo, "main")
             .await
             .map_err(store_status)?
             .ok_or_else(|| Status::not_found(format!("ref \"main\" in {repo:?}")))?;
-        let rebased = match rebase(meta, objects, repo, head, main.target).await? {
+        let rebased = match rebase(meta, objects, repo, head, main.target, &scope).await? {
+            Rebased::Denied { paths } => {
+                return Ok(LandOutcome::Denied(
+                    paths.iter().map(|p| p.as_str().to_owned()).collect(),
+                ));
+            }
             Rebased::Conflict { paths, .. } => {
                 return Ok(LandOutcome::NeedsRebase(
                     paths.iter().map(|p| p.as_str().to_owned()).collect(),

@@ -393,9 +393,13 @@ pub async fn change_requests<S: MetadataStore>(s: &S) {
 
     let mut ids = Vec::new();
     for b in 1..=4 {
-        let cr = s.submit_change_request(REPO, cs(b), cs(0)).await.unwrap();
+        let cr = s
+            .submit_change_request(REPO, cs(b), cs(0), "sp:test")
+            .await
+            .unwrap();
         assert_eq!((cr.head, cr.base, cr.status), (cs(b), cs(0), Pending));
         assert_eq!((cr.landed, cr.conflicts.len()), (None, 0));
+        assert_eq!(cr.submitter, "sp:test");
         assert_eq!(
             s.get_change_request(REPO, cr.id).await.unwrap(),
             Some(cr.clone())
@@ -492,7 +496,7 @@ pub async fn list_change_requests<S: MetadataStore>(s: &S) {
         let mut head = [0; 32];
         head[..4].copy_from_slice(&i.to_be_bytes());
         let cr = s
-            .submit_change_request(REPO, ChangesetId::from_bytes(head), base)
+            .submit_change_request(REPO, ChangesetId::from_bytes(head), base, "sp:test")
             .await
             .unwrap();
         model.push((cr.id, Pending));
@@ -570,19 +574,29 @@ pub async fn find_landings<S: MetadataStore>(s: &S) {
     s.create_repo(REPO).await.unwrap();
     s.create_repo(OTHER).await.unwrap();
     let finish = async |head: ChangesetId, outcome: LandOutcome| {
-        let cr = s.submit_change_request(REPO, head, cs(0)).await.unwrap();
+        let cr = s
+            .submit_change_request(REPO, head, cs(0), "sp:test")
+            .await
+            .unwrap();
         assert_eq!(
             s.claim_next_change_request(REPO).await.unwrap().unwrap().id,
             cr.id
         );
         s.finish_change_request(REPO, cr.id, outcome).await.unwrap()
     };
-    // 1 lands rebased as 11, 2 lands as itself, 3 conflicts, and 1 again
-    // has nothing left to land.
+    // 1 lands rebased as 11, 2 lands as itself, 3 conflicts, 1 again has
+    // nothing left to land and 4 changes a path its submitter may not.
     let rebased = finish(cs(1), LandOutcome::Landed(cs(11))).await;
     let forward = finish(cs(2), LandOutcome::Landed(cs(2))).await;
     finish(cs(3), LandOutcome::NeedsRebase(vec!["f".to_owned()])).await;
     finish(cs(1), LandOutcome::Rejected).await;
+    let outside = vec!["app/b".to_owned()];
+    let denied = finish(cs(4), LandOutcome::Denied(outside.clone())).await;
+    assert_eq!(
+        (denied.status, denied.landed, denied.conflicts),
+        (ChangeRequestStatus::Rejected, None, outside),
+        "denied paths are kept"
+    );
     for cr in [&rebased, &forward] {
         let at = cr.landed_at.expect("landed_at set");
         assert!(at >= cr.submitted_at);
@@ -618,15 +632,21 @@ pub async fn change_requests_by_repo<S: MetadataStore>(s: &S) {
         ChangesetId::from_bytes([0; 32]),
     );
     assert!(matches!(
-        s.submit_change_request(REPO, head, base).await,
+        s.submit_change_request(REPO, head, base, "sp:test").await,
         Err(StoreError::RepoNotFound(_))
     ));
     s.create_repo(REPO).await.unwrap();
     s.create_repo(OTHER).await.unwrap();
     let open = || async { s.repos_with_open_change_requests().await.unwrap() };
     assert_eq!(open().await, Vec::<String>::new());
-    let ours = s.submit_change_request(REPO, head, base).await.unwrap();
-    let theirs = s.submit_change_request(OTHER, head, base).await.unwrap();
+    let ours = s
+        .submit_change_request(REPO, head, base, "sp:test")
+        .await
+        .unwrap();
+    let theirs = s
+        .submit_change_request(OTHER, head, base, "sp:test")
+        .await
+        .unwrap();
     assert_eq!(s.get_change_request(OTHER, ours.id).await.unwrap(), None);
     assert_eq!(s.get_change_request(REPO, theirs.id).await.unwrap(), None);
     let claimed = s.claim_next_change_request(OTHER).await.unwrap().unwrap();
@@ -659,7 +679,12 @@ pub async fn concurrent_claims<S: MetadataStore>(s: &S) {
     let mut submitted = Vec::new();
     for b in 1..=16 {
         let head = ChangesetId::from_bytes([b; 32]);
-        submitted.push(s.submit_change_request(REPO, head, base).await.unwrap().id);
+        submitted.push(
+            s.submit_change_request(REPO, head, base, "sp:test")
+                .await
+                .unwrap()
+                .id,
+        );
     }
     let claim_all = || async {
         let mut ids = Vec::new();

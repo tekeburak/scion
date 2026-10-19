@@ -30,7 +30,7 @@ use scion_types::{
 };
 use tonic::{Request, Response, Status};
 
-use crate::auth::{authorize, principal};
+use crate::auth::{Scope, authorize, principal};
 use crate::land::LandWorkers;
 use crate::staged::Staged;
 use crate::store_status;
@@ -358,19 +358,24 @@ pub enum Rebased {
         changeset: ChangesetId,
         paths: Vec<RepoPath>,
     },
+    /// The stack changes these paths (sorted), outside the scope; nothing
+    /// was replayed.
+    Denied { paths: Vec<RepoPath> },
 }
 
 /// Replay `head`'s changesets that `onto` does not contain on top of
 /// `onto`, oldest first, through [`scion_core::rebase`], creating each as
 /// `CreateChangeset` does; as the `Rebase` RPC does. The stack is `head`'s
 /// first-parent line; a merge in it is replayed against its first parent
-/// and keeps its other parents.
+/// and keeps its other parents. Nothing is created if the stack changes a
+/// path outside `scope`, also when `head` already descends from `onto`.
 pub async fn rebase(
     meta: &dyn MetadataStore,
     objects: &dyn ObjectStore,
     repo: &str,
     head: ChangesetId,
     onto: ChangesetId,
+    scope: &Scope,
 ) -> Result<Rebased, Status> {
     let ctx = Deriver::new(repo, meta, objects);
     let clean = async |head: ChangesetId, created| {
@@ -381,10 +386,10 @@ pub async fn rebase(
             created,
         })
     };
-    if SkipList::is_ancestor(&ctx, onto, head)
+    let fast_forward = SkipList::is_ancestor(&ctx, onto, head)
         .await
-        .map_err(derive_status)?
-    {
+        .map_err(derive_status)?;
+    if fast_forward && scope.is_whole() {
         return clean(head, 0).await;
     }
 
@@ -413,6 +418,13 @@ pub async fn rebase(
         };
         stack.push(cs);
         cur = parent;
+    }
+    let paths = scope.denied(stack.iter().flat_map(|cs| cs.file_changes.keys()));
+    if !paths.is_empty() {
+        return Ok(Rebased::Denied { paths });
+    }
+    if fast_forward {
+        return clean(head, 0).await;
     }
 
     let mut parent = onto;
@@ -471,7 +483,8 @@ pub enum Merged {
 
 /// Merge `theirs` into `ours` through [`scion_core::merge`] and create the
 /// merge changeset, parents `[ours, theirs]` and file changes against `ours`
-/// only, as `CreateChangeset` does; as the `Merge` RPC does.
+/// only, as `CreateChangeset` does; as the `Merge` RPC does. A merge that
+/// changes a path outside `scope` is refused with `PERMISSION_DENIED`.
 pub async fn merge(
     meta: &dyn MetadataStore,
     objects: &dyn ObjectStore,
@@ -479,6 +492,7 @@ pub async fn merge(
     (ours, theirs): (ChangesetId, ChangesetId),
     (author, author_date): (Identity, Timestamp),
     message: &str,
+    scope: &Scope,
 ) -> Result<Merged, Status> {
     let ctx = Deriver::new(repo, meta, objects);
     if SkipList::is_ancestor(&ctx, theirs, ours)
@@ -501,6 +515,7 @@ pub async fn merge(
         paths.dedup();
         return Ok(Merged::Conflict { paths });
     }
+    scope.check("change", merged.changes.keys())?;
     let cs = Changeset {
         repo: repo.to_owned(),
         parents: vec![ours, theirs],
@@ -537,7 +552,8 @@ pub enum Reverted {
 /// changeset on `head` that puts every path `target` changed back as it was
 /// at `target`'s first parent, as `CreateChangeset` does; as the `Revert`
 /// RPC does. Costs three path lookups per file `target` changed, whatever
-/// lies between it and `head`.
+/// lies between it and `head`. A revert that changes a path outside `scope`
+/// is refused with `PERMISSION_DENIED`.
 pub async fn revert(
     meta: &dyn MetadataStore,
     objects: &dyn ObjectStore,
@@ -545,6 +561,7 @@ pub async fn revert(
     (head, target): (ChangesetId, ChangesetId),
     (author, author_date): (Identity, Timestamp),
     message: &str,
+    scope: &Scope,
 ) -> Result<Reverted, Status> {
     let ctx = Deriver::new(repo, meta, objects);
     if !SkipList::is_ancestor(&ctx, target, head)
@@ -624,6 +641,7 @@ pub async fn revert(
             "{target} changes no file"
         )));
     }
+    scope.check("change", file_changes.keys())?;
     let cs = Changeset {
         repo: repo.to_owned(),
         parents: vec![head],
@@ -714,7 +732,9 @@ impl ControlService for ControlServer {
     ) -> Result<Response<CreateChangesetResponse>, Status> {
         let cs = Changeset::decode(&request.get_ref().changeset)
             .map_err(|e| Status::invalid_argument(format!("changeset: {e}")))?;
-        authorize(&*self.meta, &request, &cs.repo, Role::Writer).await?;
+        authorize(&*self.meta, &request, &cs.repo, Role::Writer)
+            .await?
+            .check("change", cs.file_changes.keys())?;
         if cs == Changeset::repository_root(&cs.repo) {
             return Err(Status::invalid_argument(
                 "a repository's root changeset is created by InitRepo (`scn init`)",
@@ -734,7 +754,14 @@ impl ControlService for ControlServer {
         &self,
         request: Request<MoveRefRequest>,
     ) -> Result<Response<MoveRefResponse>, Status> {
-        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Admin).await?;
+        let scope = authorize(&*self.meta, &request, &request.get_ref().repo, Role::Admin).await?;
+        if !scope.is_whole() {
+            return Err(Status::permission_denied(format!(
+                "{} is an admin of directories of {:?} only; moving a ref needs the whole repository",
+                principal(&request)?,
+                request.get_ref().repo
+            )));
+        }
         let req = request.into_inner();
         let target = changeset_id(&req.target, "target")?;
         let version = move_ref(
@@ -750,7 +777,7 @@ impl ControlService for ControlServer {
     }
 
     async fn diff(&self, request: Request<DiffRequest>) -> Result<Response<DiffResponse>, Status> {
-        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
+        let scope = authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
         let req = request.into_inner();
         let old = req
             .old
@@ -761,8 +788,13 @@ impl ControlService for ControlServer {
         let entries = scion_core::diff(&self.deriver(&req.repo), old, new)
             .await
             .map_err(derive_status)?;
+        // Only the paths the caller may read.
         Ok(Response::new(DiffResponse {
-            entries: entries.into_iter().map(diff_entry).collect(),
+            entries: entries
+                .into_iter()
+                .filter(|e| scope.allows(e.path()))
+                .map(diff_entry)
+                .collect(),
         }))
     }
 
@@ -782,10 +814,11 @@ impl ControlService for ControlServer {
         &self,
         request: Request<PathLogRequest>,
     ) -> Result<Response<LogResponse>, Status> {
-        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
+        let scope = authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
         let req = request.into_inner();
         let head = changeset_id(&req.head, "head")?;
         let path = repo_path(&req.path)?;
+        scope.check("read", [&path])?;
         let ids = scion_core::path_log(&self.deriver(&req.repo), head, &path, limit(req.limit))
             .await
             .map_err(derive_status)?;
@@ -814,11 +847,11 @@ impl ControlService for ControlServer {
         &self,
         request: Request<RebaseRequest>,
     ) -> Result<Response<RebaseResponse>, Status> {
-        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Writer).await?;
+        let scope = authorize(&*self.meta, &request, &request.get_ref().repo, Role::Writer).await?;
         let req = request.into_inner();
         let head = changeset_id(&req.head, "head")?;
         let onto = changeset_id(&req.onto, "onto")?;
-        let resp = match rebase(&*self.meta, &*self.objects, &req.repo, head, onto).await? {
+        let resp = match rebase(&*self.meta, &*self.objects, &req.repo, head, onto, &scope).await? {
             Rebased::Clean {
                 head,
                 root,
@@ -834,6 +867,7 @@ impl ControlService for ControlServer {
                 conflicts: paths.iter().map(|p| p.as_str().to_owned()).collect(),
                 ..RebaseResponse::default()
             },
+            Rebased::Denied { paths } => return Err(scope.refuse("change", &paths[0])),
         };
         Ok(Response::new(resp))
     }
@@ -842,7 +876,7 @@ impl ControlService for ControlServer {
         &self,
         request: Request<MergeRequest>,
     ) -> Result<Response<MergeResponse>, Status> {
-        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Writer).await?;
+        let scope = authorize(&*self.meta, &request, &request.get_ref().repo, Role::Writer).await?;
         let req = request.into_inner();
         let ours = changeset_id(&req.ours, "ours")?;
         let theirs = changeset_id(&req.theirs, "theirs")?;
@@ -857,6 +891,7 @@ impl ControlService for ControlServer {
             (ours, theirs),
             author,
             &req.message,
+            &scope,
         )
         .await?
         {
@@ -882,7 +917,7 @@ impl ControlService for ControlServer {
         &self,
         request: Request<RevertRequest>,
     ) -> Result<Response<RevertResponse>, Status> {
-        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Writer).await?;
+        let scope = authorize(&*self.meta, &request, &request.get_ref().repo, Role::Writer).await?;
         let req = request.into_inner();
         let head = changeset_id(&req.head, "head")?;
         let target = changeset_id(&req.changeset, "changeset")?;
@@ -897,6 +932,7 @@ impl ControlService for ControlServer {
             (head, target),
             author,
             &req.message,
+            &scope,
         )
         .await?
         {
@@ -917,10 +953,11 @@ impl ControlService for ControlServer {
         &self,
         request: Request<BlameRequest>,
     ) -> Result<Response<BlameResponse>, Status> {
-        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
+        let scope = authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
         let req = request.into_inner();
         let cs = changeset_id(&req.changeset, "changeset")?;
         let path = repo_path(&req.path)?;
+        scope.check("read", [&path])?;
         let file = Blame::for_path(&self.deriver(&req.repo), cs, &path)
             .await
             .map_err(derive_status)?
@@ -942,6 +979,7 @@ impl ControlService for ControlServer {
         request: Request<SubmitChangeRequestRequest>,
     ) -> Result<Response<ChangeRequest>, Status> {
         authorize(&*self.meta, &request, &request.get_ref().repo, Role::Writer).await?;
+        let submitter = principal(&request)?.to_owned();
         let req = request.into_inner();
         let head = changeset_id(&req.head, "head")?;
         if self
@@ -966,7 +1004,7 @@ impl ControlService for ControlServer {
             .ok_or_else(|| Status::not_found(format!("ref \"main\" in {:?}", req.repo)))?;
         let mut cr = self
             .meta
-            .submit_change_request(&req.repo, head, main.target)
+            .submit_change_request(&req.repo, head, main.target, &submitter)
             .await
             .map_err(store_status)?;
         self.workers.wake(&req.repo);

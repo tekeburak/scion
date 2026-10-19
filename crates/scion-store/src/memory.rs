@@ -229,6 +229,7 @@ impl MetadataStore for MemoryStore {
         repo: &str,
         head: ChangesetId,
         base: ChangesetId,
+        submitter: &str,
     ) -> Result<ChangeRequest> {
         let mut m = self.meta.write().expect("poisoned");
         m.check_repo(repo)?;
@@ -237,6 +238,7 @@ impl MetadataStore for MemoryStore {
             id: m.last_request_id,
             head,
             base,
+            submitter: submitter.to_owned(),
             status: ChangeRequestStatus::Pending,
             landed: None,
             conflicts: Vec::new(),
@@ -348,7 +350,7 @@ impl MetadataStore for MemoryStore {
                 cr.landed = Some(cs);
                 cr.landed_at = Some(SystemTime::now());
             }
-            LandOutcome::NeedsRebase(paths) => cr.conflicts = paths,
+            LandOutcome::NeedsRebase(paths) | LandOutcome::Denied(paths) => cr.conflicts = paths,
             LandOutcome::Rejected => {}
         }
         Ok(cr.clone())

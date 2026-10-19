@@ -247,8 +247,11 @@ impl MetadataStore for Staged<'_> {
         repo: &str,
         head: ChangesetId,
         base: ChangesetId,
+        submitter: &str,
     ) -> Result<ChangeRequest> {
-        self.meta.submit_change_request(repo, head, base).await
+        self.meta
+            .submit_change_request(repo, head, base, submitter)
+            .await
     }
 
     async fn get_change_request(&self, repo: &str, id: u64) -> Result<Option<ChangeRequest>> {

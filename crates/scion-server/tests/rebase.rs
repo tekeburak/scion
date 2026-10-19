@@ -9,7 +9,7 @@ use bytes::Bytes;
 use proptest::prelude::*;
 use scion_derived::test_util::{Flat, REPO, changeset, materialize, tracked};
 use scion_derived::{Deriver, RootTree};
-use scion_server::{Rebased, rebase};
+use scion_server::{Rebased, Scope, rebase};
 use scion_store::{MemoryStore, MetadataStore, ObjectStore};
 use scion_types::{ChangesetId, FileChange, RepoPath};
 
@@ -78,7 +78,9 @@ async fn replays_a_stack_and_reports_conflicts() {
     .await;
 
     let Rebased::Clean { head, created, .. } =
-        rebase(&store, &store, REPO, two, main).await.unwrap()
+        rebase(&store, &store, REPO, two, main, &Scope::whole())
+            .await
+            .unwrap()
     else {
         panic!("clean")
     };
@@ -97,7 +99,9 @@ async fn replays_a_stack_and_reports_conflicts() {
 
     // Again from the result: it already contains main.
     assert_eq!(
-        rebase(&store, &store, REPO, head, main).await.unwrap(),
+        rebase(&store, &store, REPO, head, main, &Scope::whole())
+            .await
+            .unwrap(),
         Rebased::Clean {
             head,
             root: Deriver::new(REPO, &store, &store)
@@ -109,7 +113,9 @@ async fn replays_a_stack_and_reports_conflicts() {
         }
     );
     // A head main already contains moves to main.
-    let Rebased::Clean { head: ff, .. } = rebase(&store, &store, REPO, base, main).await.unwrap()
+    let Rebased::Clean { head: ff, .. } = rebase(&store, &store, REPO, base, main, &Scope::whole())
+        .await
+        .unwrap()
     else {
         panic!("clean")
     };
@@ -119,7 +125,9 @@ async fn replays_a_stack_and_reports_conflicts() {
     let theirs = create(&store, Some(base), files(&[("a", "1\nX\n3\n")]), &[], "x").await;
     let mine = create(&store, Some(base), files(&[("a", "1\nY\n3\n")]), &[], "y").await;
     assert_eq!(
-        rebase(&store, &store, REPO, mine, theirs).await.unwrap(),
+        rebase(&store, &store, REPO, mine, theirs, &Scope::whole())
+            .await
+            .unwrap(),
         Rebased::Conflict {
             changeset: mine,
             paths: vec![path("a")]
@@ -183,7 +191,7 @@ proptest! {
             let ours = build_stack(&store, base, OURS, &ours).await;
             let theirs = build_stack(&store, base, THEIRS, &theirs).await;
 
-            let Rebased::Clean { head, .. } = rebase(&store, &store, REPO, theirs, ours).await.unwrap() else {
+            let Rebased::Clean { head, .. } = rebase(&store, &store, REPO, theirs, ours, &Scope::whole()).await.unwrap() else {
                 panic!("disjoint edits cannot conflict")
             };
             let d = Deriver::new(REPO, &store, &store);

@@ -157,7 +157,10 @@ async fn requests_waiting_at_start_land_and_a_noop_is_rejected() {
     let (store, root) = repository().await;
     let head = commit(&store, root, "a.txt").await;
     // Submitted before the server runs, as if it had restarted.
-    let waiting = store.submit_change_request(REPO, head, root).await.unwrap();
+    let waiting = store
+        .submit_change_request(REPO, head, root, "sp:test")
+        .await
+        .unwrap();
     let mut c = start(store.clone()).await;
 
     let cr = finished(&mut c, waiting.id).await;
@@ -222,7 +225,7 @@ async fn a_request_left_landing_lands_once_after_a_restart() {
         advance(&store, other).await;
         let head = commit(&store, root, "y.txt").await;
         let cr = store
-            .submit_change_request(REPO, head, other)
+            .submit_change_request(REPO, head, other, "sp:test")
             .await
             .unwrap();
 
@@ -232,11 +235,16 @@ async fn a_request_left_landing_lands_once_after_a_restart() {
             .await
             .unwrap()
             .unwrap();
-        let scion_server::Rebased::Clean { head: rebased, .. } =
-            scion_server::rebase(&*store, &*store, REPO, head, other)
-                .await
-                .unwrap()
-        else {
+        let scion_server::Rebased::Clean { head: rebased, .. } = scion_server::rebase(
+            &*store,
+            &*store,
+            REPO,
+            head,
+            other,
+            &scion_server::Scope::whole(),
+        )
+        .await
+        .unwrap() else {
             panic!("no conflict");
         };
         if moved_main {

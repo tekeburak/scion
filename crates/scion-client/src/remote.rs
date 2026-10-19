@@ -122,8 +122,9 @@ pub enum RequestStatus {
     Landed(ChangesetId),
     /// Conflicts with `main` at these paths; `main` is untouched.
     NeedsRebase(Vec<RepoPath>),
-    /// Rebased onto `main`, it would land nothing.
-    Rejected,
+    /// Rebased onto `main`, it would land nothing (no paths), or it changes
+    /// these paths, which its submitter may not change.
+    Rejected(Vec<RepoPath>),
 }
 
 impl RequestStatus {
@@ -146,6 +147,13 @@ pub struct RemoteChangeRequest {
     pub landed_at: Option<SystemTime>,
 }
 
+fn paths(paths: Vec<String>) -> Result<Vec<RepoPath>, RemoteError> {
+    paths
+        .into_iter()
+        .map(|p| RepoPath::new(p).map_err(|_| RemoteError::Malformed("path")))
+        .collect()
+}
+
 fn change_request(cr: scion_proto::v1::ChangeRequest) -> Result<RemoteChangeRequest, RemoteError> {
     let status = match ChangeRequestStatus::try_from(cr.status) {
         Ok(ChangeRequestStatus::Pending) => RequestStatus::Pending,
@@ -154,13 +162,8 @@ fn change_request(cr: scion_proto::v1::ChangeRequest) -> Result<RemoteChangeRequ
             cr.landed.as_deref().unwrap_or_default(),
             "landed changeset",
         )?),
-        Ok(ChangeRequestStatus::NeedsRebase) => RequestStatus::NeedsRebase(
-            cr.conflicts
-                .into_iter()
-                .map(|p| RepoPath::new(p).map_err(|_| RemoteError::Malformed("path")))
-                .collect::<Result<_, _>>()?,
-        ),
-        Ok(ChangeRequestStatus::Rejected) => RequestStatus::Rejected,
+        Ok(ChangeRequestStatus::NeedsRebase) => RequestStatus::NeedsRebase(paths(cr.conflicts)?),
+        Ok(ChangeRequestStatus::Rejected) => RequestStatus::Rejected(paths(cr.conflicts)?),
         Ok(ChangeRequestStatus::Unspecified) | Err(_) => {
             return Err(RemoteError::Malformed("change request status"));
         }

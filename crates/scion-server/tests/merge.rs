@@ -12,7 +12,7 @@ use bytes::Bytes;
 use scion_derived::test_util::{REPO, changeset, tracked};
 use scion_derived::{Blame, Deriver};
 use scion_proto::v1::MergeRequest;
-use scion_server::{Merged, Rebased, merge, rebase};
+use scion_server::{Merged, Rebased, Scope, merge, rebase};
 use scion_store::{MemoryStore, MetadataStore, ObjectStore};
 use scion_types::{ChangesetId, FileChange, Identity, RepoPath, Timestamp};
 use tonic::Code;
@@ -81,6 +81,7 @@ async fn merges_a_release_fix_and_blames_it_to_the_fix() {
         (main, fix),
         author(),
         "Merge release/1",
+        &Scope::whole(),
     )
     .await
     .unwrap()
@@ -104,7 +105,7 @@ async fn merges_a_release_fix_and_blames_it_to_the_fix() {
 
     // Merging again changes nothing.
     assert!(matches!(
-        merge(&store, &store, REPO, (merged, fix), author(), "again")
+        merge(&store, &store, REPO, (merged, fix), author(), "again", &Scope::whole())
             .await
             .unwrap(),
         Merged::Clean { merged: m, created: false, .. } if m == merged
@@ -114,7 +115,9 @@ async fn merges_a_release_fix_and_blames_it_to_the_fix() {
     // second parent and the fix's blame.
     let newer = create(&store, Some(main), &[("h", "h\n")], "newer").await;
     let Rebased::Clean { head, created, .. } =
-        rebase(&store, &store, REPO, merged, newer).await.unwrap()
+        rebase(&store, &store, REPO, merged, newer, &Scope::whole())
+            .await
+            .unwrap()
     else {
         panic!("clean")
     };
@@ -132,9 +135,17 @@ async fn a_conflict_names_the_paths() {
     let (store, [_, main, fix]) = release().await;
     let mine = create(&store, Some(main), &[("f", "1\nmine\n3\n")], "mine").await;
     assert_eq!(
-        merge(&store, &store, REPO, (mine, fix), author(), "m")
-            .await
-            .unwrap(),
+        merge(
+            &store,
+            &store,
+            REPO,
+            (mine, fix),
+            author(),
+            "m",
+            &Scope::whole()
+        )
+        .await
+        .unwrap(),
         Merged::Conflict {
             paths: vec![path("f")]
         }

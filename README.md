@@ -54,12 +54,11 @@ Scion is that design, built on boring infrastructure:
 
 Scion is **alpha** software. The server, the CLI, git import and the real-repository benchmark
 work and are exercised end to end in CI on Postgres + S3. Every request needs a token
-signed by the server and a role in the repository it touches; tokens come from the operator
-until GitHub sign-in arrives, and a grant limited to a directory still covers the whole
-repository for now. Landing goes through change requests and a serial
+signed by the server and a role in the repository it touches, optionally limited to a
+directory; tokens come from the operator until GitHub sign-in arrives. Landing goes through change requests and a serial
 land worker, and every request can be listed and traced to the changeset it landed;
-merges and reverts run on the server. The cache and daemon tiers, sign-in, directory-scoped
-access and released binaries follow (see [What's next](#whats-next)).
+merges and reverts run on the server. The cache and daemon tiers, sign-in and released
+binaries follow (see [What's next](#whats-next)).
 
 What works today:
 
@@ -90,7 +89,9 @@ What works today:
   has readers, writers and admins (`scion-server grant`). Reads need `reader`; committing,
   landing, merging and reverting need `writer`; moving `main` or a `release/*` ref directly
   needs `admin`; `scn init` needs a server-wide admin and makes its caller the new repository's
-  admin.
+  admin. A grant can be limited to a directory (`--path lib`): its writer can change, land,
+  merge and revert only files under it, and its reader reads only those files' history,
+  blame and diffs; a refusal names the path.
 - **Benchmarks** against git on a pinned slice of a real repository, from clone and `blame`
   to 16 writers landing at once, with the numbers [below](#benchmarks).
 
@@ -314,8 +315,8 @@ Read these numbers with their limits:
 Access control is under way. Every request needs a token signed by the server: an operator
 issues one with `scion-server token` (for a person or a service principal such as CI) and `scn`
 sends it from `SCN_TOKEN`. Each request also needs a role in its repository (reader, writer,
-admin), granted with `scion-server grant` and removed with `revoke`. Next come directory-scoped
-grants, GitHub device-flow login (`scn login`) and managing access from `scn`, together with
+admin), granted with `scion-server grant` and removed with `revoke`, optionally limited to a
+directory. Next come GitHub device-flow login (`scn login`) and managing access from `scn`, together with
 fuzzing and a hermetic simulation. After that, in order: released binaries, a server image and
 a production compose profile; the regional cache and per-node daemon tiers with
 manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan, with
