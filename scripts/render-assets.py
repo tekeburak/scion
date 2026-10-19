@@ -54,7 +54,7 @@ ROADMAP = [
     ("3", "scion-server + scn CLI", "done"),
     ("6", "git import, init / update / checkout", "done"),
     ("5", "Change requests, land worker", "done"),
-    ("7", "IAM, fuzzing, simulation", "planned"),
+    ("7", "IAM, fuzzing, simulation", "active"),
     ("9", "Release and onboarding", "planned"),
     ("4", "Cache + daemon tiers", "planned"),
     ("8", "Virtual checkouts (FUSE / NFS)", "planned"),

@@ -33,9 +33,9 @@
 <text x="822.0" y="160" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#4ade80" font-weight="600" text-anchor="start">done</text>
 <text x="822.0" y="184" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">Change requests,</text>
 <text x="822.0" y="202" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">land worker</text>
-<rect x="954.4" y="96" width="136.4" height="124" rx="12" fill="#151d2e" stroke="#2a3650" stroke-width="2" stroke-dasharray="8 6"/>
+<rect x="954.4" y="96" width="136.4" height="124" rx="12" fill="#33270f" stroke="#f5b545" stroke-width="2"/>
 <text x="970.4" y="134" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="700" text-anchor="start">Phase 7</text>
-<text x="970.4" y="160" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="600" text-anchor="start">planned</text>
+<text x="970.4" y="160" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#f5b545" font-weight="600" text-anchor="start">in progress</text>
 <text x="970.4" y="184" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">IAM, fuzzing,</text>
 <text x="970.4" y="202" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">simulation</text>
 <rect x="1102.8" y="96" width="136.4" height="124" rx="12" fill="#151d2e" stroke="#2a3650" stroke-width="2" stroke-dasharray="8 6"/>

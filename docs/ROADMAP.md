@@ -5,7 +5,7 @@ ones. The README describes what Scion does today and what comes next in product 
 names no phase; this file is where the numbering lives.
 
 <p align="center">
-  <img src="assets/roadmap.svg" width="800" alt="Phases 0 to 3, 6 and 5 done; then phases 7, 9, 4 and 8 planned in that order">
+  <img src="assets/roadmap.svg" width="800" alt="Phases 0 to 3, 6 and 5 done; phase 7 in progress; then phases 9, 4 and 8 planned in that order">
 </p>
 
 | Phase | Scope | Status |
@@ -17,7 +17,7 @@ names no phase; this file is where the numbering lives.
 | 3 | `scion-server` (gRPC) + `scn` CLI | done |
 | 6 | git → Scion ingestion, benchmarks on a real repository, `scn init` / `update` / `checkout`, bounded cold derivation | done |
 | 5 | Server-side rebase/merge UX, change requests, serial land worker | done |
-| 7 | IAM (GitHub device-flow login, service principals, repo + directory ACLs), fuzzing, hermetic simulation | planned |
+| 7 | IAM (GitHub device-flow login, service principals, repo + directory ACLs), fuzzing, hermetic simulation | in progress |
 | 9 | Release and onboarding: versioned binaries, server image, production compose profile, five-minute quickstart | planned |
 | 4 | `scion-cache` and `scion-daemon` tiers, manifest-based seeding | planned |
 | 8 | Virtualized checkouts (FUSE / NFS) | planned |
@@ -228,6 +228,86 @@ goal: many agents landing at once must not queue behind each other's client roun
   with change requests" how-to and the status and roadmap figures show Phase 5 done. *Accepted
   when* following the how-to on the compose stack lands two concurrent changes and
   `scripts/render-assets.py --check` passes.
+
+## Phase 7: identity, access, fuzzing and simulation
+
+Every RPC carries a bearer token that `scion-server` checks once, at its boundary (see
+"Identity and access" in `docs/ARCHITECTURE.md`); the tiers of Phase 4 will forward it and
+decide nothing. A token is stateless: the principal (`github:<login>` or `sp:<name>`) and an
+expiry, encoded by hand (never `serde` or `prost`) and signed with a keyed BLAKE3 MAC under a
+server key, so no table exists without a `repo` column (invariant 7). Authorization is a
+`grants` table of `(repo, principal, path_prefix, role)` rows with roles `reader`, `writer`
+and `admin`; moving `main` or a `release/*` ref directly needs `admin`. Creating a repository
+needs a server-wide admin grant, stored under the reserved name `*`, which no repository can
+take. Directory scope applies where a path is known: writes (every file change of a created
+changeset, merge or revert) and control-plane reads by path (`path_log`, `blame`, `diff`);
+objects are fetched by id and checked per repository only. Tokens are not revocable; revoking a
+grant takes effect on the next request. Simulation and fuzzing live in the
+planned `scion-sim` crate and run on the memory stores, with no network. Authentication must
+not move any `scripts/bench-real` row beyond its run-to-run noise.
+
+- **7.1 Tokens.** `scion-server` issues and verifies tokens: principal, expiry, MAC with the
+  key from `SCION_TOKEN_KEY` (32 bytes, hex). *Accepted when* unit tests show a token round
+  trips, and one with any byte changed, one past its expiry and one signed with another key
+  are each refused.
+- **7.2 Grants store.** A migration adds `grants (repo, principal, path_prefix, role)`;
+  `MetadataStore` gains `put_grant`, `delete_grant` and `grants_for(repo, principal)` on the
+  memory and Postgres stores. *Accepted when* the conformance suite covers them on both stores
+  and a grant of one repository is invisible from another.
+- **7.3 Operator commands.** `scion-server grant <repo|*> <principal> <role> [--path <dir>]`,
+  `scion-server revoke …` and `scion-server token <principal> --ttl <duration>` (a service
+  principal's token, or the first admin's) work on the stores directly, like `backfill`.
+  *Accepted when* a test bootstraps an admin and a service principal from an empty database
+  with these commands alone.
+- **7.4 `scn` sends a token.** Every `scn` request carries the token for its server, read from
+  `SCN_TOKEN` or from the per-server file `scn login` will write; a server without auth
+  ignores it. *Accepted when* a test sees the token in the request metadata of every RPC kind
+  `scn` makes, and a working copy's commands pick the token of its own server.
+- **7.5 Authentication at the boundary.** One tonic interceptor on both services refuses a
+  request without a valid token with UNAUTHENTICATED and a message naming `scn login`;
+  `scion-server` refuses to start without `SCION_TOKEN_KEY`. The compose stack, the e2e tests,
+  `scripts/bench-real` and the quickstart use a token from `scion-server token`. *Accepted
+  when* every RPC without a token, with a bad one or with an expired one is refused in a server
+  test, and the e2e suite passes with tokens.
+- **7.6 Repository roles.** Each RPC names the role it needs (`reader` for reads and the object
+  plane, `writer` for creating changesets, merges, reverts and change requests, `admin` for
+  `MoveRef`, server admin for `InitRepo`, whose caller becomes the repository's admin).
+  *Accepted when* a table-driven server test calls every RPC as each role and gets OK or
+  PERMISSION_DENIED as listed.
+- **7.7 Directory scope.** A grant with a `path_prefix` limits a writer to changes under it and
+  a reader's path reads to it; the land worker re-checks a rebased change's paths against the
+  submitter's grants. *Accepted when* a writer granted `lib/` lands a change under `lib/` and is
+  refused, with the path named, for a change touching `app/`, also when it arrives through a
+  merge or a revert.
+- **7.8 GitHub device-flow login.** `scn login <server>` calls `StartLogin`, prints GitHub's
+  verification URL and user code, and polls `FinishLogin`; the server asks GitHub for the
+  device code with `SCION_GITHUB_CLIENT_ID`, reads the user once authorized, and returns a
+  token for `github:<login>` that `scn` stores per server with mode 0600. *Accepted when* a
+  test against a fake GitHub endpoint logs in, and a denied or expired device code ends with a
+  message that says which.
+- **7.9 Managing access from `scn`.** `scn access grant|revoke|list` for repository admins, and
+  `scn whoami` (principal, expiry, roles in the working copy's repository). *Accepted when*
+  the e2e test has an admin grant a second principal `writer` on a directory, that principal
+  lands under it, and `revoke` makes its next land fail.
+- **7.10 Hermetic simulation.** `scion-sim` runs one in-process server on the memory stores
+  with a seeded scheduler driving clients that commit, land, update, merge and revert, while
+  injecting land-worker stops between create and CAS, `MoveRef` races and restarts; after each
+  run it checks that `main` is linear, every landed request's change is on `main` exactly once,
+  no object changed after being written and no request was lost. *Accepted when* `cargo test`
+  runs 200 seeds in under a minute, a failing seed prints a one-line reproduction, and the
+  same seed replays the same history.
+- **7.11 Fuzzing.** Fuzz targets for every boundary that takes untrusted bytes: canonical
+  decoding of changesets, trees and derived nodes read from the object store, the request
+  validation of `CreateChangeset` and change requests, token parsing and `scion-diff3`; a
+  stable `cargo test` replays the checked-in corpus and a CI job runs each target for five
+  minutes with `cargo fuzz`. *Accepted when* every target runs its five minutes without a
+  crash and each crash found while writing them has a corpus entry and a fix.
+- **7.12 Docs.** "Identity and access" in `docs/ARCHITECTURE.md` loses its *planned* mark and
+  describes tokens, grants, roles and directory scope; `docs/DATA_MODEL.md` documents
+  `grants`; the README gets a "Sign in and share a repository" how-to and drops the
+  no-authentication warning; the status and roadmap figures show Phase 7 done. *Accepted when*
+  following the how-to on the compose stack logs in, grants a second principal and lands as
+  it, and `scripts/render-assets.py --check` passes.
 
 ## Phase 9: release and onboarding
 
