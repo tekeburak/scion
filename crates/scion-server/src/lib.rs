@@ -22,6 +22,7 @@ use scion_proto::v1::object_service_server::ObjectServiceServer;
 use scion_store::{MetadataStore, ObjectStore, StoreError};
 use tokio::net::TcpListener;
 use tonic::Status;
+use tonic::service::Routes;
 use tonic::transport::server::TcpIncoming;
 
 use control::ControlServer;
@@ -51,6 +52,23 @@ pub async fn serve(
     meta: Arc<dyn MetadataStore>,
     objects: Arc<dyn ObjectStore>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    tonic::transport::Server::builder()
+        .timeout(RPC_DEADLINE)
+        .add_routes(routes(meta, objects).await?)
+        // Without TCP_NODELAY a small reply waits for the client's delayed
+        // ACK, about 40 ms on Linux, whenever two writes go out back to back.
+        .serve_with_incoming(TcpIncoming::from(listener).with_nodelay(Some(true)))
+        .await?;
+    Ok(())
+}
+
+/// The health, control and object services [`serve`] runs, for a server
+/// built with its own layers. Starts the land worker of every repository
+/// with requests waiting.
+pub async fn routes(
+    meta: Arc<dyn MetadataStore>,
+    objects: Arc<dyn ObjectStore>,
+) -> Result<Routes, StoreError> {
     let workers = Arc::new(LandWorkers::new(meta.clone(), objects.clone()));
     for repo in meta.repos_with_open_change_requests().await? {
         workers.wake(&repo);
@@ -69,16 +87,9 @@ pub async fn serve(
     let object_service = ObjectServiceServer::new(ObjectServer::new(objects))
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
-    tonic::transport::Server::builder()
-        .timeout(RPC_DEADLINE)
-        .add_service(health_service)
+    Ok(Routes::new(health_service)
         .add_service(control_service)
-        .add_service(object_service)
-        // Without TCP_NODELAY a small reply waits for the client's delayed
-        // ACK, about 40 ms on Linux, whenever two writes go out back to back.
-        .serve_with_incoming(TcpIncoming::from(listener).with_nodelay(Some(true)))
-        .await?;
-    Ok(())
+        .add_service(object_service))
 }
 
 /// Map a store failure to a gRPC status.

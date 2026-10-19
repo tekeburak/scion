@@ -23,6 +23,7 @@ scion-server.workspace = true
 scion-store.workspace = true
 tempfile = "3"
 tokio = { workspace = true, features = ["net"] }
+tower = { version = "0.5", default-features = false, features = ["util"] }
 
 [features]
 default = []

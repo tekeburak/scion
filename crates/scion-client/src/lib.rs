@@ -13,6 +13,9 @@
 //!   line. There are no ignore files: nothing untracked is committed unless
 //!   it was added.
 //!
+//! Every request carries the server's token, if there is one: `SCN_TOKEN`,
+//! else the per-server file [`token_path`] names (written by `scn login`).
+//!
 //! Checkout starts from a root tree id, fetches the trees the sparse profile
 //! reaches level by level, then the blobs, every request naming one immutable
 //! object. The client never tells the server what it already has. In the MVP
@@ -33,8 +36,8 @@ pub use checkout::{CheckoutError, MAIN_REF, checkout, clone};
 pub use commit::{CommitError, commit};
 pub use index::{Index, IndexEntry};
 pub use remote::{
-    BlameRun, ChangeRequestStatus, DiffEntry, FileEntry, Merged, RPC_DEADLINE, Rebased, Remote,
-    RemoteChangeRequest, RemoteError, RemoteRef, RequestStatus, Reverted,
+    Bearer, BlameRun, ChangeRequestStatus, DiffEntry, FileEntry, Merged, RPC_DEADLINE, Rebased,
+    Remote, RemoteChangeRequest, RemoteError, RemoteRef, RequestStatus, Reverted, token_path,
 };
 pub use sparse::{SparseError, SparseProfile};
 pub use status::{FileStatus, StatusError, read_working_file, status};

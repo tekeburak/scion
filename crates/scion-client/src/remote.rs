@@ -1,6 +1,7 @@
 //! The connection to the server. In the MVP both planes go to `scion-server`
 //! directly; the object plane moves to the nearest cache tier in Phase 4.
 
+use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use scion_proto::v1::control_service_client::ControlServiceClient;
@@ -15,6 +16,9 @@ use scion_types::{
     BlobId, Changeset, ChangesetId, Decode, Encode, FileType, Identity, RepoPath, Timestamp, Tree,
     TreeId,
 };
+use tonic::metadata::{Ascii, MetadataValue};
+use tonic::service::Interceptor;
+use tonic::service::interceptor::InterceptedService;
 use tonic::transport::{Channel, Endpoint};
 
 /// The status filter of [`Remote::list_change_requests`].
@@ -35,6 +39,10 @@ pub enum RemoteError {
     Rpc(#[from] tonic::Status),
     #[error("server sent a malformed {0}")]
     Malformed(&'static str),
+    #[error("cannot read the token for {0}: {1}")]
+    Token(String, #[source] std::io::Error),
+    #[error("the token for {0} (from {1}) is not a token")]
+    BadToken(String, String),
 }
 
 /// A ref as the server reports it.
@@ -192,16 +200,77 @@ fn file_entry(f: &scion_proto::v1::FileEntry) -> Result<FileEntry, RemoteError> 
     })
 }
 
+/// The file `scn login` writes the token for `server` to:
+/// `$XDG_CONFIG_HOME/scn/tokens/<server>` (`~/.config` when unset), the
+/// server address with every character but ASCII letters, digits, `.` and `-`
+/// turned into `_`. `None` when neither variable is set.
+pub fn token_path(server: &str) -> Option<PathBuf> {
+    let config = std::env::var_os("XDG_CONFIG_HOME")
+        .filter(|d| !d.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|h| Path::new(&h).join(".config")))?;
+    let name: String = server
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '.' || c == '-' {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    Some(config.join("scn").join("tokens").join(name))
+}
+
+/// The token to send to `server`: `SCN_TOKEN` if set, else the contents of
+/// [`token_path`], else none.
+fn token_for(server: &str) -> Result<Option<(String, String)>, RemoteError> {
+    if let Some(t) = std::env::var("SCN_TOKEN").ok().filter(|t| !t.is_empty()) {
+        return Ok(Some((t, "SCN_TOKEN".to_owned())));
+    }
+    let Some(path) = token_path(server) else {
+        return Ok(None);
+    };
+    match std::fs::read_to_string(&path) {
+        Ok(t) => Ok(Some((t.trim().to_owned(), path.display().to_string()))),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(RemoteError::Token(server.to_owned(), e)),
+    }
+}
+
+/// Adds `authorization: Bearer <token>` to every request, when there is a
+/// token.
+#[derive(Debug, Clone)]
+pub struct Bearer(Option<MetadataValue<Ascii>>);
+
+impl Interceptor for Bearer {
+    fn call(&mut self, mut req: tonic::Request<()>) -> Result<tonic::Request<()>, tonic::Status> {
+        if let Some(v) = &self.0 {
+            req.metadata_mut().insert("authorization", v.clone());
+        }
+        Ok(req)
+    }
+}
+
 /// Clients for both planes of one server.
 #[derive(Debug, Clone)]
 pub struct Remote {
-    pub control: ControlServiceClient<Channel>,
-    pub objects: ObjectServiceClient<Channel>,
+    pub control: ControlServiceClient<InterceptedService<Channel, Bearer>>,
+    pub objects: ObjectServiceClient<InterceptedService<Channel, Bearer>>,
 }
 
 impl Remote {
-    /// Connect to `server` (e.g. `http://127.0.0.1:7070`).
+    /// Connect to `server` (e.g. `http://127.0.0.1:7070`). Every request
+    /// carries the server's token (see [`token_path`]) if there is one.
     pub async fn connect(server: &str) -> Result<Self, RemoteError> {
+        let bearer = match token_for(server)? {
+            None => None,
+            Some((token, from)) => Some(
+                format!("Bearer {token}")
+                    .parse()
+                    .map_err(|_| RemoteError::BadToken(server.to_owned(), from))?,
+            ),
+        };
         let channel = Endpoint::from_shared(server.to_owned())
             .map_err(|e| RemoteError::Connect(server.to_owned(), e))?
             .timeout(RPC_DEADLINE)
@@ -209,11 +278,12 @@ impl Remote {
             .connect()
             .await
             .map_err(|e| RemoteError::Connect(server.to_owned(), e))?;
+        let bearer = Bearer(bearer);
         Ok(Self {
-            control: ControlServiceClient::new(channel.clone())
+            control: ControlServiceClient::with_interceptor(channel.clone(), bearer.clone())
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
-            objects: ObjectServiceClient::new(channel)
+            objects: ObjectServiceClient::with_interceptor(channel, bearer)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
         })
