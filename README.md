@@ -205,30 +205,36 @@ tools. Import is timed twice: cold, into the run's empty bucket, and warm, into 
 repository on the same bucket. git runs its history workloads in a full clone, its best case.
 `scn` runs them in a sparse clone of `core/`, its normal case. Every checkout is compared byte
 for byte outside the timers. `log` and `blame` are timed twice: cold (the first call after
-import, with nothing cached on the server) and warm.
+import, with nothing cached on the server) and warm. For many writers landing at once, 16
+clones each edit a different file and then all commit and publish together: git pushes, and
+on a rejected push pulls with rebase and pushes again; `scn` lands. The table gives the total
+from the first start to the last finish, and the p50 and p99 of the writers' own times.
 
 <p align="center">
   <img src="docs/assets/bench-real.svg" width="100%"
-       alt="Median times of Scion and git for import, clone, sparse clone, status, path log, blame and commit + land on a 600-commit slice of a real repository">
+       alt="Median times of Scion and git for import, clone, sparse clone, status, path log, blame, commit + land and 16 concurrent writers landing on a 600-commit slice of a real repository">
 </p>
 
 <!-- bench-real:start (scripts/render-assets.py writes this table) -->
 | Workload | git, ms | scion, ms | scion / git |
 | --- | ---: | ---: | ---: |
-| import, cold | 1,531 | 23,354 | 15.3× |
-| import, warm | 1,585 | 8,415 | 5.3× |
-| clone | 2,056 | 1,046 | 0.51× |
-| sparse clone | 646 | 75 | 0.12× |
-| status | 292 | 11 | 0.04× |
-| path log, cold | 28 | 244 | 8.7× |
-| path log, warm | 29 | 26 | 0.90× |
-| blame, cold | 54 | 215 | 4.0× |
-| blame, warm | 74 | 11 | 0.15× |
-| commit + land | 44 | 44 | 1.0× |
+| import, cold | 1,870 | 39,879 | 21.3× |
+| import, warm | 1,782 | 12,420 | 7.0× |
+| clone | 2,806 | 1,644 | 0.59× |
+| sparse clone | 694 | 134 | 0.19× |
+| status | 263 | 13 | 0.05× |
+| path log, cold | 29 | 419 | 14.4× |
+| path log, warm | 51 | 45 | 0.88× |
+| blame, cold | 88 | 366 | 4.2× |
+| blame, warm | 101 | 19 | 0.19× |
+| commit + land | 68 | 94 | 1.4× |
+| land, 16 writers at once | 5,086 | 1,034 | 0.20× |
+| land, 16 writers: p50 per land | 3,427 | 700 | 0.20× |
+| land, 16 writers: p99 per land | 5,060 | 981 | 0.19× |
 
 Repository: library/ of the public repository pinned in scripts/bench-real, first-parent commits since 2026-01-01 up to 91e9c2688eb23af9a5b77f056156e756550c7c99 (600 commits, 2330 files at the tip).  
-Machine: Linux 6.18.44-fc-v139 x86_64; Intel(R) Xeon(R) Processor @ 2.10GHz; 4 cpus; 15 GiB.  
-Run: git version 2.43.0; scion ba08ff9; 3 runs; 2026-10-17T18:45:34Z.  
+Machine: Linux 6.18.44-fc-v139 x86_64; Intel(R) Xeon(R) Processor @ 2.80GHz; 4 cpus; 15 GiB.  
+Run: git version 2.43.0; scion 2c1a06b; 3 runs; 2026-10-19T02:16:45Z.  
 Other implementations of the design: not measured in this run.
 <!-- bench-real:end -->
 
@@ -236,8 +242,8 @@ Read these numbers with their limits:
 
 - **Import** writes one immutable object per blob, tree and history page to a remote object
   store, where git writes a local packfile; parity with git's push is not a goal. The figure to
-  quote is the cold row, 15× git: into an empty bucket the object store's write rate is the
-  bound. Warm, with the objects already stored, it is 5× git.
+  quote is the cold row, 21× git: into an empty bucket the object store's write rate is the
+  bound. Warm, with the objects already stored, it is 7× git.
 - **Cold `log` and `blame`** pay one object-store round trip per pointer hop, which git's
   local packfile never does. Warm, both are at or below git.
 - One machine, three runs, shared cloud VM: medians move by several milliseconds between
@@ -257,7 +263,7 @@ Read these numbers with their limits:
 
 ## What's next
 
-In order: a benchmark of many writers landing at once; then access
+In order: access
 control (GitHub device-flow login, service principals, repository
 and directory ACLs) together with fuzzing and a hermetic simulation; released binaries, a
 server image and a production compose profile; the regional cache and per-node daemon tiers

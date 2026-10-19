@@ -48,6 +48,13 @@
 #                   second call
 #   land         edit one file, commit it and publish it: git commit -a + push;
 #                scn commit + land
+#   land 16 writers
+#                WRITERS clones (made outside the timer) each edit a different
+#                file, then all commit and publish at once: git commit -a, then
+#                push, and on a rejected push pull --rebase and push again;
+#                scn commit + land. Recorded per run as the total (first start
+#                to last finish) and the p50 and p99 of the writers' own times
+#                (`land 16 writers`, `... p50`, `... p99`); git and scion only.
 #
 # git runs its history workloads (status, log, blame, land) in the full clone,
 # its best case; scn and the other implementations run them in the sparse
@@ -66,6 +73,7 @@ SPARSE=core
 LOG_PATH=core/src
 BLAME_FILE=alloc/src/vec/mod.rs
 EDIT_FILE=core/src/lib.rs
+WRITERS=16
 IMPL_A_COMMIT=7d445a0744e30f4dcb36a794b0ce42648157e1b9
 IMPL_B_COMMIT=00e92ab9c2a9985f39a64636b4b6c5c4bb583916
 IMPL_A_URL=${BENCH_IMPL_A_URL:-}
@@ -165,6 +173,37 @@ same_checkout() {
     [ "$(cd "$1" && find . -path ./.git -prune -o -type f -perm -u+x -print | sort)" = \
       "$(cd "$2" && find . -path "./$meta" -prune -o -type f -perm -u+x -print | sort)" ] ||
         { say "file modes differ: $1 $2"; return 1; }
+}
+
+# Runs writer $3 (a shell command, given the writer number as $1) for each of
+# the $WRITERS writers at once and records workload $1 for tool $2 as the
+# total and the nearest-rank p50 and p99 of the writers' own times. One
+# failed writer marks all three samples failed.
+time_writers() {
+    local workload=$1 tool=$2 run=$3 cmd=$4 out=$WORK/writers start end i result=ok pids=()
+    rm -rf "$out"
+    mkdir -p "$out"
+    start=$(now_ms)
+    for i in $(seq 1 "$WRITERS"); do
+        (
+            s=$(now_ms)
+            if sh -c "$cmd" writer "$i" >/dev/null 2>"$out/$i.err"; then r=ok; else r=failed; fi
+            echo "$(($(now_ms) - s)) $r" >"$out/$i.ms"
+        ) &
+        pids+=($!)
+    done
+    # Only the writers: the run's scion-server is a background job too.
+    wait "${pids[@]}"
+    end=$(now_ms)
+    if grep -q failed "$out"/*.ms; then
+        result=failed
+        say "$workload ($tool) failed: $(cat "$out"/*.err | tail -1)"
+    fi
+    local sorted
+    sorted=$(cut -d' ' -f1 "$out"/*.ms | sort -n)
+    echo "$workload,$tool,$run,$((end - start)),$result" >>"$OUT"
+    echo "$workload p50,$tool,$run,$(echo "$sorted" | sed -n "$(( (WRITERS + 1) / 2 ))p"),$result" >>"$OUT"
+    echo "$workload p99,$tool,$run,$(echo "$sorted" | sed -n "$(( (WRITERS * 99 + 99) / 100 ))p"),$result" >>"$OUT"
 }
 
 unsupported() {
@@ -398,6 +437,14 @@ start_server() {
 server_pid="" impl_a_pid="" impl_b_pid=""
 trap 'kill $server_pid $impl_a_pid $impl_b_pid 2>/dev/null || true; [ -z "$IMPL_A_URL" ] || docker rm -f "$CRDB" >/dev/null 2>&1 || true' EXIT
 
+# The writers' files: the first $WRITERS sources under $LOG_PATH other than
+# the one the single land edits.
+WRITER_FILES=()
+while IFS= read -r f; do WRITER_FILES+=("$f"); done < <(
+    git -C "$SUBSET" ls-tree -r --name-only main "$LOG_PATH/" |
+        grep '\.rs$' | grep -vx "$EDIT_FILE" | sort | head -n "$WRITERS")
+[ "${#WRITER_FILES[@]}" -eq "$WRITERS" ] || { say "fewer than $WRITERS files under $LOG_PATH"; exit 1; }
+
 commits=$(git -C "$SUBSET" rev-list --count main)
 files=$(git -C "$SUBSET" ls-tree -r main | wc -l | tr -d ' ')
 {
@@ -461,6 +508,24 @@ for run in $(seq 1 "$RUNS"); do
     time_it land git "$run" sh -c "git -C '$dir/git-full' commit -q -a -m 'bench edit' &&
         git -C '$dir/git-full' push -q origin HEAD:main"
     time_it land scion "$run" sh -c "cd '$dir/scn-sparse' && '$BIN/scn' commit -m 'bench edit' && '$BIN/scn' land"
+
+    # Each writer appends to its own file, so no edit overlaps another; the
+    # clones start from the main both tools now have.
+    for i in $(seq 1 "$WRITERS"); do
+        git clone -q --no-local "$dir/origin.git" "$dir/git-w$i"
+        "$BIN/scn" clone --sparse "$SPARSE" "$SERVER" "$repo" "$dir/scn-w$i" >/dev/null
+        echo "// bench-real writer $i" >>"$dir/git-w$i/${WRITER_FILES[$((i - 1))]}"
+        echo "// bench-real writer $i" >>"$dir/scn-w$i/${WRITER_FILES[$((i - 1))]}"
+    done
+    time_writers "land 16 writers" git "$run" "w='$dir/git-w'\$1
+        git -C \"\$w\" commit -q -a -m 'bench writer' || exit 1
+        for _ in \$(seq 1 $((WRITERS * 4))); do
+            git -C \"\$w\" push -q origin HEAD:main 2>/dev/null && exit 0
+            git -C \"\$w\" pull -q --rebase origin main || exit 1
+        done
+        exit 1"
+    time_writers "land 16 writers" scion "$run" "cd '$dir/scn-w'\$1 &&
+        '$BIN/scn' commit -m 'bench writer' && '$BIN/scn' land"
 
     kill "$server_pid" 2>/dev/null || true
     wait "$server_pid" 2>/dev/null || true

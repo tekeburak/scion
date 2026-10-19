@@ -95,17 +95,21 @@ clone, its best case, while `scn` runs them in a sparse clone, its normal case.
 
 The measurements so far, on the 600-commit slice `scripts/bench-real` imports (4 vCPU, the
 compose Postgres + RustFS stack, one fresh bucket per run): a cold import, into an empty
-bucket, takes 23,354 ms against git's 1,531 ms (15×), where the object store's write rate is
+bucket, takes 39,879 ms against git's 1,870 ms (21×), where the object store's write rate is
 the bound and the 10× criterion is not met yet; a warm import, with the objects already
-stored, takes 8,415 ms against 1,585 ms (5.3×). The README quotes the cold row.
+stored, takes 12,420 ms against 1,782 ms (7.0×). The README quotes the cold row.
 `log` and `blame` are measured twice, cold (the first call for a new repository) and warm.
-Medians of three runs at commit `ba08ff9` plus Phase 6.18 (the README table): warm `blame` of
-a 4,738-line file with 44 versions takes 11 ms against git's 74 ms, warm path `log` 26 ms
-against 29 ms, and commit + `land` 44 ms against 44 ms. Cold, a path `log` of 428 changes takes
-244 ms against git's 28 ms (8.7×; the criterion is 20×), because its anchors let the object
-reads overlap, and that `blame` 215 ms against 54 ms (4.0×; the criterion is 5×), because its metadata reads are
-batched and its diffs run in parallel. A cold blame is still a few hundred object reads, one history node and one
-file version per version of every file the last change touched.
+Medians of three runs (the README table): warm `blame` of a 4,738-line file with 44 versions
+takes 19 ms against git's 101 ms, and warm path `log` 45 ms against 51 ms. Cold, a path `log`
+of 428 changes takes 419 ms against git's 29 ms (14×; the criterion is 20×), because its
+anchors let the object reads overlap, and that `blame` 366 ms against 88 ms (4.2×; the
+criterion is 5×), because its metadata reads are batched and its diffs run in parallel. A cold
+blame is still a few hundred object reads, one history node and one file version per version
+of every file the last change touched. A single commit + `land` takes 94 ms against git's
+68 ms on this run, above the at-or-below-git target. Sixteen writers landing at once, each
+editing a different file, all land in 1,034 ms against 5,086 ms for git's fetch-rebase-push
+retry loop (p50 per land 700 ms against 3,427 ms, p99 981 ms against 5,060 ms): the server
+rebases each request in turn, so no writer pays another's round trips.
 
 ## What are the known limits today?
 

@@ -431,6 +431,9 @@ BENCH_WORKLOADS = [
     ("blame cold", "blame, cold"),
     ("blame warm", "blame, warm"),
     ("land", "commit + land"),
+    ("land 16 writers", "land, 16 writers at once"),
+    ("land 16 writers p50", "land, 16 writers: p50 per land"),
+    ("land 16 writers p99", "land, 16 writers: p99 per land"),
 ]
 
 

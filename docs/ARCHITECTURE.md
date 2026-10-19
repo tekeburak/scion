@@ -246,7 +246,8 @@ regression against any of them is a bug. Import is held to at most ten times git
 (Phase 6.11): git writes local packfiles, Scion writes one immutable object per blob and tree
 to a remote object store. A cold `log` or `blame` pays one object-store read per pointer hop,
 so Phase 6.12 holds a cold path `log` within 20× git and a cold `blame` within 5×. The
-workloads cover import, full and sparse checkout, status, one-file commit, land, log and blame;
+workloads cover import, full and sparse checkout, status, one-file commit, land, 16 writers
+landing at once, log and blame;
 the results are the Benchmarks table and chart in `README.md` (Phase 6.13), rendered from
 `docs/bench-real.csv`, and the measurement script (`scripts/bench-real`) stays in the
 repository.
