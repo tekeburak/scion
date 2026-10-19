@@ -234,7 +234,14 @@ with the canonical primitives and signed with a keyed BLAKE3 MAC under the 32-by
 table. The `grants` table (`repo`, `principal`, `path_prefix`, `role` of `reader`, `writer`
 or `admin`; server-wide grants live under the reserved repository `*`) exists but is not
 consulted yet: today any valid token can do anything, so run a server only where every token
-holder is trusted. The rest of this section is the plan.
+holder is trusted.
+
+Until `scn login` exists, the operator bootstraps access with `scion-server` subcommands that
+work on the stores directly, with no server running: `grant <repo|*> <principal> <role>
+[--path <dir>]`, `revoke <repo|*> <principal> [--path <dir>]` and `token <principal> --ttl
+<duration>`, which prints a token (principals are `github:<login>` or `sp:<name>`). `scn`
+sends `SCN_TOKEN` if it is set, else the per-server file `$XDG_CONFIG_HOME/scn/tokens/<server>`
+that `scn login` will write. The rest of this section is the plan.
 
 Clients authenticate with **GitHub device-flow login** (`scn login`): the CLI shows a device
 code, the server exchanges the resulting GitHub identity for a short-lived Scion token, and
