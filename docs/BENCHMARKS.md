@@ -13,13 +13,13 @@ stage (`crates/scion-proto/src/trace.rs`) and sums them per workload into
 shared create path in process) and `server` stages. Spans of concurrent calls add up, so a
 stage can exceed its workload's wall time; the critical-path stage is the one to attack.
 The baseline below is the 2026-10-21 run in [`bench-real.csv`](bench-real.csv) (medians of 3)
-with the stages of one traced run on the same machine; the import rows are from the Phase 10.3
-run. Rows slower than git:
+with the stages of one traced run on the same machine; the import rows are from the Phase 10.4
+run (mapper on two threads). Rows slower than git:
 
 | Row | scion / git | Most expensive stage | What it is |
 | --- | ---: | --- | --- |
-| import, cold | 12.9× | blob `put`: 94.9 s summed over 600 uploads in flight; `create` is 3.9 s (wall 17.3 s) | Since 10.3 a batch's trees and history pages are one `INSERT` each (`store`: 17.2 s → 2.6 s); what is left is uploading every blob to the object store and one `HEAD` per blob in `has_blobs` (26 s summed), which 10.4 batches. |
-| import, warm | 4.2× | `has_blobs`: 15.8 s summed, one `HEAD` per blob | The blobs are already stored; `create` is 2.0 s, of which `store` 1.4 s and `insert` 1.3 s. |
+| import, cold | 8.7× | blob `put`: 76 s summed over 7,955 uploads in flight; `create` is 4.4 s (wall 11.6 s) | One object-store `PUT` per blob (`store` is one `INSERT` per batch since 10.3); the stack serves about 1,100 `PUT`/s, so blobs alone take about 7 s. See #168. |
+| import, warm | 2.2× | `has_blobs`: 24 s summed, one `HEAD` per blob (7,955) | Mapping went from 4.9 s on one thread to about 1.8 s of work on two (10.4: rename scoring counts each file's lines once, delta-base cache); what is left is one `HEAD` per blob for a repository whose blobs another one stored. See #168. |
 | path log, cold | 7.4× | `walk`: 102 ms of the 164 ms `PathLog` | One object-store read per path-history hop on an empty memo; `read` (62 ms) was 428 `get_changeset` queries, 32 at a time, and is one `get_changesets` since 10.2. |
 | blame, cold | 3.8× | `Blame`: 176 ms | Deriving blame along the file's version chain: changeset and blob reads, one round trip per version, on an empty memo. |
 | commit + land | 1.6× | `CreateChangeset`: 12 ms, then `SubmitChangeRequest`: 13 ms | Four client round trips (`PutBlob`, `CreateChangeset`, `SubmitChangeRequest`, then waiting on the request); inside the create, the derived objects' `store` (9.5 ms) and the skip list (9.2 ms) run alongside the row `insert` (7.5 ms). |
