@@ -335,6 +335,10 @@ impl MetadataStore for CountingMeta {
         self.tick();
         self.inner.grants(repo).await
     }
+    async fn repos_of(&self, principal: &str) -> scion_store::Result<Vec<String>> {
+        self.tick();
+        self.inner.repos_of(principal).await
+    }
 }
 
 #[tokio::test]

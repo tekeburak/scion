@@ -10,7 +10,7 @@ use crate::token::{TokenKey, check_principal};
 
 /// Usage of every `scion-server` command.
 pub const USAGE: &str = "\
-usage: scion-server                                          serve
+usage: scion-server [--web <addr>]                            serve
        scion-server backfill <repo> <type>
        scion-server grant <repo|*> <principal> <role> [--path <dir>]
        scion-server revoke <repo|*> <principal> [--path <dir>]
@@ -19,8 +19,8 @@ usage: scion-server                                          serve
 /// A parsed `scion-server` command line.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
-    /// Serve the gRPC services.
-    Serve,
+    /// Serve the gRPC services, and the web interface on `web` if given.
+    Serve { web: Option<String> },
     /// Derive `ty` for `repo`'s whole history.
     Backfill { repo: String, ty: String },
     /// Give a principal a role in a repository, or server-wide under `*`.
@@ -41,7 +41,10 @@ impl Command {
     pub fn parse(args: &[String]) -> Result<Self, String> {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         match args.as_slice() {
-            [] => Ok(Self::Serve),
+            [] => Ok(Self::Serve { web: None }),
+            ["--web", addr] => Ok(Self::Serve {
+                web: Some((*addr).to_owned()),
+            }),
             ["backfill", repo, ty] => Ok(Self::Backfill {
                 repo: (*repo).to_owned(),
                 ty: (*ty).to_owned(),
@@ -213,6 +216,17 @@ mod tests {
     }
 
     #[test]
+    fn serve_takes_a_web_address() {
+        assert_eq!(parse(""), Ok(Command::Serve { web: None }));
+        assert_eq!(
+            parse("--web 127.0.0.1:8080"),
+            Ok(Command::Serve {
+                web: Some("127.0.0.1:8080".into())
+            })
+        );
+    }
+
+    #[test]
     fn paths_drop_the_trailing_slash() {
         let Ok(Command::Grant { grant, .. }) = parse("grant web sp:ci writer --path lib/net/")
         else {
@@ -235,6 +249,7 @@ mod tests {
             ("token sp:ci", "usage:"),
             ("token sp:ci --ttl soon", "--ttl"),
             ("serve", "usage:"),
+            ("--web", "usage:"),
         ] {
             let err = parse(line).unwrap_err();
             assert!(err.contains(says), "{line}: {err}");

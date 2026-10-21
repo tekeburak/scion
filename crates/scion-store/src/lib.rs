@@ -410,6 +410,10 @@ pub trait MetadataStore: Send + Sync {
     /// Every grant in `repo`, by principal then path prefix; empty for an
     /// unknown repository.
     async fn grants(&self, repo: &str) -> Result<Vec<Grant>>;
+
+    /// The repositories `principal` holds a grant in, by name; never
+    /// [`SERVER_GRANTS`].
+    async fn repos_of(&self, principal: &str) -> Result<Vec<String>>;
 }
 
 /// Immutable content-addressed objects.

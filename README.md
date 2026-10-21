@@ -96,6 +96,12 @@ What works today:
   service-principal tokens from `scion-server token`. A repository's admins grant, revoke and
   list its roles from a working copy (`scn access grant|revoke|list`), and `scn whoami` shows
   who a token names, until when, and its roles in the repository.
+- **Web interface** (`scion-server --web <addr>`): server-rendered pages for the repositories a
+  token can read: repository home with its README, directories and files at any ref or
+  changeset, log and per-path history, blame, changesets with their line diffs, and change
+  requests with their status and conflicts. The pages run inside the server and check the same
+  roles and directory grants as `scn`. Until browser sign-in arrives, they take the token as
+  `Authorization: Bearer <token>`.
 - **Robustness checks**: a seeded, hermetic simulation runs many clients committing, landing,
   merging and reverting while land workers stop and the server restarts, and checks that
   `main` stays linear and nothing landed is lost or written twice; fuzz targets cover every
@@ -364,8 +370,8 @@ GitHub sign-in and `scn access` for repository admins, and a seeded, hermetic si
 many clients landing, merging and reverting while the server fails and restarts, and every
 boundary that reads untrusted bytes is fuzzed. In parallel, a performance pass aims at every benchmark row being a multiple faster than git: trees and history pages move into the metadata
 database as the reference design keeps them, the object plane gains streaming batch requests, and
-landing becomes one round trip. After that, in order: a web interface (repository, history, blame
-and change-request pages with GitHub login), an HTTP/JSON API and an MCP server so coding agents
+landing becomes one round trip. The web interface's read-only pages are in; next come GitHub
+sign-in in the browser, change-request actions and repository settings from the page, an HTTP/JSON API and an MCP server so coding agents
 can read, commit and land through tools; released binaries, a server image, a production
 compose profile and a hosted instance; the regional cache and per-node daemon tiers with
 manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan, with
@@ -379,6 +385,7 @@ acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
 | Storage | `scion-store`: `MetadataStore` / `ObjectStore` traits; memory, Postgres and S3 implementations |
 | Algorithms | `scion-derived` (root tree, path history, blame, skip list), `scion-core` (diff, log, merge-base, merge, rebase), `scion-diff3` |
 | Network | `scion-proto` (gRPC schema), `scion-server` (control plane, object origin, land worker) |
+| Web | `scion-web`: the web interface's server-rendered pages, served in process by `scion-server --web` |
 | Client | `scion-client`: `.scn/` layout, index, sparse profile, clone, checkout, commit and update; `scn`: the CLI |
 | Import | `scion-ingest`: git → Scion importer (`import`, `verify`), checkpoints and incremental sync |
 | Testing | `scion-sim`: seeded, hermetic simulation of the server with faults and restarts |

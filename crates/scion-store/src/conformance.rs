@@ -374,6 +374,16 @@ pub async fn grants<S: MetadataStore>(s: &S) {
     );
     assert_eq!(s.grants("other").await.unwrap(), vec![]);
     assert_eq!(s.grants("missing").await.unwrap(), vec![]);
+    s.put_grant("other", &grant(alice, "docs", Role::Reader))
+        .await
+        .unwrap();
+    assert_eq!(
+        s.repos_of(alice).await.unwrap(),
+        vec![REPO.to_owned(), "other".to_owned()],
+        "each repository once, by name, without the server grants"
+    );
+    assert_eq!(s.repos_of("sp:nobody").await.unwrap(), Vec::<String>::new());
+    assert!(s.delete_grant("other", alice, "docs").await.unwrap());
 
     assert!(s.delete_grant(REPO, alice, "lib").await.unwrap());
     assert!(!s.delete_grant(REPO, alice, "lib").await.unwrap());

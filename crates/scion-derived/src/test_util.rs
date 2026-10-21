@@ -326,4 +326,7 @@ impl MetadataStore for CountingMeta<'_> {
     async fn grants(&self, repo: &str) -> scion_store::Result<Vec<Grant>> {
         self.inner.grants(repo).await
     }
+    async fn repos_of(&self, principal: &str) -> scion_store::Result<Vec<String>> {
+        self.inner.repos_of(principal).await
+    }
 }
