@@ -1,6 +1,7 @@
 # Announcement drafts: the real-repository benchmark (Phase 6.13)
 
-**Status: draft. Not posted anywhere.** Updated when Phase 6 had merged in full, through
+**Status: superseded by [`alpha.md`](alpha.md); its numbers and status are out of date. Not
+posted anywhere.** Updated when Phase 6 had merged in full, through
 6.18 (#85), and after Phase 5 through 5.11 (#114): change requests and the serial land worker,
 `scn land`, `scn requests`, `scn log --landed`, server-side merge and revert, conflict markers
 on `update`, and the 16-writer concurrent-land benchmark. Every number below is a median from
