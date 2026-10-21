@@ -142,7 +142,17 @@ struct Caller(Option<Principal>);
 impl FromRequestParts<Api> for Caller {
     type Rejection = Error;
 
-    async fn from_request_parts(parts: &mut Parts, api: &Api) -> Result<Self, Error> {
+    fn from_request_parts(
+        parts: &mut Parts,
+        api: &Api,
+    ) -> impl Future<Output = Result<Self, Error>> + Send {
+        std::future::ready(Self::of(parts, api))
+    }
+}
+
+impl Caller {
+    /// The caller a request's headers name; checking a token reads nothing.
+    fn of(parts: &Parts, api: &Api) -> Result<Self, Error> {
         let Some(value) = parts.headers.get(header::AUTHORIZATION) else {
             if parts.method == Method::GET {
                 return Ok(Self(None));
@@ -160,9 +170,7 @@ impl FromRequestParts<Api> for Caller {
             .map_err(|e| unauthenticated(&e.to_string()))?;
         Ok(Self(Some(Principal(principal, expiry))))
     }
-}
 
-impl Caller {
     /// The RPC request for `message`, as this caller.
     fn request<T>(&self, message: T) -> Request<T> {
         let mut request = Request::new(message);
