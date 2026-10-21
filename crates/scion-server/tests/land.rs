@@ -312,6 +312,61 @@ async fn a_request_whose_copy_is_below_main_lands_once_after_a_restart() {
     assert_eq!(log, ["z.txt", "delete y", "y.txt", "x.txt", "root"]);
 }
 
+/// A stack whose head merges a changeset `main` already has: the merge
+/// replays as nothing, so the land's tip is the copy of the changeset below
+/// it. A worker stopped after moving `main` lands it once when the server
+/// starts again, not the stack below the merge a second time (#148).
+#[tokio::test]
+async fn a_merge_head_left_landing_lands_once_after_a_restart() {
+    let (store, root) = repository().await;
+    let other = commit(&store, root, "x.txt").await;
+    advance(&store, other).await;
+    let write = commit(&store, root, "y.txt").await;
+    let delete = BTreeMap::from([(RepoPath::new("y.txt").unwrap(), FileChange::Deleted)]);
+    let below = store
+        .put_changeset(&changeset(vec![write], delete, "delete y"))
+        .await
+        .unwrap();
+    let theirs = BTreeMap::from([(RepoPath::new("x.txt").unwrap(), tracked(b"x.txt"))]);
+    let head = store
+        .put_changeset(&changeset(vec![below, other], theirs, "merge"))
+        .await
+        .unwrap();
+    let cr = store
+        .submit_change_request(REPO, head, other, "sp:test")
+        .await
+        .unwrap();
+    store
+        .claim_next_change_request(REPO)
+        .await
+        .unwrap()
+        .unwrap();
+    let scion_server::Rebased::Clean { head: rebased, .. } = scion_server::rebase(
+        &*store,
+        &*store,
+        REPO,
+        head,
+        other,
+        &scion_server::Scope::whole(),
+    )
+    .await
+    .unwrap() else {
+        panic!("no conflict");
+    };
+    advance(&store, rebased).await;
+
+    let mut c = start(store.clone()).await;
+    let cr = finished(&mut c, cr.id).await;
+    assert_eq!(cr.status(), ChangeRequestStatus::Landed);
+    assert_eq!(cr.landed.as_deref(), Some(rebased.as_bytes().as_slice()));
+    let log: Vec<String> = main_log(&mut c)
+        .await
+        .into_iter()
+        .map(|cs| cs.message)
+        .collect();
+    assert_eq!(log, ["delete y", "y.txt", "x.txt", "root"]);
+}
+
 #[tokio::test]
 async fn a_waiting_submit_replies_with_the_outcome() {
     let (store, root) = repository().await;

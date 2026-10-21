@@ -19,7 +19,7 @@ use tokio::sync::Notify;
 use tonic::{Request, Status};
 
 use crate::auth::{Scope, authorize, principal};
-use crate::control::{Rebased, rebase};
+use crate::control::{MAX_LOG_LIMIT, Rebased, rebase};
 use crate::store_status;
 
 /// Longest a waiting `SubmitChangeRequest` or `GetChangeRequest` holds its
@@ -256,7 +256,13 @@ async fn land(
 
 /// `cr`'s head or its rebased copy, if a stopped run put it on `main`: the
 /// walk down `main`'s first-parent line stops at `cr.base`'s generation, so
-/// it reads only what landed since the request was submitted.
+/// it reads only what landed since the request was submitted. A merge on
+/// top of the stack whose other parents `main` has already replays as
+/// nothing (see [`rebase`]), so the land's tip is the copy of the merge's
+/// first parent: that copy counts too, down a run of merges. Only a
+/// rebased copy of it: a replay below the head always changes its parent,
+/// so the first parent itself on `main` is history the request was built
+/// on, not its land.
 async fn landed_copy(
     meta: &dyn MetadataStore,
     repo: &str,
@@ -269,6 +275,23 @@ async fn landed_copy(
             .ok_or_else(|| Status::data_loss(format!("changeset {id} is missing")))
     };
     let floor = generation(cr.base).await?;
+    let mut tips = vec![cr.head];
+    let mut top = cr.head;
+    // No run of merges is longer than a stack `rebase` replays.
+    while tips.len() <= MAX_LOG_LIMIT as usize {
+        let cs = meta
+            .get_changeset(repo, top)
+            .await
+            .map_err(store_status)?
+            .ok_or_else(|| Status::data_loss(format!("changeset {top} is missing")))?;
+        match cs.parents[..] {
+            [first, _, ..] => {
+                tips.push(first);
+                top = first;
+            }
+            _ => break,
+        }
+    }
     let mut at = meta
         .get_ref(repo, "main")
         .await
@@ -278,8 +301,10 @@ async fn landed_copy(
         if generation(id).await? <= floor {
             break;
         }
-        if is_copy(meta, repo, cr.head, id).await? {
-            return Ok(Some(id));
+        for (i, &tip) in tips.iter().enumerate() {
+            if (i == 0 || tip != id) && is_copy(meta, repo, tip, id).await? {
+                return Ok(Some(id));
+            }
         }
         at = meta
             .get_changeset(repo, id)
