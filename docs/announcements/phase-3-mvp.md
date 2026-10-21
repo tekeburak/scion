@@ -1,6 +1,7 @@
 # Announcement drafts: the MVP (Phase 3)
 
-**Status: draft. Not posted anywhere.** Written when Phase 3.10 merged (#28). Every claim
+**Status: superseded by [`alpha.md`](alpha.md); its numbers and status are out of date. Not
+posted anywhere.** Written when Phase 3.10 merged (#28). Every claim
 below is checked against the README and `docs/`; re-check them before posting, because
 Phase 6 may have moved on. The only numbers used are the synthetic benchmark medians in the
 README (in-memory store, not Postgres + S3) and the tree-node count a test asserts.
