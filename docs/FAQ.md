@@ -103,20 +103,20 @@ sparse clone, its normal case.
 
 The measurements, medians of three runs on the 600-commit slice `scripts/bench-real` imports
 (4 vCPU, the compose Postgres + RustFS stack, one fresh bucket per run): a cold import, into an
-empty bucket, takes 20,961 ms against git's 1,237 ms (17×), where the object store's write rate
+empty bucket, takes 25,258 ms against git's 1,668 ms (15×), where the object store's write rate
 is the bound and the 10× criterion is not met yet; a warm import, with the objects already
-stored, takes 7,257 ms against 1,335 ms (5.4×). The README quotes the cold row. `log` and
+stored, takes 8,682 ms against 1,523 ms (5.7×). The README quotes the cold row. `log` and
 `blame` are measured twice, cold (the first call for a new repository) and warm. Warm `blame`
-of one file at the tip takes 11 ms against git's 45 ms, and warm path `log` 21 ms against 21 ms.
-Cold, the path `log` takes 170 ms against git's 23 ms (7.4×; the criterion is 20×), because
-its anchors let the object reads overlap, and the `blame` 187 ms against 49 ms (3.8×; the
+of one file at the tip takes 13 ms against git's 56 ms, and warm path `log` 25 ms against 29 ms.
+Cold, the path `log` takes 168 ms against git's 24 ms (7.0×; the criterion is 20×), because
+its anchors let the object reads overlap, and the `blame` 239 ms against 53 ms (4.5×; the
 criterion is 5×), because its metadata reads are batched and its diffs run in parallel. A cold
 blame is still a few hundred object reads, one history node and one file version per version
-of every file the last change touched. A single commit + `land` takes 54 ms against git's
-34 ms (1.6×), above the at-or-below-git target, because it goes through a change request and
+of every file the last change touched. A single commit + `land` takes 63 ms against git's
+46 ms (1.4×), above the at-or-below-git target, because it goes through a change request and
 the land worker. Sixteen writers landing at once, each editing a different file, all land in
-594 ms against 3,165 ms for git's fetch-rebase-push retry loop (p50 per land 410 ms against
-2,240 ms, p99 571 ms against 3,138 ms): the server rebases each request in turn, so no writer
+643 ms against 3,536 ms for git's fetch-rebase-push retry loop (p50 per land 432 ms against
+2,487 ms, p99 626 ms against 3,522 ms): the server rebases each request in turn, so no writer
 pays another's round trips.
 
 ## What are the known limits today?
