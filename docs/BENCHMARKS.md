@@ -19,7 +19,7 @@ with the stages of one traced run on the same machine. Rows slower than git:
 | --- | ---: | --- | --- |
 | import, cold | 16.9× | `store`: 17.2 s of the 18.7 s spent in `create` (wall 21.0 s) | Writing each batch's derived trees and path-history pages to the object store, one PUT each, on the serial create path. Blob `put` (132 s summed over 16 uploads in flight) overlaps it. |
 | import, warm | 5.4× | `store`: 5.3 s of the 5.6 s in `create` | The same derived objects, already stored: each still costs a conditional PUT that the object store refuses. `has_blobs` (19 s summed, one HEAD per blob) overlaps it. |
-| path log, cold | 7.4× | `walk`: 102 ms of the 164 ms `PathLog` | One object-store read per path-history hop on an empty memo; `read` (62 ms) is 428 `get_changeset` queries, 32 at a time. |
+| path log, cold | 7.4× | `walk`: 102 ms of the 164 ms `PathLog` | One object-store read per path-history hop on an empty memo; `read` (62 ms) was 428 `get_changeset` queries, 32 at a time, and is one `get_changesets` since 10.2. |
 | blame, cold | 3.8× | `Blame`: 176 ms | Deriving blame along the file's version chain: changeset and blob reads, one round trip per version, on an empty memo. |
 | commit + land | 1.6× | `CreateChangeset`: 12 ms, then `SubmitChangeRequest`: 13 ms | Four client round trips (`PutBlob`, `CreateChangeset`, `SubmitChangeRequest`, then waiting on the request); inside the create, the derived objects' `store` (9.5 ms) and the skip list (9.2 ms) run alongside the row `insert` (7.5 ms). |
 
