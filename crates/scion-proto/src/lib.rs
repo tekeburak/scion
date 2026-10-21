@@ -12,6 +12,8 @@
 
 #![forbid(unsafe_code)]
 
+pub mod trace;
+
 /// Version 1 of the protocol, generated from `proto/scion/v1/scion.proto`.
 #[allow(
     missing_debug_implementations,

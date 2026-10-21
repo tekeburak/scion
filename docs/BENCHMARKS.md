@@ -5,6 +5,29 @@ The headline numbers, measured on a slice of a real repository's history, are in
 the CSV with every sample is [`bench-real.csv`](bench-real.csv). This page keeps the older
 synthetic workloads, which exercise the client library directly against an in-process server.
 
+## Where the time goes
+
+`SCION_TRACE=1 scripts/bench-real 1` makes every Scion process print one line per finished
+stage (`crates/scion-proto/src/trace.rs`) and sums them per workload into
+`target/bench-real/results-trace.csv`, as `client` (`scn`, or `scion-ingest`, which runs the
+shared create path in process) and `server` stages. Spans of concurrent calls add up, so a
+stage can exceed its workload's wall time; the critical-path stage is the one to attack.
+The baseline below is the 2026-10-21 run in [`bench-real.csv`](bench-real.csv) (medians of 3)
+with the stages of one traced run on the same machine. Rows slower than git:
+
+| Row | scion / git | Most expensive stage | What it is |
+| --- | ---: | --- | --- |
+| import, cold | 16.9× | `store`: 17.2 s of the 18.7 s spent in `create` (wall 21.0 s) | Writing each batch's derived trees and path-history pages to the object store, one PUT each, on the serial create path. Blob `put` (132 s summed over 16 uploads in flight) overlaps it. |
+| import, warm | 5.4× | `store`: 5.3 s of the 5.6 s in `create` | The same derived objects, already stored: each still costs a conditional PUT that the object store refuses. `has_blobs` (19 s summed, one HEAD per blob) overlaps it. |
+| path log, cold | 7.4× | `walk`: 102 ms of the 164 ms `PathLog` | One object-store read per path-history hop on an empty memo; `read` (62 ms) is 428 `get_changeset` queries, 32 at a time. |
+| blame, cold | 3.8× | `Blame`: 176 ms | Deriving blame along the file's version chain: changeset and blob reads, one round trip per version, on an empty memo. |
+| commit + land | 1.6× | `CreateChangeset`: 12 ms, then `SubmitChangeRequest`: 13 ms | Four client round trips (`PutBlob`, `CreateChangeset`, `SubmitChangeRequest`, then waiting on the request); inside the create, the derived objects' `store` (9.5 ms) and the skip list (9.2 ms) run alongside the row `insert` (7.5 ms). |
+
+Every other row is already faster than git. The traced run also shows where the next steps
+start: a clone's 2,878 RPCs each pay an `auth` grants query (22.5 s summed), which 10.2
+memoizes; 2,330 `GetBlob` and 547 `GetTree` calls, one per file and directory, which 10.5
+batches.
+
 ## Synthetic workloads
 
 The [benchmark runner](../crates/scion-client/examples/benchmark.rs) compares Scion with git on

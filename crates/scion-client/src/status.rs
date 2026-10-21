@@ -10,6 +10,7 @@ use std::io;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
+use scion_proto::trace::span;
 use scion_types::{BlobId, FileType, RepoPath};
 
 use crate::checkout::mtime_ns;
@@ -101,8 +102,11 @@ pub fn status(
     index: &Index,
     added: &BTreeSet<RepoPath>,
 ) -> Result<BTreeMap<RepoPath, FileStatus>, StatusError> {
+    let walked = span("walk");
     let mut files = Vec::new();
     walk(root, root, &mut files)?;
+    drop(walked);
+    let _compare = span("compare");
     let mut out = BTreeMap::new();
     let mut seen = BTreeSet::new();
     for file in files {

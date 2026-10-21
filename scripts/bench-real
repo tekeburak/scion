@@ -46,6 +46,10 @@
 #                   first and second call
 #   blame cold/warm one file at the tip: git blame; scn blame, first and
 #                   second call
+#   log/blame warm client cold
+#                the same log and blame from a second sparse clone made
+#                outside the timer, so the server has served them before but
+#                this client has not; git runs them in its full clone again
 #   land         edit one file, commit it and publish it: git commit -a + push;
 #                scn commit + land
 #   land 16 writers
@@ -62,6 +66,13 @@
 # are compared byte for byte outside the timers. Each sample is one CSV row
 # (`workload,tool,run,ms,result`, result `ok`, `failed` or `unsupported`); the `#` lines at
 # the top record the repository, commit range and machine.
+#
+# With SCION_TRACE=1 every Scion process prints its per-stage spans (see
+# crates/scion-proto/src/trace.rs) and the script sums them per workload into
+# <out>-trace.csv (`workload,tool,run,process,stage,calls,ms`, process `client`
+# for scn or scion-ingest and `server` for scion-server). Spans of concurrent
+# calls add up, so a stage's ms can exceed the workload's. Printing them costs
+# time, so take the headline numbers from a run without it.
 
 set -euo pipefail
 
@@ -85,6 +96,8 @@ RUNS=${1:-3}
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 WORK=$ROOT/target/bench-real
 OUT=${2:-$WORK/results.csv}
+TRACE=${SCION_TRACE:-}
+TRACE_OUT=${OUT%.csv}-trace.csv
 SUBSET=$WORK/subset-${TIP:0:12}.git
 BIN=$ROOT/target/release
 COMPOSE=(docker compose -f "$ROOT/deploy/docker-compose.yml")
@@ -144,19 +157,44 @@ build_subset() {
     rm -rf "$up"
 }
 
+# Lines of the run's scion-server log so far, where its spans start.
+server_mark() {
+    if [ "$TRACE" = 1 ] && [ -f "$WORK/server.log" ]; then wc -l <"$WORK/server.log"; else echo 0; fi
+}
+
+# The last line of stderr file $1 that is not a span.
+last_error() { grep -v '^scion-trace ' "$1" | tail -1; }
+
+# With SCION_TRACE=1, sums the spans of workload $1 of tool $2 in run $3: the
+# client's from the stderr files $5..., the server's from its log after line
+# $4.
+trace_rows() {
+    [ "$TRACE" = 1 ] || return 0
+    local workload=$1 tool=$2 run=$3 mark=$4
+    shift 4
+    { cat "$@" | sed 's/^/client /'
+      [ ! -f "$WORK/server.log" ] || tail -n +$((mark + 1)) "$WORK/server.log" | sed 's/^/server /'
+    } | awk -v w="$workload" -v t="$tool" -v r="$run" '
+        $2 == "scion-trace" { k = $1 "," $3; n[k]++; us[k] += $4 }
+        END { for (k in n) printf "%s,%s,%s,%s,%d,%.1f\n", w, t, r, k, n[k], us[k] / 1000 }' |
+        sort >>"$TRACE_OUT"
+}
+
 # Milliseconds `"$@"` takes, appended to the CSV as one sample. A workload
 # that fails is recorded as failed and the run goes on, so one slow RPC does
 # not hide the other numbers.
 time_it() {
-    local workload=$1 tool=$2 run=$3 start end result=ok
+    local workload=$1 tool=$2 run=$3 start end result=ok mark
     shift 3
+    mark=$(server_mark)
     start=$(now_ms)
     if ! "$@" >/dev/null 2>"$WORK/stderr"; then
         result=failed
-        say "$workload ($tool) failed: $(tail -1 "$WORK/stderr")"
+        say "$workload ($tool) failed: $(last_error "$WORK/stderr")"
     fi
     end=$(now_ms)
     echo "$workload,$tool,$run,$((end - start)),$result" >>"$OUT"
+    trace_rows "$workload" "$tool" "$run" "$mark" "$WORK/stderr"
 }
 
 # BSD date has no %N; perl ships with macOS.
@@ -182,9 +220,10 @@ same_checkout() {
 # total and the nearest-rank p50 and p99 of the writers' own times. One
 # failed writer marks all three samples failed.
 time_writers() {
-    local workload=$1 tool=$2 run=$3 cmd=$4 out=$WORK/writers start end i result=ok pids=()
+    local workload=$1 tool=$2 run=$3 cmd=$4 out=$WORK/writers start end i result=ok pids=() mark
     rm -rf "$out"
     mkdir -p "$out"
+    mark=$(server_mark)
     start=$(now_ms)
     for i in $(seq 1 "$WRITERS"); do
         (
@@ -199,13 +238,14 @@ time_writers() {
     end=$(now_ms)
     if grep -q failed "$out"/*.ms; then
         result=failed
-        say "$workload ($tool) failed: $(cat "$out"/*.err | tail -1)"
+        say "$workload ($tool) failed: $(cat "$out"/*.err | grep -v '^scion-trace ' | tail -1)"
     fi
     local sorted
     sorted=$(cut -d' ' -f1 "$out"/*.ms | sort -n)
     echo "$workload,$tool,$run,$((end - start)),$result" >>"$OUT"
     echo "$workload p50,$tool,$run,$(echo "$sorted" | sed -n "$(( (WRITERS + 1) / 2 ))p"),$result" >>"$OUT"
     echo "$workload p99,$tool,$run,$(echo "$sorted" | sed -n "$(( (WRITERS * 99 + 99) / 100 ))p"),$result" >>"$OUT"
+    trace_rows "$workload" "$tool" "$run" "$mark" "$out"/*.err
 }
 
 unsupported() {
@@ -462,6 +502,7 @@ files=$(git -C "$SUBSET" ls-tree -r main | wc -l | tr -d ' ')
     [ -z "$IMPL_B_URL" ] || echo "# impl-b: $IMPL_B_URL $IMPL_B_COMMIT in memory"
     echo "workload,tool,run,ms,result"
 } >"$OUT"
+[ "$TRACE" != 1 ] || echo "workload,tool,run,process,stage,calls,ms" >"$TRACE_OUT"
 
 stamp=$(date +%s)
 for run in $(seq 1 "$RUNS"); do
@@ -504,6 +545,12 @@ for run in $(seq 1 "$RUNS"); do
         time_it "blame $temp" git "$run" git -C "$dir/git-full" blame -- "$BLAME_FILE"
         time_it "blame $temp" scion "$run" sh -c "cd '$dir/scn-sparse' && '$BIN/scn' blame '$BLAME_FILE'"
     done
+    # A second client that has asked nothing yet, of a server that has.
+    "$BIN/scn" clone --sparse "$SPARSE" "$SERVER" "$repo" "$dir/scn-fresh" >/dev/null
+    time_it "log warm client cold" git "$run" git -C "$dir/git-full" log --first-parent -n 1000 -- "$LOG_PATH"
+    time_it "log warm client cold" scion "$run" sh -c "cd '$dir/scn-fresh' && '$BIN/scn' log -n 1000 '$LOG_PATH'"
+    time_it "blame warm client cold" git "$run" git -C "$dir/git-full" blame -- "$BLAME_FILE"
+    time_it "blame warm client cold" scion "$run" sh -c "cd '$dir/scn-fresh' && '$BIN/scn' blame '$BLAME_FILE'"
 
     # The other implementations compare their checkouts with git's, so they
     # run before git's land edits it.
@@ -550,4 +597,11 @@ grep -v '^#' "$OUT" | tail -n +2 | sort -t, -k1,1 -k2,2 -k4,4n |
                  for (k in failed) print k "," failed[k] " failed"
                  for (k in unsupported) print k ",unsupported"
              }' |
-    sort | awk -F, '{ printf "%-14s %-6s %12s\n", $1, $2, $3 }' >&2
+    sort | awk -F, '{ printf "%-22s %-6s %12s\n", $1, $2, $3 }' >&2
+if [ "$TRACE" = 1 ]; then
+    say "wrote $TRACE_OUT; the most expensive stages, ms per run:"
+    tail -n +2 "$TRACE_OUT" | awk -F, -v runs="$RUNS" '
+        { k = $1 "," $4 " " $5; ms[k] += $7; calls[k] += $6 }
+        END { for (k in ms) printf "%s,%.0f,%d\n", k, ms[k] / runs, calls[k] / runs }' |
+        sort -t, -k1,1 -k3,3nr | awk -F, '++seen[$1] <= 3 { printf "%-22s %-24s %9s ms %7s calls\n", $1, $2, $3, $4 }' >&2
+fi

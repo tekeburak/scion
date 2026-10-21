@@ -1,82 +1,94 @@
 # repository: https://github.com/rust-lang/rust.git library/, first-parent commits since 2026-01-01 up to 91e9c2688eb23af9a5b77f056156e756550c7c99 (600 commits, 2330 files at the tip)
-# machine: Linux 6.18.44-fc-v139 x86_64; Intel(R) Xeon(R) Processor @ 2.80GHz; 4 cpus; 15 GiB
-# tools: git version 2.43.0; scion 2c1a06b; 3 runs; 2026-10-19T02:16:45Z
+# machine: Linux 6.18.44-fc-v140 x86_64; Intel(R) Xeon(R) Processor @ 2.10GHz; 4 cpus; 15 GiB
+# tools: git version 2.43.0; scion d3ebd05; 3 runs; 2026-10-21T04:23:20Z
 workload,tool,run,ms,result
-import cold,git,1,1870,ok
-import cold,scion,1,40495,ok
-import warm,git,1,1782,ok
-import warm,scion,1,13952,ok
-clone,git,1,2806,ok
-clone,scion,1,1644,ok
-sparse clone,git,1,687,ok
-sparse clone,scion,1,134,ok
-status,git,1,263,ok
-status,scion,1,13,ok
-log cold,git,1,29,ok
-log cold,scion,1,419,ok
-log warm,git,1,51,ok
-log warm,scion,1,45,ok
-blame cold,git,1,88,ok
-blame cold,scion,1,350,ok
-blame warm,git,1,101,ok
-blame warm,scion,1,19,ok
-land,git,1,69,ok
-land,scion,1,94,ok
-land 16 writers,git,1,4806,ok
-land 16 writers p50,git,1,3228,ok
-land 16 writers p99,git,1,4747,ok
-land 16 writers,scion,1,1013,ok
-land 16 writers p50,scion,1,700,ok
-land 16 writers p99,scion,1,970,ok
-import cold,git,2,1827,ok
-import cold,scion,2,38018,ok
-import warm,git,2,1720,ok
-import warm,scion,2,12200,ok
-clone,git,2,2078,ok
-clone,scion,2,1564,ok
-sparse clone,git,2,694,ok
-sparse clone,scion,2,117,ok
-status,git,2,225,ok
-status,scion,2,12,ok
-log cold,git,2,29,ok
-log cold,scion,2,388,ok
-log warm,git,2,32,ok
-log warm,scion,2,33,ok
-blame cold,git,2,66,ok
-blame cold,scion,2,366,ok
-blame warm,git,2,71,ok
-blame warm,scion,2,22,ok
-land,git,2,62,ok
-land,scion,2,95,ok
-land 16 writers,git,2,5267,ok
-land 16 writers p50,git,2,3550,ok
-land 16 writers p99,git,2,5235,ok
-land 16 writers,scion,2,1042,ok
-land 16 writers p50,scion,2,678,ok
-land 16 writers p99,scion,2,981,ok
-import cold,git,3,2049,ok
-import cold,scion,3,39879,ok
-import warm,git,3,1886,ok
-import warm,scion,3,12420,ok
-clone,git,3,2814,ok
-clone,scion,3,1774,ok
-sparse clone,git,3,780,ok
-sparse clone,scion,3,175,ok
-status,git,3,298,ok
-status,scion,3,20,ok
-log cold,git,3,51,ok
-log cold,scion,3,549,ok
-log warm,git,3,51,ok
-log warm,scion,3,48,ok
-blame cold,git,3,106,ok
-blame cold,scion,3,411,ok
-blame warm,git,3,117,ok
-blame warm,scion,3,18,ok
-land,git,3,68,ok
-land,scion,3,85,ok
-land 16 writers,git,3,5086,ok
-land 16 writers p50,git,3,3427,ok
-land 16 writers p99,git,3,5060,ok
-land 16 writers,scion,3,1034,ok
-land 16 writers p50,scion,3,734,ok
-land 16 writers p99,scion,3,1011,ok
+import cold,git,1,1237,ok
+import cold,scion,1,20322,ok
+import warm,git,1,1335,ok
+import warm,scion,1,7984,ok
+clone,git,1,1649,ok
+clone,scion,1,1254,ok
+sparse clone,git,1,502,ok
+sparse clone,scion,1,104,ok
+status,git,1,180,ok
+status,scion,1,8,ok
+log cold,git,1,23,ok
+log cold,scion,1,160,ok
+log warm,git,1,20,ok
+log warm,scion,1,19,ok
+blame cold,git,1,48,ok
+blame cold,scion,1,187,ok
+blame warm,git,1,45,ok
+blame warm,scion,1,10,ok
+log warm client cold,git,1,20,ok
+log warm client cold,scion,1,19,ok
+blame warm client cold,git,1,49,ok
+blame warm client cold,scion,1,12,ok
+land,git,1,41,ok
+land,scion,1,58,ok
+land 16 writers,git,1,3525,ok
+land 16 writers p50,git,1,2513,ok
+land 16 writers p99,git,1,3493,ok
+land 16 writers,scion,1,560,ok
+land 16 writers p50,scion,1,375,ok
+land 16 writers p99,scion,1,543,ok
+import cold,git,2,1236,ok
+import cold,scion,2,20961,ok
+import warm,git,2,1358,ok
+import warm,scion,2,6705,ok
+clone,git,2,1552,ok
+clone,scion,2,1277,ok
+sparse clone,git,2,550,ok
+sparse clone,scion,2,97,ok
+status,git,2,135,ok
+status,scion,2,7,ok
+log cold,git,2,21,ok
+log cold,scion,2,170,ok
+log warm,git,2,21,ok
+log warm,scion,2,21,ok
+blame cold,git,2,51,ok
+blame cold,scion,2,164,ok
+blame warm,git,2,45,ok
+blame warm,scion,2,13,ok
+log warm client cold,git,2,21,ok
+log warm client cold,scion,2,18,ok
+blame warm client cold,git,2,44,ok
+blame warm client cold,scion,2,10,ok
+land,git,2,34,ok
+land,scion,2,54,ok
+land 16 writers,git,2,2564,ok
+land 16 writers p50,git,2,1600,ok
+land 16 writers p99,git,2,2543,ok
+land 16 writers,scion,2,848,ok
+land 16 writers p50,scion,2,669,ok
+land 16 writers p99,scion,2,829,ok
+import cold,git,3,1309,ok
+import cold,scion,3,21031,ok
+import warm,git,3,1276,ok
+import warm,scion,3,7257,ok
+clone,git,3,1751,ok
+clone,scion,3,1368,ok
+sparse clone,git,3,500,ok
+sparse clone,scion,3,97,ok
+status,git,3,172,ok
+status,scion,3,8,ok
+log cold,git,3,26,ok
+log cold,scion,3,189,ok
+log warm,git,3,22,ok
+log warm,scion,3,23,ok
+blame cold,git,3,49,ok
+blame cold,scion,3,193,ok
+blame warm,git,3,56,ok
+blame warm,scion,3,11,ok
+log warm client cold,git,3,26,ok
+log warm client cold,scion,3,21,ok
+blame warm client cold,git,3,48,ok
+blame warm client cold,scion,3,11,ok
+land,git,3,33,ok
+land,scion,3,44,ok
+land 16 writers,git,3,3165,ok
+land 16 writers p50,git,3,2240,ok
+land 16 writers p99,git,3,3138,ok
+land 16 writers,scion,3,594,ok
+land 16 writers p50,scion,3,410,ok
+land 16 writers p99,scion,3,571,ok

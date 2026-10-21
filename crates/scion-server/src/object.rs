@@ -5,6 +5,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use scion_proto::trace::{span, timed};
 use scion_proto::v1::object_service_server::ObjectService;
 use scion_proto::v1::{
     GetBlobRequest, GetBlobResponse, GetTreeRequest, GetTreeResponse, PutBlobRequest,
@@ -51,7 +52,12 @@ impl ObjectService for ObjectServer {
         &self,
         request: Request<GetTreeRequest>,
     ) -> Result<Response<GetTreeResponse>, Status> {
-        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
+        let _rpc = span("GetTree");
+        timed(
+            "auth",
+            authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader),
+        )
+        .await?;
         let id = tree_id(&request.get_ref().id)?;
         let tree = self
             .objects
@@ -68,7 +74,12 @@ impl ObjectService for ObjectServer {
         &self,
         request: Request<GetBlobRequest>,
     ) -> Result<Response<GetBlobResponse>, Status> {
-        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
+        let _rpc = span("GetBlob");
+        timed(
+            "auth",
+            authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader),
+        )
+        .await?;
         let id = blob_id(&request.get_ref().id)?;
         let data = self
             .objects
@@ -85,7 +96,12 @@ impl ObjectService for ObjectServer {
         &self,
         request: Request<PutBlobRequest>,
     ) -> Result<Response<PutBlobResponse>, Status> {
-        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
+        let _rpc = span("PutBlob");
+        timed(
+            "auth",
+            authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader),
+        )
+        .await?;
         let data = Bytes::from(request.into_inner().data);
         let id = self.objects.put_blob(data).await.map_err(store_status)?;
         Ok(Response::new(PutBlobResponse {
@@ -97,7 +113,12 @@ impl ObjectService for ObjectServer {
         &self,
         request: Request<PutTreeRequest>,
     ) -> Result<Response<PutTreeResponse>, Status> {
-        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
+        let _rpc = span("PutTree");
+        timed(
+            "auth",
+            authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader),
+        )
+        .await?;
         let tree = Tree::decode(&request.get_ref().tree)
             .map_err(|e| Status::invalid_argument(format!("tree: {e}")))?;
         let id = self.objects.put_tree(&tree).await.map_err(store_status)?;
