@@ -337,16 +337,26 @@ holds a `reader` grant in it (`scn access grant anyone reader`, or `--path` for 
 directory): a visitor without a token reads what `anyone` may, and a signed-in one reads its
 own grants and those of `anyone`, both from one read of the repository's grants. No token
 names `anyone`, it can be granted nothing but `reader`, and the gRPC services do not read its
-grants, so public reads exist only in the web interface (and later its HTTP API).
+grants, so public reads exist only in the web interface and its HTTP API.
 
 A page is bounded like an RPC: at most five metadata reads (the log adds one ancestry read per changeset it lists, the walk
 the `Log` RPC also makes), a 30-second deadline, and a content policy that loads nothing but
 the page's own style.
 
-*Planned, Phase 11.* Change-request actions, an HTTP/JSON API that
-mirrors the control plane for clients that do not speak gRPC, and an MCP server so coding
-agents can read, commit and land through tools, all through the same authorization. A
-separate code-review product is not a goal; change-request pages are.
+The same listener serves an **HTTP/JSON API** under `/api/v1` for clients that do not speak
+gRPC (`docs/API.md` lists every route). It is a translation only: each route builds the RPC's
+request, with the caller's principal from `Authorization: Bearer <token>`, and calls the same
+`ControlService` or `ObjectService` method the gRPC services run, so roles, directory scopes,
+validation and the land worker are shared; with `--web`, gRPC and HTTP run on one control
+server, so a repository still has one land worker. Ids travel as hex, blobs as raw bytes,
+and changesets and trees as JSON that the server turns into the canonical encoding before
+hashing (invariant 5: no JSON is ever hashed). A `GET` without a token reads as `anyone`,
+every read with one also holds `anyone`'s grants, and every other method needs a token. A
+request has the pages' 30-second deadline and a body of up to the 64 MiB blob limit.
+
+*Planned, Phase 11.* Change-request actions on the pages, and an MCP server so coding agents
+can read, commit and land through tools, all through the same authorization. A separate
+code-review product is not a goal; change-request pages are.
 
 ### Ingestion
 

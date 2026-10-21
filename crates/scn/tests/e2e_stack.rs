@@ -80,14 +80,14 @@ async fn serve() -> (String, String) {
     let addr = listener.local_addr().unwrap();
     let web = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let web_addr = web.local_addr().unwrap();
-    tokio::spawn(scion_server::serve_web(
+    tokio::spawn(scion_server::serve_with_web(
+        listener,
         web,
-        meta.clone(),
-        objects.clone(),
+        meta,
+        objects,
         key(),
         None,
     ));
-    tokio::spawn(scion_server::serve(listener, meta, objects, key(), None));
     (format!("http://{addr}"), format!("http://{web_addr}"))
 }
 

@@ -403,6 +403,7 @@ async fn site() -> Site {
         store.clone(),
         Arc::new(verify),
         Some(login),
+        axum::Router::new(),
     ));
     Site {
         store,

@@ -195,6 +195,7 @@ async fn a_server_without_github_login_says_so() {
 /// `github` with `secret`, or with no secret. Returns its address.
 async fn serve_web(github: &str, secret: Option<&str>) -> String {
     let store = Arc::new(MemoryStore::new());
+    let grpc = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     let app = GitHub::new("ok", github, github);
@@ -202,7 +203,8 @@ async fn serve_web(github: &str, secret: Option<&str>) -> String {
         Some(s) => app.with_secret(s),
         None => app,
     };
-    tokio::spawn(scion_server::serve_web(
+    tokio::spawn(scion_server::serve_with_web(
+        grpc,
         listener,
         store.clone(),
         store,

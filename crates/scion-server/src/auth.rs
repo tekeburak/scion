@@ -6,7 +6,7 @@
 
 use std::time::SystemTime;
 
-use scion_store::{MetadataStore, Role, SERVER_GRANTS};
+use scion_store::{Grant, MetadataStore, Role, SERVER_GRANTS};
 use scion_types::RepoPath;
 use tonic::service::Interceptor;
 use tonic::{Request, Status};
@@ -18,6 +18,12 @@ use crate::token::TokenKey;
 /// by [`Authenticate`].
 #[derive(Debug, Clone)]
 pub(crate) struct Principal(pub(crate) String, pub(crate) SystemTime);
+
+/// Marks a request that came through the HTTP API, whose reads also hold
+/// what [`scion_web::ANYONE`] is granted, as the web interface's pages do.
+/// gRPC requests never carry it.
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct PublicReads;
 
 /// Refuses a request whose bearer token is missing, malformed, signed with
 /// another key or expired, with UNAUTHENTICATED.
@@ -94,20 +100,43 @@ impl Scope {
         principal: &str,
         role: Role,
     ) -> Result<Self, Status> {
-        let prefixes = meta
+        let grants = meta
             .grants_for(repo, principal)
             .await
+            .map_err(store_status)?;
+        Ok(Self::from_grants(grants, repo, principal, role))
+    }
+
+    /// What `principal` and [`scion_web::ANYONE`] together hold `role` or
+    /// more on in `repo`, from one read of the repository's grants.
+    async fn of_public(
+        meta: &dyn MetadataStore,
+        repo: &str,
+        principal: &str,
+        role: Role,
+    ) -> Result<Self, Status> {
+        let grants = meta
+            .grants(repo)
+            .await
             .map_err(store_status)?
+            .into_iter()
+            .filter(|g| g.principal == principal || g.principal == scion_web::ANYONE)
+            .collect();
+        Ok(Self::from_grants(grants, repo, principal, role))
+    }
+
+    fn from_grants(grants: Vec<Grant>, repo: &str, principal: &str, role: Role) -> Self {
+        let prefixes = grants
             .into_iter()
             .filter(|g| g.role >= role)
             .map(|g| g.path_prefix)
             .collect();
-        Ok(Self {
+        Self {
             principal: principal.to_owned(),
             repo: repo.to_owned(),
             role,
             prefixes,
-        })
+        }
     }
 
     /// Whether the scope covers the whole repository.
@@ -188,7 +217,11 @@ pub(crate) async fn authorize<T>(
     need: Role,
 ) -> Result<Scope, Status> {
     let principal = principal(request)?;
-    let scope = Scope::of(meta, repo, principal, need).await?;
+    let scope = if need == Role::Reader && request.extensions().get::<PublicReads>().is_some() {
+        Scope::of_public(meta, repo, principal, need).await?
+    } else {
+        Scope::of(meta, repo, principal, need).await?
+    };
     if !scope.prefixes.is_empty() {
         return Ok(scope);
     }

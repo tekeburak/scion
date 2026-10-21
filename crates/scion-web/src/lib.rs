@@ -110,13 +110,15 @@ struct Web {
     login: Option<Login>,
 }
 
-/// The pages, for a server that runs its own listener; browsers sign in
-/// through `login`, if given.
+/// The pages, and `api` under `/api/v1`, for a server that runs its own
+/// listener; browsers sign in through `login`, if given. Both get the same
+/// deadline.
 pub fn router(
     meta: Arc<dyn MetadataStore>,
     objects: Arc<dyn ObjectStore>,
     verify: Verify,
     login: Option<Login>,
+    api: Router,
 ) -> Router {
     Router::new()
         .route("/", get(repos))
@@ -130,13 +132,14 @@ pub fn router(
         .route("/{repo}/changeset/{id}", get(changeset))
         .route("/{repo}/requests", get(requests))
         .route("/{repo}/requests/{id}", get(request))
-        .layer(middleware::from_fn(guard))
         .with_state(Web {
             meta,
             objects,
             verify,
             login,
         })
+        .nest("/api/v1", api)
+        .layer(middleware::from_fn(guard))
 }
 
 /// Serve [`router`] on `listener` until the future is dropped or accepting
@@ -147,12 +150,13 @@ pub async fn serve(
     objects: Arc<dyn ObjectStore>,
     verify: Verify,
     login: Option<Login>,
+    api: Router,
 ) -> std::io::Result<()> {
     // Without TCP_NODELAY a small reply waits for the client's delayed ACK.
     let listener = listener.tap_io(|tcp| {
         let _ = tcp.set_nodelay(true);
     });
-    axum::serve(listener, router(meta, objects, verify, login)).await
+    axum::serve(listener, router(meta, objects, verify, login, api)).await
 }
 
 /// Every page gets [`DEADLINE`], and a policy that lets a page load nothing

@@ -174,6 +174,7 @@ dependencies = [
  "percent-encoding",
  "pin-project-lite",
  "serde_core",
+ "serde_json",
  "serde_path_to_error",
  "serde_urlencoded",
  "sync_wrapper",
@@ -3337,6 +3338,7 @@ name = "scion-server"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "axum",
  "blake3",
  "bytes",
  "futures-util",
@@ -3351,6 +3353,7 @@ dependencies = [
  "scion-types",
  "scion-web",
  "serde",
+ "serde_json",
  "thiserror",
  "tokio",
  "tonic",

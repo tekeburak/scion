@@ -15,6 +15,7 @@ scion-derived.workspace = true
 scion-core.workspace = true
 scion-web.workspace = true
 async-trait.workspace = true
+axum = { version = "0.8", default-features = false, features = ["json", "query"] }
 blake3.workspace = true
 bytes.workspace = true
 hex.workspace = true
@@ -28,6 +29,7 @@ tonic.workspace = true
 tonic-health.workspace = true
 
 [dev-dependencies]
+serde_json = "1"
 scion-types.workspace = true
 proptest.workspace = true
 tonic-prost.workspace = true

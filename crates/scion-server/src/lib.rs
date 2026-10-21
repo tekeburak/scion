@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+mod api;
 mod auth;
 mod backfill;
 mod control;
@@ -74,24 +75,55 @@ pub async fn serve(
     Ok(())
 }
 
-/// Serve the web interface on `listener` until the future is dropped or
-/// accepting fails. Its pages read the same stores as the control plane and
-/// take the same tokens, signed with `key`; browsers sign in through
-/// `github` when it has its client secret.
-pub async fn serve_web(
+type Failure = Box<dyn std::error::Error + Send + Sync>;
+
+/// [`serve`] on `listener`, and the web interface with its HTTP API
+/// (`/api/v1`) on `web`, until either fails. Both run on one control
+/// server, so each repository with requests keeps a single land worker.
+/// The pages take the same tokens, signed with `key`; browsers sign in
+/// through `github` when it has its client secret.
+pub async fn serve_with_web(
     listener: TcpListener,
+    web: TcpListener,
     meta: Arc<dyn MetadataStore>,
     objects: Arc<dyn ObjectStore>,
     key: TokenKey,
     github: Option<GitHub>,
-) -> std::io::Result<()> {
-    let login = LoginServer::new(github, key.clone()).web_login();
-    let verify = move |token: &str| {
-        key.verify(token, std::time::SystemTime::now())
-            .map(|(principal, _)| principal)
-            .map_err(|e| e.to_string())
+) -> Result<(), Failure> {
+    let (control, object) = servers(meta.clone(), objects.clone()).await?;
+    let api = api::router(meta.clone(), control.clone(), object.clone(), key.clone());
+    let login = LoginServer::new(github.clone(), key.clone());
+    let pages = {
+        let key = key.clone();
+        let verify = move |token: &str| {
+            key.verify(token, std::time::SystemTime::now())
+                .map(|(principal, _)| principal)
+                .map_err(|e| e.to_string())
+        };
+        scion_web::serve(web, meta, objects, Arc::new(verify), login.web_login(), api)
     };
-    scion_web::serve(listener, meta, objects, Arc::new(verify), login).await
+    let grpc = tonic::transport::Server::builder()
+        .timeout(RPC_DEADLINE)
+        .add_routes(routes_of(control, object, login, key).await)
+        .serve_with_incoming(TcpIncoming::from(listener).with_nodelay(Some(true)));
+    tokio::try_join!(async { grpc.await.map_err(Failure::from) }, async {
+        pages.await.map_err(Failure::from)
+    },)?;
+    Ok(())
+}
+
+/// The control and object servers, after starting the land worker of every
+/// repository with requests waiting.
+async fn servers(
+    meta: Arc<dyn MetadataStore>,
+    objects: Arc<dyn ObjectStore>,
+) -> Result<(Arc<ControlServer>, ObjectServer), StoreError> {
+    let workers = Arc::new(LandWorkers::new(meta.clone(), objects.clone()));
+    for repo in meta.repos_with_open_change_requests().await? {
+        workers.wake(&repo);
+    }
+    let control = Arc::new(ControlServer::new(meta.clone(), objects.clone(), workers));
+    Ok((control, ObjectServer::new(meta, objects)))
 }
 
 /// The health, login, control and object services [`serve`] runs, for a
@@ -105,10 +137,16 @@ pub async fn routes(
     key: TokenKey,
     github: Option<GitHub>,
 ) -> Result<Routes, StoreError> {
-    let workers = Arc::new(LandWorkers::new(meta.clone(), objects.clone()));
-    for repo in meta.repos_with_open_change_requests().await? {
-        workers.wake(&repo);
-    }
+    let (control, object) = servers(meta, objects).await?;
+    Ok(routes_of(control, object, LoginServer::new(github, key.clone()), key).await)
+}
+
+async fn routes_of(
+    control: Arc<ControlServer>,
+    object: ObjectServer,
+    login: LoginServer,
+    key: TokenKey,
+) -> Routes {
     let (health, health_service) = tonic_health::server::health_reporter();
     health
         .set_serving::<ObjectServiceServer<ObjectServer>>()
@@ -116,22 +154,21 @@ pub async fn routes(
     health
         .set_serving::<ControlServiceServer<ControlServer>>()
         .await;
-    let control_service =
-        ControlServiceServer::new(ControlServer::new(meta.clone(), objects.clone(), workers))
-            .max_decoding_message_size(MAX_MESSAGE_BYTES)
-            .max_encoding_message_size(MAX_MESSAGE_BYTES);
-    let object_service = ObjectServiceServer::new(ObjectServer::new(meta.clone(), objects))
+    let control_service = ControlServiceServer::from_arc(control)
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
-    let login_service = LoginServiceServer::new(LoginServer::new(github, key.clone()));
+    let object_service = ObjectServiceServer::new(object)
+        .max_decoding_message_size(MAX_MESSAGE_BYTES)
+        .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let login_service = LoginServiceServer::new(login);
     let authenticate = Authenticate(key);
-    Ok(Routes::new(health_service)
+    Routes::new(health_service)
         .add_service(login_service)
         .add_service(InterceptedService::new(
             control_service,
             authenticate.clone(),
         ))
-        .add_service(InterceptedService::new(object_service, authenticate)))
+        .add_service(InterceptedService::new(object_service, authenticate))
 }
 
 /// Map a store failure to a gRPC status.

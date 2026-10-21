@@ -8,8 +8,9 @@
 //! scion-server token <principal> --ttl <duration>   print a token
 //! ```
 //!
-//! `--web <addr>` also serves the web interface on `addr` (for example
-//! `127.0.0.1:8080`), in the same process as the gRPC services.
+//! `--web <addr>` also serves the web interface and its HTTP/JSON API
+//! (`/api/v1`, see `docs/API.md`) on `addr` (for example `127.0.0.1:8080`),
+//! in the same process as the gRPC services.
 //!
 //! `backfill` derives one derived type (`root_tree`, `path_history`,
 //! `skip_list`) for every changeset reachable from the repository's refs that
@@ -90,17 +91,7 @@ async fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + S
                 Some(addr) => {
                     let web = TcpListener::bind(&addr).await?;
                     eprintln!("web interface on http://{}", web.local_addr()?);
-                    let pages = scion_server::serve_web(
-                        web,
-                        meta.clone(),
-                        objects.clone(),
-                        key.clone(),
-                        github.clone(),
-                    );
-                    tokio::try_join!(
-                        scion_server::serve(listener, meta, objects, key, github),
-                        async { pages.await.map_err(Into::into) },
-                    )?;
+                    scion_server::serve_with_web(listener, web, meta, objects, key, github).await?;
                 }
             }
         }
