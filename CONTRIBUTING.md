@@ -36,12 +36,15 @@ follows, for people and agents alike; read it, together with `docs/ARCHITECTURE.
 4. Commit messages explain *why*; the diff shows *what*.
 5. CI must be green. Reviews look at intent and invariants first, lines second.
 
-Issues labelled `good first issue` are small, self-contained and need no design decision.
+Issues labelled [`good first issue`](https://github.com/tekeburak/scion/labels/good%20first%20issue)
+are small, self-contained and need no design decision: a doc comment, a unit test, a clearer
+error message. Say on the issue that you are taking it, and open one PR for it.
 
 ## Checks
 
 Every command in the "Commands" section of `CLAUDE.md` must pass before a commit; CI runs the
-same set on ubuntu and macos. The short version:
+same set on Linux, on self-hosted runners (the header of `.github/workflows/ci.yml` says how
+they behave), and macOS is covered by developing on it. The short version:
 
 ```sh
 cargo fmt --all -- --check
