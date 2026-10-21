@@ -103,6 +103,53 @@ pub struct Mapped {
     pub blobs: BTreeMap<BlobId, Bytes>,
 }
 
+/// One commit read from git: everything [`GitRepo::changeset`] needs except
+/// its parents' changeset ids, so commits can be read concurrently and
+/// [resolved](Read::resolve) in order.
+#[derive(Debug)]
+pub struct Read {
+    commit: ObjectId,
+    parents: Vec<ObjectId>,
+    /// `parents` is empty and every `copy_from` names the repository root;
+    /// [`Read::resolve`] fills both in.
+    changeset: Changeset,
+    blobs: BTreeMap<BlobId, Bytes>,
+}
+
+impl Read {
+    /// The changeset of this commit, given `imported`, which must hold the
+    /// changeset of every parent.
+    pub fn resolve(self, imported: &HashMap<ObjectId, ChangesetId>) -> Result<Mapped, IngestError> {
+        let Self {
+            commit,
+            parents,
+            mut changeset,
+            blobs,
+        } = self;
+        changeset.parents = parents
+            .iter()
+            .map(|p| {
+                imported
+                    .get(p)
+                    .copied()
+                    .ok_or(IngestError::MissingParent { commit, parent: *p })
+            })
+            .collect::<Result<_, _>>()?;
+        if let Some(&first) = changeset.parents.first() {
+            for change in changeset.file_changes.values_mut() {
+                if let FileChange::Tracked {
+                    copy_from: Some((_, at)),
+                    ..
+                } = change
+                {
+                    *at = first;
+                }
+            }
+        }
+        Ok(Mapped { changeset, blobs })
+    }
+}
+
 /// A git repository opened for import.
 #[derive(Debug)]
 pub struct GitRepo {
@@ -123,11 +170,20 @@ type Change = (Vec<u8>, Option<File>, Option<File>);
 /// past this only exact renames and copies are found, like git's rename limit.
 const MAX_INEXACT_PAIRS: usize = 10_000;
 
+/// Bytes of delta bases kept per open repository, so reading a blob does not
+/// re-inflate the whole delta chain of every version before it.
+const PACK_CACHE_BYTES: usize = 32 << 20;
+
 impl GitRepo {
     /// Open the repository at `git_dir` (a work tree or a bare repository).
     pub fn open(git_dir: &Path) -> Result<Self, IngestError> {
-        let repo = gix::open(git_dir)
+        let mut repo = gix::open(git_dir)
             .map_err(|e| IngestError::Open(git_dir.display().to_string(), e.to_string()))?;
+        repo.objects.set_pack_cache(|| {
+            Box::new(gix::odb::pack::cache::lru::MemoryCappedHashmap::new(
+                PACK_CACHE_BYTES,
+            ))
+        });
         Ok(Self { repo })
     }
 
@@ -194,20 +250,17 @@ impl GitRepo {
         repo: &str,
         imported: &HashMap<ObjectId, ChangesetId>,
     ) -> Result<Mapped, IngestError> {
+        self.read(id, repo)?.resolve(imported)
+    }
+
+    /// Read commit `id` of this repository for a changeset of `repo`: the
+    /// tree diff, renames, file contents and identities, which need no other
+    /// commit's changeset.
+    pub fn read(&self, id: ObjectId, repo: &str) -> Result<Read, IngestError> {
         let obj_err = |e: &dyn std::fmt::Display| IngestError::Object(id, e.to_string());
         let commit = self.repo.find_commit(id).map_err(|e| obj_err(&e))?;
         let parent_ids: Vec<ObjectId> = commit.parent_ids().map(gix::Id::detach).collect();
         let c = commit.decode().map_err(|e| obj_err(&e))?;
-
-        let parents = parent_ids
-            .iter()
-            .map(|p| {
-                imported.get(p).copied().ok_or(IngestError::MissingParent {
-                    commit: id,
-                    parent: *p,
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
 
         let old_tree = match parent_ids.first() {
             Some(p) => Some(self.tree_of(*p)?),
@@ -216,10 +269,12 @@ impl GitRepo {
         let mut changes = Vec::new();
         self.diff(id, &[], old_tree, Some(c.tree()), &mut changes)?;
 
-        let sources = match parents.first() {
+        let sources = match parent_ids.first() {
             Some(_) => self.copy_sources(&changes)?,
             None => HashMap::new(),
         };
+        // `resolve` replaces it with the first parent's changeset.
+        let first_parent = Changeset::repository_root(repo).id();
 
         let mut file_changes = BTreeMap::new();
         let mut blobs = BTreeMap::new();
@@ -235,9 +290,9 @@ impl GitRepo {
                         reason: "not a valid repository path (UTF-8, no empty, `.` or `..` component)",
                     })
             };
-            let copy_from = match (sources.get(raw), parents.first()) {
-                (Some(from), Some(parent)) => Some((to_path(from)?, *parent)),
-                _ => None,
+            let copy_from = match sources.get(raw) {
+                Some(from) => Some((to_path(from)?, first_parent)),
+                None => None,
             };
             let path = to_path(raw)?;
             let change = match new {
@@ -269,7 +324,7 @@ impl GitRepo {
         let committer = c.committer().map_err(|e| obj_err(&e))?;
         let changeset = Changeset {
             repo: repo.to_owned(),
-            parents,
+            parents: Vec::new(),
             author: identity(author),
             author_date: timestamp(author.time().map_err(|e| obj_err(&e))?),
             committer: Some(identity(committer)),
@@ -278,7 +333,12 @@ impl GitRepo {
             file_changes,
             extra: BTreeMap::from([(GIT_SHA.to_owned(), id.as_bytes().to_vec())]),
         };
-        Ok(Mapped { changeset, blobs })
+        Ok(Read {
+            commit: id,
+            parents: parent_ids,
+            changeset,
+            blobs,
+        })
     }
 
     /// For each added file, the file it was renamed or copied from, if any:
@@ -305,7 +365,20 @@ impl GitRepo {
             return Ok(out);
         }
         let compare = sources.len() * added.len() <= MAX_INEXACT_PAIRS;
-        let mut source_data: HashMap<ObjectId, Vec<u8>> = HashMap::new();
+        // Each source is read and its lines counted once, not once per pair.
+        let inexact = compare
+            && added
+                .iter()
+                .any(|(_, blob)| sources.iter().all(|(_, s)| s != blob));
+        let source_data: Vec<Vec<u8>> = if inexact {
+            sources
+                .iter()
+                .map(|(_, source)| self.blob(*source))
+                .collect::<Result<_, _>>()?
+        } else {
+            Vec::new()
+        };
+        let source_lines: Vec<Lines<'_>> = source_data.iter().map(|d| Lines::of(d)).collect();
         for (path, blob) in added {
             if let Some((from, _)) = sources.iter().find(|(_, s)| *s == blob) {
                 out.insert(path.clone(), (*from).clone());
@@ -315,18 +388,8 @@ impl GitRepo {
                 continue;
             }
             let data = self.blob(blob)?;
-            let mut best: Option<(u64, &Vec<u8>)> = None;
-            for (from, source) in &sources {
-                if !source_data.contains_key(source) {
-                    source_data.insert(*source, self.blob(*source)?);
-                }
-                let score = similarity(&source_data[source], &data);
-                if score >= 50 && best.is_none_or(|(b, _)| score > b) {
-                    best = Some((score, from));
-                }
-            }
-            if let Some((_, from)) = best {
-                out.insert(path.clone(), from.clone());
+            if let Some(from) = most_similar(&Lines::of(&data), &source_lines) {
+                out.insert(path.clone(), sources[from].0.clone());
             }
         }
         Ok(out)
@@ -438,27 +501,64 @@ fn file_type(commit: ObjectId, path: &[u8], mode: EntryMode) -> Result<FileType,
     }
 }
 
+/// A file's lines, each with how often it occurs.
+struct Lines<'a> {
+    counts: HashMap<&'a [u8], u64>,
+    total: u64,
+}
+
+impl<'a> Lines<'a> {
+    fn of(data: &'a [u8]) -> Self {
+        let mut counts: HashMap<&[u8], u64> = HashMap::new();
+        let mut total = 0;
+        for line in data.split_inclusive(|c| *c == b'\n') {
+            *counts.entry(line).or_default() += 1;
+            total += 1;
+        }
+        Self { counts, total }
+    }
+}
+
 /// Percentage of lines two files share (each line counted as often as it
 /// occurs in both), relative to their average length. Empty files are never
 /// similar.
-fn similarity(a: &[u8], b: &[u8]) -> u64 {
-    let lines = |d: &[u8]| d.split_inclusive(|c| *c == b'\n').count() as u64;
-    let (la, lb) = (lines(a), lines(b));
-    if la == 0 || lb == 0 {
+fn similarity(a: &Lines<'_>, b: &Lines<'_>) -> u64 {
+    if a.total == 0 || b.total == 0 {
         return 0;
     }
-    let mut counts: HashMap<&[u8], u64> = HashMap::new();
-    for line in a.split_inclusive(|c| *c == b'\n') {
-        *counts.entry(line).or_default() += 1;
-    }
-    let mut shared = 0;
-    for line in b.split_inclusive(|c| *c == b'\n') {
-        if let Some(n) = counts.get_mut(line).filter(|n| **n > 0) {
-            *n -= 1;
-            shared += 1;
+    let (small, large) = if a.counts.len() <= b.counts.len() {
+        (a, b)
+    } else {
+        (b, a)
+    };
+    let shared: u64 = small
+        .counts
+        .iter()
+        .map(|(line, n)| (*n).min(large.counts.get(line).copied().unwrap_or(0)))
+        .sum();
+    200 * shared / (a.total + b.total)
+}
+
+/// The index of the first of `sources` most similar to `added`, if any
+/// shares at least half its lines. A pair whose line counts alone bound its
+/// score below that, or not above the best so far, is not compared.
+fn most_similar(added: &Lines<'_>, sources: &[Lines<'_>]) -> Option<usize> {
+    let mut best: Option<(u64, usize)> = None;
+    for (i, source) in sources.iter().enumerate() {
+        let (la, lb) = (source.total, added.total);
+        if la == 0 || lb == 0 {
+            continue;
+        }
+        let bound = 200 * la.min(lb) / (la + lb);
+        if bound < 50 || best.is_some_and(|(b, _)| bound <= b) {
+            continue;
+        }
+        let score = similarity(source, added);
+        if score >= 50 && best.is_none_or(|(b, _)| score > b) {
+            best = Some((score, i));
         }
     }
-    200 * shared / (la + lb)
+    best.map(|(_, i)| i)
 }
 
 fn identity(sig: gix::actor::SignatureRef<'_>) -> Identity {
@@ -470,4 +570,61 @@ fn identity(sig: gix::actor::SignatureRef<'_>) -> Identity {
 
 fn timestamp(t: gix::date::Time) -> Timestamp {
     Timestamp::new(t.seconds, t.offset / 60)
+}
+
+#[cfg(test)]
+mod tests {
+    use proptest::prelude::*;
+
+    use super::*;
+
+    /// The pairwise similarity rename detection used before lines were
+    /// counted once per file: the reference the faster one must match.
+    fn reference_similarity(a: &[u8], b: &[u8]) -> u64 {
+        let lines = |d: &[u8]| d.split_inclusive(|c| *c == b'\n').count() as u64;
+        let (la, lb) = (lines(a), lines(b));
+        if la == 0 || lb == 0 {
+            return 0;
+        }
+        let mut counts: HashMap<&[u8], u64> = HashMap::new();
+        for line in a.split_inclusive(|c| *c == b'\n') {
+            *counts.entry(line).or_default() += 1;
+        }
+        let mut shared = 0;
+        for line in b.split_inclusive(|c| *c == b'\n') {
+            if let Some(n) = counts.get_mut(line).filter(|n| **n > 0) {
+                *n -= 1;
+                shared += 1;
+            }
+        }
+        200 * shared / (la + lb)
+    }
+
+    /// Files of a few short lines drawn from a small alphabet, so that they
+    /// share lines often and are sometimes empty.
+    fn file() -> impl Strategy<Value = Vec<u8>> {
+        prop::collection::vec(prop::sample::select(&b"ab\n"[..]), 0..48)
+    }
+
+    proptest! {
+        #[test]
+        fn most_similar_matches_pairwise_comparison(
+            added in file(),
+            sources in prop::collection::vec(file(), 0..8),
+        ) {
+            let mut expected: Option<(u64, usize)> = None;
+            for (i, source) in sources.iter().enumerate() {
+                let score = reference_similarity(source, &added);
+                if score >= 50 && expected.is_none_or(|(b, _)| score > b) {
+                    expected = Some((score, i));
+                }
+            }
+            let lines: Vec<Lines<'_>> = sources.iter().map(|s| Lines::of(s)).collect();
+            let added_lines = Lines::of(&added);
+            for (source, l) in sources.iter().zip(&lines) {
+                prop_assert_eq!(similarity(l, &added_lines), reference_similarity(source, &added));
+            }
+            prop_assert_eq!(most_similar(&added_lines, &lines), expected.map(|(_, i)| i));
+        }
+    }
 }

@@ -12,14 +12,17 @@ use tokio::sync::mpsc;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 
-use crate::{GIT_SHA, GitRepo, IngestError, Mapped, ObjectId};
+use crate::{GIT_SHA, GitRepo, IngestError, Mapped, ObjectId, Read};
 
 /// Most blob uploads in flight at once for one commit.
 const UPLOAD_CONCURRENCY: usize = 16;
 /// Most commits whose blobs upload while earlier ones are being created.
 const UPLOAD_AHEAD: usize = 16;
-/// Most mapped commits waiting for their upload to start.
+/// Most mapped commits waiting for their upload to start, and most read
+/// commits waiting to be mapped.
 const MAP_AHEAD: usize = 8;
+/// Threads reading commits from git.
+const MAP_THREADS: usize = 2;
 /// Most changesets created in one batch.
 const BATCH: usize = 64;
 
@@ -217,9 +220,11 @@ async fn upload(
 
 type MapResult = Result<(ObjectId, Mapped), IngestError>;
 
-/// Map `pending` commits, in order, on a blocking thread. `ids` holds the
+/// Map `pending` commits, in order. `MAP_THREADS` blocking threads read
+/// them from git, commit `i` on thread `i % MAP_THREADS`; one more resolves
+/// each in order against the changesets before it. `ids` holds the
 /// changesets of the commits already imported; each mapped commit's id is
-/// added as it goes. The thread stops at the first error, which it sends, or
+/// added as it goes. Mapping stops at the first error, which is sent, or
 /// when the receiver is dropped.
 fn spawn_mapper(
     git_dir: &Path,
@@ -228,24 +233,29 @@ fn spawn_mapper(
     mut ids: HashMap<ObjectId, ChangesetId>,
 ) -> (JoinHandle<()>, mpsc::Receiver<MapResult>) {
     let (tx, rx) = mpsc::channel(MAP_AHEAD);
-    // A repository handle stays on its thread; the mapper opens its own.
-    let git_dir = git_dir.to_owned();
-    let repo = repo.to_owned();
+    let readers: Vec<_> = (0..MAP_THREADS)
+        .map(|k| {
+            let commits: Vec<_> = pending
+                .iter()
+                .copied()
+                .skip(k)
+                .step_by(MAP_THREADS)
+                .collect();
+            spawn_reader(git_dir, repo, commits)
+        })
+        .collect();
     let handle = tokio::task::spawn_blocking(move || {
-        let git = match GitRepo::open(&git_dir) {
-            Ok(git) => git,
-            Err(e) => {
-                let _ = tx.blocking_send(Err(e));
+        for i in 0..pending.len() {
+            // A reader that stopped early has sent its error, which ends the
+            // loop before its channel is read again.
+            let Ok(read) = readers[i % MAP_THREADS].recv() else {
                 return;
-            }
-        };
-        for commit in pending {
-            let map = span("map");
-            let mapped = git.changeset(commit, &repo, &ids).map(|mapped| {
+            };
+            let mapped = read.and_then(|(commit, read)| {
+                let mapped = read.resolve(&ids)?;
                 ids.insert(commit, mapped.changeset.id());
-                (commit, mapped)
+                Ok((commit, mapped))
             });
-            drop(map);
             let failed = mapped.is_err();
             if tx.blocking_send(mapped).is_err() || failed {
                 return;
@@ -253,4 +263,36 @@ fn spawn_mapper(
         }
     });
     (handle, rx)
+}
+
+/// Read `commits` from git, in order, on a blocking thread, which stops at the
+/// first error, which it sends, or when the receiver is dropped.
+fn spawn_reader(
+    git_dir: &Path,
+    repo: &str,
+    commits: Vec<ObjectId>,
+) -> std::sync::mpsc::Receiver<Result<(ObjectId, Read), IngestError>> {
+    let (tx, rx) = std::sync::mpsc::sync_channel(MAP_AHEAD / MAP_THREADS);
+    // A repository handle stays on its thread; each reader opens its own.
+    let git_dir = git_dir.to_owned();
+    let repo = repo.to_owned();
+    tokio::task::spawn_blocking(move || {
+        let git = match GitRepo::open(&git_dir) {
+            Ok(git) => git,
+            Err(e) => {
+                let _ = tx.send(Err(e));
+                return;
+            }
+        };
+        for commit in commits {
+            let map = span("map");
+            let read = git.read(commit, &repo).map(|read| (commit, read));
+            drop(map);
+            let failed = read.is_err();
+            if tx.send(read).is_err() || failed {
+                return;
+            }
+        }
+    });
+    rx
 }

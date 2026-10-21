@@ -3456,6 +3456,7 @@ dependencies = [
  "futures-util",
  "gix",
  "object_store",
+ "proptest",
  "scion-client",
  "scion-derived",
  "scion-proto",
