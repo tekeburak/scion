@@ -161,5 +161,5 @@ CockroachDB stays a drop-in target, though CI does not test it yet; any S3-compa
 - Workflows built on many long-lived branches or forks: there are no server branches.
 - Reclaiming storage: objects are append-only and garbage collection is a non-goal.
 - Code review beyond change requests: the web interface shows change requests with their
-  status, heads and conflicts, and acting on them from the page is planned; a separate review
-  product is a non-goal.
+  status, heads and conflicts, and members rebase, land or reject them from the page; a
+  separate review product is a non-goal.

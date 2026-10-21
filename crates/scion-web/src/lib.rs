@@ -13,6 +13,14 @@
 //! for paths under its grants and a changeset's diff only for those paths,
 //! while trees and files are objects and need a reader of the repository
 //! only.
+//!
+//! A change request's page also acts on it for a signed-in caller, through
+//! the [`Act`] function the server passes in, which checks the caller's
+//! role as the control plane does: a writer rebases it onto `main` or lands
+//! it again, its submitter or an admin rejects it. The page shows only the
+//! buttons the caller's role allows. Actions are `POST`s, which a browser
+//! sends with the session cookie only from this site (it is `SameSite=Lax`),
+//! and one whose `Origin` names another host is refused as well.
 
 #![forbid(unsafe_code)]
 
@@ -32,7 +40,10 @@ use futures_util::future::BoxFuture;
 use futures_util::{StreamExt, TryStreamExt, stream};
 use maud::Markup;
 use scion_derived::{Blame, DeriveError, Deriver, RootTree};
-use scion_store::{MetadataStore, ObjectStore, StoreError, is_allowed_ref_name};
+use scion_store::{
+    ChangeRequest, ChangeRequestStatus, MetadataStore, ObjectStore, Role, StoreError,
+    is_allowed_ref_name,
+};
 use scion_types::{Changeset, ChangesetId, RepoPath, TreeEntry};
 use serde::Deserialize;
 use tokio::net::TcpListener;
@@ -44,6 +55,62 @@ pub type Verify = Arc<dyn Fn(&str) -> Result<String, String> + Send + Sync>;
 /// long it is valid, or says why not.
 pub type Exchange =
     Arc<dyn Fn(String) -> BoxFuture<'static, Result<(String, Duration), String>> + Send + Sync>;
+
+/// What a change request's page asks the server to do to it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Action {
+    /// Replay its head onto `main`, as the land worker would, to see
+    /// whether it still conflicts.
+    Rebase,
+    /// Submit its head again, as the caller, and wait for the land worker.
+    Land,
+    /// Close it while it is `pending` or `needs_rebase`.
+    Reject,
+}
+
+impl Action {
+    /// The action the last segment of its URL names.
+    fn parse(s: &str) -> Option<Self> {
+        [Self::Rebase, Self::Land, Self::Reject]
+            .into_iter()
+            .find(|a| a.as_str() == s)
+    }
+
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Rebase => "rebase",
+            Self::Land => "land",
+            Self::Reject => "reject",
+        }
+    }
+}
+
+/// What the server did for an [`Action`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Acted {
+    /// The head replays cleanly onto `main` as this changeset.
+    Rebased(ChangesetId),
+    /// The head conflicts with `main` at these paths.
+    Conflicts(Vec<String>),
+    /// This new request carries the head; it is finished, or still open if
+    /// the land worker took longer than a wait.
+    Submitted(u64),
+    /// The request is rejected.
+    Rejected,
+}
+
+/// Runs an [`Action`] on a change request of `repo` for `principal`, or
+/// refuses it with an HTTP status and why; arguments in that order.
+pub type Act = Arc<
+    dyn Fn(
+            String,
+            String,
+            ChangeRequest,
+            Action,
+        ) -> BoxFuture<'static, Result<Acted, (StatusCode, String)>>
+        + Send
+        + Sync,
+>;
 
 /// The principal whose grants every visitor reads: a reader grant to it
 /// makes a repository, or a directory with `--path`, public. No token names
@@ -108,16 +175,18 @@ struct Web {
     objects: Arc<dyn ObjectStore>,
     verify: Verify,
     login: Option<Login>,
+    act: Act,
 }
 
 /// The pages, and `api` under `/api/v1`, for a server that runs its own
-/// listener; browsers sign in through `login`, if given. Both get the same
-/// deadline.
+/// listener; browsers sign in through `login`, if given, and change
+/// requests are acted on through `act`. Both get the same deadline.
 pub fn router(
     meta: Arc<dyn MetadataStore>,
     objects: Arc<dyn ObjectStore>,
     verify: Verify,
     login: Option<Login>,
+    act: Act,
     api: Router,
 ) -> Router {
     Router::new()
@@ -132,11 +201,13 @@ pub fn router(
         .route("/{repo}/changeset/{id}", get(changeset))
         .route("/{repo}/requests", get(requests))
         .route("/{repo}/requests/{id}", get(request))
+        .route("/{repo}/requests/{id}/{action}", post(take_action))
         .with_state(Web {
             meta,
             objects,
             verify,
             login,
+            act,
         })
         .nest("/api/v1", api)
         .layer(middleware::from_fn(guard))
@@ -150,13 +221,14 @@ pub async fn serve(
     objects: Arc<dyn ObjectStore>,
     verify: Verify,
     login: Option<Login>,
+    act: Act,
     api: Router,
 ) -> std::io::Result<()> {
     // Without TCP_NODELAY a small reply waits for the client's delayed ACK.
     let listener = listener.tap_io(|tcp| {
         let _ = tcp.set_nodelay(true);
     });
-    axum::serve(listener, router(meta, objects, verify, login, api)).await
+    axum::serve(listener, router(meta, objects, verify, login, act, api)).await
 }
 
 /// Every page gets [`DEADLINE`], and a policy that lets a page load nothing
@@ -276,6 +348,9 @@ struct Reader {
     /// Directories of its grants, without a trailing `/`; empty for the
     /// whole repository.
     prefixes: Vec<String>,
+    /// The highest role its own grants give it on some path; `None` for a
+    /// visitor, who reads only what [`ANYONE`] does.
+    role: Option<Role>,
 }
 
 impl Reader {
@@ -311,14 +386,19 @@ impl Reader {
 async fn reader(web: &Web, headers: &HeaderMap, repo: &str) -> Result<Reader, Error> {
     let principal = viewer(web, headers)?;
     // One read for both principals: a repository has a grant per member.
-    let prefixes: Vec<String> = web
+    let grants: Vec<_> = web
         .meta
         .grants(repo)
         .await?
         .into_iter()
         .filter(|g| g.principal == ANYONE || Some(&g.principal) == principal.as_ref())
-        .map(|g| g.path_prefix)
         .collect();
+    let role = grants
+        .iter()
+        .filter(|g| g.principal != ANYONE)
+        .map(|g| g.role)
+        .max();
+    let prefixes: Vec<String> = grants.into_iter().map(|g| g.path_prefix).collect();
     match principal {
         // Also for a repository that does not exist, as on the control plane.
         None if prefixes.is_empty() => Err(Error(
@@ -338,6 +418,7 @@ async fn reader(web: &Web, headers: &HeaderMap, repo: &str) -> Result<Reader, Er
         principal => Ok(Reader {
             principal: principal.unwrap_or_else(|| ANYONE.to_owned()),
             prefixes,
+            role,
         }),
     }
 }
@@ -739,20 +820,111 @@ async fn requests(State(web): State<Web>, Path(repo): Path<String>, headers: Hea
     Ok(html::requests(&repo, &requests))
 }
 
-/// One change request: where it is, and its head, base and landed changeset.
+/// One change request: where it is, and its head, base and landed
+/// changeset, with the actions the caller's role allows.
 async fn request(
     State(web): State<Web>,
     Path((repo, id)): Path<(String, String)>,
     headers: HeaderMap,
 ) -> Page {
-    reader(&web, &headers, &repo).await?;
+    let reader = reader(&web, &headers, &repo).await?;
+    let cr = change_request(&web, &repo, &id).await?;
+    Ok(html::request(&repo, &cr, &actions(&reader, &cr), None))
+}
+
+/// Change request `id` of `repo`.
+async fn change_request(web: &Web, repo: &str, id: &str) -> Result<ChangeRequest, Error> {
     let id: u64 = id
         .parse()
         .map_err(|_| bad_request(format!("change request {id:?}")))?;
-    let cr = web
-        .meta
-        .get_change_request(&repo, id)
+    web.meta
+        .get_change_request(repo, id)
         .await?
-        .ok_or_else(|| not_found(format!("no change request {id} in {repo:?}")))?;
-    Ok(html::request(&repo, &cr))
+        .ok_or_else(|| not_found(format!("no change request {id} in {repo:?}")))
+}
+
+/// The actions `reader` may take on `cr` where it is now.
+fn actions(reader: &Reader, cr: &ChangeRequest) -> Vec<Action> {
+    use ChangeRequestStatus as S;
+    let writer = reader.role >= Some(Role::Writer);
+    let mut actions = Vec::new();
+    if writer && cr.status == S::NeedsRebase {
+        actions.push(Action::Rebase);
+    }
+    if writer && matches!(cr.status, S::NeedsRebase | S::Rejected) {
+        actions.push(Action::Land);
+    }
+    if matches!(cr.status, S::Pending | S::NeedsRebase)
+        && (reader.role == Some(Role::Admin)
+            || (reader.role.is_some() && reader.principal == cr.submitter))
+    {
+        actions.push(Action::Reject);
+    }
+    actions
+}
+
+/// Act on a change request for the signed-in caller: a rebase shows its
+/// outcome on the request's page, a land goes to the new request's page
+/// and a reject back to this one.
+async fn take_action(
+    State(web): State<Web>,
+    Path((repo, id, action)): Path<(String, String, String)>,
+    headers: HeaderMap,
+) -> Result<Response, Error> {
+    let action = Action::parse(&action)
+        .ok_or_else(|| not_found(format!("no action {action:?}; try rebase, land or reject")))?;
+    same_origin(&headers)?;
+    let reader = reader(&web, &headers, &repo).await?;
+    if reader.role.is_none() {
+        let (status, who) = if reader.principal == ANYONE {
+            (StatusCode::UNAUTHORIZED, "sign in at /login".to_owned())
+        } else {
+            (
+                StatusCode::FORBIDDEN,
+                format!("{} is not one", reader.principal),
+            )
+        };
+        return Err(Error(
+            status,
+            format!("acting on a change request needs a member of {repo:?}: {who}"),
+        ));
+    }
+    let cr = change_request(&web, &repo, &id).await?;
+    let acted = (web.act)(reader.principal.clone(), repo.clone(), cr.clone(), action)
+        .await
+        .map_err(|(status, why)| Error(status, why))?;
+    let to = match acted {
+        Acted::Submitted(new) => html::request_url(&repo, new),
+        Acted::Rejected => html::request_url(&repo, cr.id),
+        // A rebase leaves the request as it was.
+        outcome => {
+            let page = html::request(&repo, &cr, &actions(&reader, &cr), Some(&outcome));
+            return Ok(page.into_response());
+        }
+    };
+    let to = HeaderValue::try_from(to)
+        .map_err(|e| Error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    Ok((StatusCode::SEE_OTHER, [(header::LOCATION, to)]).into_response())
+}
+
+/// Refuse a `POST` a browser sent from a page of another host. One with no
+/// `Origin` comes from a client that is not a browser, which sends its
+/// token itself.
+fn same_origin(headers: &HeaderMap) -> Result<(), Error> {
+    let Some(origin) = headers.get(header::ORIGIN) else {
+        return Ok(());
+    };
+    let host = headers.get(header::HOST).and_then(|h| h.to_str().ok());
+    let from = origin
+        .to_str()
+        .ok()
+        .and_then(|o| o.split_once("://"))
+        .map(|(_, authority)| authority);
+    if from.is_some() && from == host {
+        return Ok(());
+    }
+    Err(Error(
+        StatusCode::FORBIDDEN,
+        "this action was sent from another site's page".into(),
+    ))
 }

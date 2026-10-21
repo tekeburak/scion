@@ -376,9 +376,20 @@ component from the revision's root tree, which `GET changesets/{id}` returns alo
 changeset (derived data, not a changeset field); writing uploads the files' blobs and creates
 one changeset on the parent, and `land` submits it and waits for the land worker.
 
-*Planned, Phase 11.* Change-request actions on the pages, all through the same
-authorization. A separate
-code-review product is not a goal; change-request pages are.
+A change request's page also **acts on it** for a signed-in member, through the RPCs `scn`
+calls, so roles are checked as there; the page shows only the buttons the caller's role
+allows. A writer rebases a request that needs a rebase onto `main`'s current changeset
+(`Rebase`), which shows the rebased changeset or the paths that still conflict, and lands a
+request that needs a rebase or was rejected by submitting its head again as itself and
+waiting for the land worker (`SubmitChangeRequest`): an admin lands this way a change its
+submitter's directory grants did not cover. The submitter or an admin rejects a request that
+is `pending` or `needs_rebase`, one conditional update in `change_requests`, which a request
+the land worker has claimed already does not match. Actions are `POST`s; the session cookie
+is `SameSite=Lax`, so a browser sends it only from this site, and a `POST` whose `Origin`
+names another host is refused as well. A separate code-review product is not a goal;
+change-request pages are.
+
+*Planned, Phase 11.* Creating repositories and granting roles from the pages.
 
 ### Ingestion
 

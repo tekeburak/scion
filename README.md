@@ -99,8 +99,10 @@ What works today:
 - **Web interface** (`scion-server --web <addr>`): server-rendered pages for the repositories a
   visitor can read: repository home with its README, directories and files at any ref or
   changeset, log and per-path history, blame, changesets with their line diffs, and change
-  requests with their status and conflicts. The pages run inside the server and check the same
-  roles and directory grants as `scn`. People sign in with GitHub in the browser (once the
+  requests with their status and conflicts. From a change request's page, writers rebase it
+  onto `main` to see whether it still conflicts and land it again, and its submitter or an
+  admin rejects it; each page shows only the buttons the visitor's role allows. The pages run
+  inside the server and check the same roles and directory grants as `scn`. People sign in with GitHub in the browser (once the
   OAuth app's `SCION_GITHUB_CLIENT_SECRET` is set; the server keeps no session state), tools
   send `Authorization: Bearer <token>`, and `scn access grant anyone reader` makes a
   repository, or with `--path` one directory, public: readable without signing in.
@@ -386,9 +388,9 @@ A performance pass is under way, aimed at every benchmark row being a multiple f
 a path log already reads all of its changesets in one batch and the server's memos keep their
 hot entries; next, trees and history pages move into the metadata database as the reference
 design keeps them, the object plane gains streaming batch requests, and landing becomes one
-round trip. The web interface's pages, browser sign-in, HTTP/JSON API, MCP server and `scn --json`
-are in; next come landing or rejecting change requests and creating repositories and granting
-roles from the web interface; released binaries, a server image, a production
+round trip. The web interface's pages, browser sign-in, change-request actions, HTTP/JSON API, MCP server
+and `scn --json` are in; next come creating repositories and granting roles from the web
+interface; released binaries, a server image, a production
 compose profile and a hosted instance; the regional cache and per-node daemon tiers with
 manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan, with
 acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).

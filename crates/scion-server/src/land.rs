@@ -16,9 +16,9 @@ use scion_store::{
 };
 use scion_types::{Changeset, ChangesetId};
 use tokio::sync::Notify;
-use tonic::Status;
+use tonic::{Request, Status};
 
-use crate::auth::Scope;
+use crate::auth::{Scope, authorize, principal};
 use crate::control::{Rebased, rebase};
 use crate::store_status;
 
@@ -105,6 +105,31 @@ impl LandWorkers {
             }
         }
     }
+}
+
+/// Reject `cr` of `repo` for `request`'s principal, its submitter or an
+/// admin of the repository. One that is no longer `pending` or
+/// `needs_rebase` is refused, and stays as it is.
+pub(crate) async fn reject<T>(
+    meta: &dyn MetadataStore,
+    request: &Request<T>,
+    repo: &str,
+    cr: &ChangeRequest,
+) -> Result<ChangeRequest, Status> {
+    if principal(request)? != cr.submitter {
+        authorize(meta, request, repo, Role::Admin).await?;
+    }
+    let cr = meta
+        .reject_change_request(repo, cr.id)
+        .await
+        .map_err(store_status)?;
+    if cr.status != ChangeRequestStatus::Rejected {
+        return Err(Status::failed_precondition(format!(
+            "change request {} is {}; only one that is pending or needs a rebase can be rejected",
+            cr.id, cr.status
+        )));
+    }
+    Ok(cr)
 }
 
 fn is_open(cr: &ChangeRequest) -> bool {

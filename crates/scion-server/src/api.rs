@@ -38,7 +38,7 @@ use scion_types::{
     BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, FileType, Identity, RepoPath,
     Timestamp, Tree, TreeEntry,
 };
-use scion_web::ANYONE;
+use scion_web::{ANYONE, Act, Acted, Action};
 use serde::{Deserialize, Serialize};
 use tonic::{Code, Request, Status};
 
@@ -100,6 +100,81 @@ pub(crate) fn router(
             objects,
             key,
         })
+}
+
+/// What the web interface's change-request pages do, as the signed-in
+/// principal, through the RPCs `scn` calls, so roles are checked as
+/// there: a land submits the request's head again and waits for the land
+/// worker, a rebase replays the head onto `main`; a reject is
+/// [`crate::land::reject`].
+pub(crate) fn page_actions(meta: Arc<dyn MetadataStore>, control: Arc<ControlServer>) -> Act {
+    Arc::new(move |principal, repo, cr, action| {
+        let (meta, control) = (meta.clone(), control.clone());
+        Box::pin(async move {
+            // The page checked the token; its expiry is never read.
+            let caller = Caller(Some(Principal(principal, SystemTime::UNIX_EPOCH)));
+            page_action(&*meta, &control, &caller, repo, &cr, action)
+                .await
+                .map_err(|e| (e.0, e.2))
+        })
+    })
+}
+
+async fn page_action(
+    meta: &dyn MetadataStore,
+    control: &ControlServer,
+    caller: &Caller,
+    repo: String,
+    cr: &scion_store::ChangeRequest,
+    action: Action,
+) -> Result<Acted, Error> {
+    let fail = |e: Status| caller.error(&e);
+    match action {
+        Action::Land => {
+            let request = SubmitChangeRequestRequest {
+                repo,
+                head: cr.head.as_bytes().to_vec(),
+                wait: true,
+            };
+            let reply = control
+                .submit_change_request(caller.request(request))
+                .await
+                .map_err(fail)?;
+            Ok(Acted::Submitted(reply.into_inner().id))
+        }
+        Action::Rebase => {
+            let main = control
+                .get_ref(caller.request(GetRefRequest {
+                    repo: repo.clone(),
+                    name: "main".into(),
+                }))
+                .await
+                .map_err(fail)?
+                .into_inner();
+            let request = RebaseRequest {
+                repo,
+                head: cr.head.as_bytes().to_vec(),
+                onto: main.target,
+            };
+            let reply = control
+                .rebase(caller.request(request))
+                .await
+                .map_err(fail)?
+                .into_inner();
+            Ok(match reply.head {
+                Some(head) => Acted::Rebased(ChangesetId::from_bytes(
+                    head.try_into().expect("the server sends 32-byte ids"),
+                )),
+                None => Acted::Conflicts(reply.conflicts),
+            })
+        }
+        Action::Reject => {
+            crate::land::reject(meta, &caller.request(()), &repo, cr)
+                .await
+                .map_err(fail)?;
+            Ok(Acted::Rejected)
+        }
+    }
 }
 
 /// A refusal: its HTTP status, the gRPC code's name and why.

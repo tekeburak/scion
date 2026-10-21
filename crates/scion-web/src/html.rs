@@ -11,7 +11,7 @@ use scion_core::DiffEntry;
 use scion_store::ChangeRequest;
 use scion_types::{Changeset, ChangesetId, FileType, RepoPath, Tree, TreeEntry};
 
-use crate::Content;
+use crate::{Acted, Action, Content};
 
 const STYLE: &str = "
 body{font:14px/1.5 system-ui,sans-serif;margin:0;color:#1f2328;background:#fff}
@@ -32,6 +32,7 @@ pre.diff span{display:block;padding:0 12px}
 article.readme{border:1px solid #d0d7de;padding:8px 24px;margin-top:16px}
 td.ln{color:#57606a;text-align:right;user-select:none;width:1%}
 td.who{white-space:nowrap;width:1%}
+form.act{display:inline-block;margin:12px 8px 0 0}
 @media (prefers-color-scheme:dark){
 body{color:#e6edf3;background:#0d1117}
 header,pre{background:#161b22}
@@ -91,7 +92,7 @@ fn requests_url(repo: &str) -> String {
     format!("/{}/requests", enc(repo))
 }
 
-fn request_url(repo: &str, id: u64) -> String {
+pub(crate) fn request_url(repo: &str, id: u64) -> String {
     format!("/{}/requests/{id}", enc(repo))
 }
 
@@ -480,7 +481,13 @@ fn submitted(cr: &ChangeRequest) -> String {
     scion_types::Timestamp::new(i64::try_from(secs).unwrap_or(i64::MAX), 0).to_string()
 }
 
-pub(crate) fn request(repo: &str, cr: &ChangeRequest) -> Markup {
+pub(crate) fn request(
+    repo: &str,
+    cr: &ChangeRequest,
+    actions: &[Action],
+    outcome: Option<&Acted>,
+) -> Markup {
+    let conflicts = |paths: &[String]| html! { ul { @for path in paths { li.mono { (path) } } } };
     page(
         &format!("Change request #{}", cr.id),
         &html! {
@@ -503,7 +510,37 @@ pub(crate) fn request(repo: &str, cr: &ChangeRequest) -> Markup {
                         "Paths the submitter may not change"
                     }
                 }
-                ul { @for path in &cr.conflicts { li.mono { (path) } } }
+                (conflicts(&cr.conflicts))
+            }
+            @match outcome {
+                Some(Acted::Rebased(id)) => {
+                    h3 { "Rebased onto main" }
+                    p {
+                        "The head now replays cleanly onto main as "
+                        a.mono href=(changeset_url(repo, *id)) { (short(*id)) }
+                        "; land it to put it there."
+                    }
+                }
+                Some(Acted::Conflicts(paths)) => {
+                    h3 { "Still conflicts with main" }
+                    (conflicts(paths))
+                    p.muted {
+                        "Resolve them in a working copy: " code { "scn update" } ", edit, "
+                        code { "scn commit" } ", " code { "scn land" } "."
+                    }
+                }
+                _ => {}
+            }
+            @for action in actions {
+                form.act method="post" action=(format!("{}/{}", request_url(repo, cr.id), action.as_str())) {
+                    button type="submit" {
+                        @match action {
+                            Action::Rebase => "Rebase onto main",
+                            Action::Land => "Land",
+                            Action::Reject => "Reject",
+                        }
+                    }
+                }
             }
         },
     )

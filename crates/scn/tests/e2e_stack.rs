@@ -10,7 +10,8 @@
 //! Last, the admin grants a second principal a directory with `scn access`,
 //! that principal lands under it, and a revoke makes its next land fail.
 //! A second test opens every page of the web interface on a repository
-//! seeded the same way.
+//! seeded the same way, then lands from a change request's page a request
+//! the land worker rejected.
 //! Each run uses its own repository name, so runs never see each other's
 //! refs or changesets even though they share the database and bucket.
 
@@ -413,6 +414,99 @@ async fn web_pages_on_postgres_and_s3() {
     assert_eq!(response.status().as_u16(), 401);
 
     session_and_public(&web, r, &id, &wc).await;
+    land_from_the_page(&server, &web, r, dir.path()).await;
+}
+
+/// `sp:e2e-docs` commits a change to `src/` and loses its grant there
+/// before landing it, so the land worker rejects the request; the admin's
+/// signed-in browser lands it from the request's page, and `main` moves to
+/// it.
+async fn land_from_the_page(server: &str, web: &str, r: &str, dir: &Path) {
+    let docs = "sp:e2e-docs";
+    let wc = dir.join("wc");
+    scn(&wc, &["access", "grant", docs, "reader"]);
+    scn(&wc, &["access", "grant", docs, "writer", "--path", "docs"]);
+    scn(&wc, &["access", "grant", docs, "writer", "--path", "src"]);
+    scn_as(docs, dir, &["clone", server, r, "docs"]);
+    let mine = dir.join("docs");
+    std::fs::write(mine.join("src/lib.rs"), b"pub fn one() -> u8 {\n    3\n}\n").unwrap();
+    scn_as(docs, &mine, &["add", "src"]);
+    let head = committed(&scn_as(docs, &mine, &["commit", "-m", "Three from docs"]));
+    scn(&wc, &["access", "revoke", docs, "--path", "src"]);
+    let out = scn_as(docs, &mine, &["land", "--no-wait"]);
+    let id: u64 = out
+        .strip_prefix("submitted request ")
+        .and_then(|rest| rest.split(' ').next())
+        .expect(&out)
+        .parse()
+        .unwrap();
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let finished = client
+        .get(format!(
+            "{web}/api/v1/repos/{r}/change-requests/{id}?wait=true"
+        ))
+        .bearer_auth(token_of(docs))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(finished.contains(r#""status":"rejected""#), "{finished}");
+
+    let session = format!("scion_session={}", token());
+    let page = client
+        .get(format!("{web}/{r}/requests/{id}"))
+        .header("cookie", &session)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let land = format!("/{r}/requests/{id}/land");
+    assert!(page.contains(&format!("action=\"{land}\"")), "{page}");
+    let response = client
+        .post(format!("{web}{land}"))
+        .header("cookie", &session)
+        .header("origin", web)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 303);
+    let to = response.headers()["location"].to_str().unwrap().to_owned();
+    let page = client
+        .get(format!("{web}{to}"))
+        .header("cookie", &session)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        page.contains("landed") && page.contains("sp:test"),
+        "{page}"
+    );
+    let log = client
+        .get(format!("{web}/{r}/log"))
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    let newest = log.find("Three from docs").expect(&log);
+    assert!(newest < log.find("Fix one").unwrap(), "{log}");
+    scn(&wc, &["update"]);
+    assert_eq!(
+        std::fs::read(wc.join("src/lib.rs")).unwrap(),
+        b"pub fn one() -> u8 {\n    3\n}\n",
+        "main moved to {head}"
+    );
 }
 
 /// A signed-in browser's session lists the change requests of the private
