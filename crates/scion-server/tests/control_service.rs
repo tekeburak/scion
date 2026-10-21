@@ -5,9 +5,11 @@ mod common;
 
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use bytes::Bytes;
-use scion_derived::test_util::{REPO, changeset, tracked};
+use scion_derived::test_util::{CountingMeta, REPO, changeset, tracked};
+use scion_derived::{Deriver, PathHistory};
 use scion_proto::v1::{
     BlameRequest, BlameRun, DiffRequest, GetRefRequest, LogRequest, MergeBaseRequest,
     PathLogRequest,
@@ -302,4 +304,37 @@ async fn bad_input_and_unknown_changesets_are_rejected() {
         .await
         .unwrap_err();
     assert_eq!(err.code(), Code::PermissionDenied);
+}
+
+/// Phase 10.2: a 428-result path log on a cold server costs the grants
+/// query, the `PathHistory` pointer at the head and one `get_changesets`.
+#[tokio::test]
+async fn path_log_of_428_changesets_makes_three_metadata_queries() {
+    let shared = Arc::new(MemoryStore::with_repo(REPO));
+    let store: &'static MemoryStore = Box::leak(Box::new(shared.clone()));
+    let mut head = commit(store, vec![], &[("f.txt", b"0\n")], "0").await;
+    for i in 1..428 {
+        let content = format!("{i}\n");
+        head = commit(store, vec![head], &[("f.txt", content.as_bytes())], "edit").await;
+    }
+    Deriver::new(REPO, store, store)
+        .derive::<PathHistory>(head)
+        .await
+        .unwrap();
+
+    let counting = Arc::new(CountingMeta::new(store));
+    let mut client = common::control(common::serve(counting.clone(), shared).await);
+    counting.queries.store(0, Ordering::Relaxed);
+    let log = client
+        .path_log(PathLogRequest {
+            repo: REPO.into(),
+            head: bytes(head),
+            path: "f.txt".into(),
+            limit: 1000,
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(log.changesets.len(), 428);
+    assert!(counting.queries() <= 3, "{} queries", counting.queries());
 }

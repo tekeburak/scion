@@ -43,7 +43,7 @@ use crate::store_status;
 /// by asking again from the last parent.
 pub const MAX_LOG_LIMIT: u32 = 1000;
 
-/// Changesets a `Log` or `PathLog` reply reads at once.
+/// Tree lookups a `Revert` runs at once.
 const READ_CONCURRENCY: usize = 32;
 
 /// Serves the control plane from the metadata and object stores.
@@ -77,24 +77,21 @@ impl ControlServer {
         Deriver::new(repo, &*self.meta, &*self.objects)
     }
 
-    /// The canonical encodings of `ids`, in order.
-    /// The changesets `ids`, in order, read concurrently.
+    /// The canonical encodings of `ids`, in order, read with one
+    /// `get_changesets`.
     async fn encoded(&self, repo: &str, ids: Vec<ChangesetId>) -> Result<Vec<Vec<u8>>, Status> {
-        stream::iter(ids)
-            .map(|id| async move {
-                let cs = self
-                    .meta
-                    .get_changeset(repo, id)
-                    .await
-                    .map_err(store_status)?
-                    .ok_or_else(|| {
-                        Status::data_loss(format!("indexed changeset {id} is missing"))
-                    })?;
-                Ok::<_, Status>(cs.encode_to_vec())
-            })
-            .buffered(READ_CONCURRENCY)
-            .try_collect()
+        let found = self
+            .meta
+            .get_changesets(repo, &ids)
             .await
+            .map_err(store_status)?;
+        ids.iter()
+            .zip(found)
+            .map(|(id, cs)| {
+                cs.map(|cs| cs.encode_to_vec())
+                    .ok_or_else(|| Status::data_loss(format!("indexed changeset {id} is missing")))
+            })
+            .collect()
     }
 }
 

@@ -149,6 +149,7 @@ pub struct CountingMeta<'a> {
     pub inner: &'a MemoryStore,
     pub derived_reads: AtomicUsize,
     pub changeset_reads: AtomicUsize,
+    pub queries: AtomicUsize,
 }
 
 impl<'a> CountingMeta<'a> {
@@ -157,6 +158,7 @@ impl<'a> CountingMeta<'a> {
             inner,
             derived_reads: AtomicUsize::new(0),
             changeset_reads: AtomicUsize::new(0),
+            queries: AtomicUsize::new(0),
         }
     }
     pub fn derived_reads(&self) -> usize {
@@ -165,14 +167,20 @@ impl<'a> CountingMeta<'a> {
     pub fn changeset_reads(&self) -> usize {
         self.changeset_reads.load(Ordering::Relaxed)
     }
+    /// Calls of any kind, each one Postgres round trip on a real store.
+    pub fn queries(&self) -> usize {
+        self.queries.load(Ordering::Relaxed)
+    }
 }
 
 #[async_trait]
 impl MetadataStore for CountingMeta<'_> {
     async fn create_repo(&self, name: &str) -> scion_store::Result<()> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.create_repo(name).await
     }
     async fn put_changesets(&self, batch: &[Changeset]) -> scion_store::Result<()> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.put_changesets(batch).await
     }
     async fn get_changeset(
@@ -180,10 +188,21 @@ impl MetadataStore for CountingMeta<'_> {
         repo: &str,
         id: ChangesetId,
     ) -> scion_store::Result<Option<Changeset>> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.changeset_reads.fetch_add(1, Ordering::Relaxed);
         self.inner.get_changeset(repo, id).await
     }
+    async fn get_changesets(
+        &self,
+        repo: &str,
+        ids: &[ChangesetId],
+    ) -> scion_store::Result<Vec<Option<Changeset>>> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
+        self.changeset_reads.fetch_add(ids.len(), Ordering::Relaxed);
+        self.inner.get_changesets(repo, ids).await
+    }
     async fn generation(&self, repo: &str, id: ChangesetId) -> scion_store::Result<Option<u64>> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.generation(repo, id).await
     }
     async fn create_ref(
@@ -192,9 +211,11 @@ impl MetadataStore for CountingMeta<'_> {
         name: &str,
         target: ChangesetId,
     ) -> scion_store::Result<RefState> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.create_ref(repo, name, target).await
     }
     async fn get_ref(&self, repo: &str, name: &str) -> scion_store::Result<Option<RefState>> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.get_ref(repo, name).await
     }
     async fn move_ref(
@@ -204,11 +225,13 @@ impl MetadataStore for CountingMeta<'_> {
         expected_version: u64,
         new_target: ChangesetId,
     ) -> scion_store::Result<RefState> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner
             .move_ref(repo, name, expected_version, new_target)
             .await
     }
     async fn list_refs(&self, repo: &str) -> scion_store::Result<Vec<(String, RefState)>> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.list_refs(repo).await
     }
     async fn put_derived_many(
@@ -216,6 +239,7 @@ impl MetadataStore for CountingMeta<'_> {
         repo: &str,
         pointers: Vec<DerivedPointer>,
     ) -> scion_store::Result<()> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.put_derived_many(repo, pointers).await
     }
     async fn get_derived(
@@ -225,6 +249,7 @@ impl MetadataStore for CountingMeta<'_> {
         version: u32,
         cs: ChangesetId,
     ) -> scion_store::Result<Option<Vec<u8>>> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.derived_reads.fetch_add(1, Ordering::Relaxed);
         self.inner.get_derived(repo, ty, version, cs).await
     }
@@ -233,12 +258,14 @@ impl MetadataStore for CountingMeta<'_> {
         repo: &str,
         done: &[(Vec<u8>, ChangesetId)],
     ) -> scion_store::Result<()> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.put_ingest_checkpoints(repo, done).await
     }
     async fn ingest_checkpoints(
         &self,
         repo: &str,
     ) -> scion_store::Result<Vec<(Vec<u8>, ChangesetId)>> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.ingest_checkpoints(repo).await
     }
 
@@ -249,6 +276,7 @@ impl MetadataStore for CountingMeta<'_> {
         base: ChangesetId,
         submitter: &str,
     ) -> scion_store::Result<ChangeRequest> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner
             .submit_change_request(repo, head, base, submitter)
             .await
@@ -259,6 +287,7 @@ impl MetadataStore for CountingMeta<'_> {
         repo: &str,
         id: u64,
     ) -> scion_store::Result<Option<ChangeRequest>> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.get_change_request(repo, id).await
     }
 
@@ -268,6 +297,7 @@ impl MetadataStore for CountingMeta<'_> {
         status: Option<ChangeRequestStatus>,
         limit: u32,
     ) -> scion_store::Result<Vec<ChangeRequest>> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.list_change_requests(repo, status, limit).await
     }
 
@@ -276,6 +306,7 @@ impl MetadataStore for CountingMeta<'_> {
         repo: &str,
         changesets: &[ChangesetId],
     ) -> scion_store::Result<Vec<(ChangesetId, ChangeRequest)>> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.find_landings(repo, changesets).await
     }
 
@@ -283,6 +314,7 @@ impl MetadataStore for CountingMeta<'_> {
         &self,
         repo: &str,
     ) -> scion_store::Result<Option<ChangeRequest>> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.claim_next_change_request(repo).await
     }
 
@@ -290,6 +322,7 @@ impl MetadataStore for CountingMeta<'_> {
         &self,
         repo: &str,
     ) -> scion_store::Result<Option<ChangeRequest>> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.landing_change_request(repo).await
     }
 
@@ -299,14 +332,17 @@ impl MetadataStore for CountingMeta<'_> {
         id: u64,
         outcome: LandOutcome,
     ) -> scion_store::Result<ChangeRequest> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.finish_change_request(repo, id, outcome).await
     }
 
     async fn repos_with_open_change_requests(&self) -> scion_store::Result<Vec<String>> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.repos_with_open_change_requests().await
     }
 
     async fn put_grant(&self, repo: &str, grant: &Grant) -> scion_store::Result<()> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.put_grant(repo, grant).await
     }
 
@@ -316,14 +352,17 @@ impl MetadataStore for CountingMeta<'_> {
         principal: &str,
         path_prefix: &str,
     ) -> scion_store::Result<bool> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.delete_grant(repo, principal, path_prefix).await
     }
 
     async fn grants_for(&self, repo: &str, principal: &str) -> scion_store::Result<Vec<Grant>> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.grants_for(repo, principal).await
     }
 
     async fn grants(&self, repo: &str) -> scion_store::Result<Vec<Grant>> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.grants(repo).await
     }
     async fn repos_of(&self, principal: &str) -> scion_store::Result<Vec<String>> {

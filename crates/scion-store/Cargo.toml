@@ -16,6 +16,7 @@ sqlx = { version = "0.8.6", features = ["runtime-tokio", "tls-rustls", "postgres
 object_store = { version = "0.14.2", features = ["aws"] }
 zstd = "0.14.2"
 futures = "0.3.34"
+moka = { version = "0.12.16", default-features = false, features = ["sync"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]
