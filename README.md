@@ -57,7 +57,8 @@ work and are exercised end to end in CI on Postgres + S3. Every request needs a 
 signed by the server and a role in the repository it touches, optionally limited to a
 directory; people sign in with GitHub (`scn login`) and services use tokens from the operator. Landing goes through change requests and a serial
 land worker, and every request can be listed and traced to the changeset it landed;
-merges and reverts run on the server. A web interface, released binaries and the cache and
+merges and reverts run on the server. A [web interface](#web-interface), an HTTP/JSON API and
+an MCP server serve people and agents. Released binaries, a hosted instance and the cache and
 daemon tiers follow (see [What's next](#whats-next)).
 
 What works today:
@@ -137,7 +138,8 @@ On a machine with Docker (with compose) and the Rust toolchain, from a checkout 
 repository:
 
 ```sh
-# Postgres, S3 (RustFS) and scion-server on 127.0.0.1:7420; the first run builds the server
+# Postgres, S3 (RustFS) and scion-server on 127.0.0.1:7420, its web interface on
+# 127.0.0.1:8080; the first run builds the server
 docker compose -f deploy/docker-compose.yml up -d --wait
 cargo install --locked --path crates/scn   # scion-proto's build needs protoc on PATH
 # every request carries a token; the local server signs one for you, and lets
@@ -155,6 +157,8 @@ scn add hello.txt
 scn commit -m "add hello" --author "Ada <ada@example.com>"   # or set SCN_AUTHOR
 scn land                                   # the server lands it on main
 scn log
+scn access grant anyone reader             # make demo public, then open
+                                           # http://127.0.0.1:8080/demo in a browser
 ```
 
 After a code change, rebuild
@@ -163,7 +167,9 @@ the server with `docker compose -f deploy/docker-compose.yml up -d --wait --buil
 starts a new server with it. To sign in with GitHub instead of `SCN_TOKEN`, create a GitHub
 OAuth app with device flow enabled, start the stack with `SCION_GITHUB_CLIENT_ID` set to its
 client id and run `scn login http://127.0.0.1:7420`; the token lands in
-`~/.config/scn/tokens/` (mode 0600) and is valid for 30 days. A token stays valid until its `--ttl` runs out, also across `down -v`. A `scion-server` run
+`~/.config/scn/tokens/` (mode 0600) and is valid for 30 days. With the app's client secret in
+`SCION_GITHUB_CLIENT_SECRET` too (callback URL `http://127.0.0.1:8080/login/callback`), *Sign
+in* on the pages does the same in the browser and shows private repositories. A token stays valid until its `--ttl` runs out, also across `down -v`. A `scion-server` run
 outside compose needs `SCION_TOKEN_KEY` (`openssl rand -hex 32`) and must be restarted after
 `down -v` too: it keeps an in-memory memo of the objects the bucket holds, and that memo
 outlives the bucket.
@@ -280,6 +286,35 @@ Run `import` again after new git commits and it imports only those and fast-forw
 an interrupted import resumes the same way. If the git history was rewritten under an import,
 `import` names the commit `main` is at and writes nothing.
 
+## Web interface
+
+`scion-server --web <addr>` serves server-rendered pages from the same process as the gRPC
+services; the compose stack above serves them on `http://127.0.0.1:8080`. There is nothing else
+to deploy and no JavaScript build. Every page reads through the same role and directory checks
+as `scn`, and shows only the buttons the visitor's role allows.
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/assets/web-home.png" alt="Repository home: the root directory at main and the rendered README"><br>
+      <sub>Repository home: the tree at <code>main</code> or any changeset, and its README.</sub></td>
+    <td width="50%"><img src="docs/assets/web-diff.png" alt="A changeset page: its message, author, parent and line diff"><br>
+      <sub>A changeset: message, author, first parent and the line diff of each file.</sub></td>
+  </tr>
+  <tr>
+    <td width="50%"><img src="docs/assets/web-blame.png" alt="Blame of src/greet.rs, each line credited to the changeset that wrote it"><br>
+      <sub>Blame: each line credited to the changeset that last wrote it.</sub></td>
+    <td width="50%"><img src="docs/assets/web-request.png" alt="A change request that conflicts with main, naming src/greet.rs, with rebase, land and reject buttons"><br>
+      <sub>A change request that conflicts with <code>main</code>: the paths, and the actions a writer can take.</sub></td>
+  </tr>
+</table>
+
+The pages cover the repository list (with *Create repository* for a server admin), each
+repository's tree and files, log and per-path history, blame, changesets, change requests with
+rebase, land and reject, and a settings page where admins make the repository public or private
+and grant and revoke roles. Public repositories read without signing in; tools send
+`Authorization: Bearer <token>` to the pages and to the HTTP/JSON API under `/api/v1` on the
+same address ([`docs/API.md`](docs/API.md)).
+
 ## How it works
 
 A **changeset** is the unit of work: commit metadata plus a flat list of files changed relative
@@ -391,9 +426,8 @@ a path log already reads all of its changesets in one batch and the server's mem
 hot entries; next, trees and history pages move into the metadata database as the reference
 design keeps them, the object plane gains streaming batch requests, and landing becomes one
 round trip. The web interface's pages, browser sign-in, change-request actions, repository settings,
-HTTP/JSON API, MCP server and `scn --json` are in; next come screenshots and a quickstart step
-for the web interface; released binaries, a server image, a production
-compose profile and a hosted instance; the regional cache and per-node daemon tiers with
+HTTP/JSON API, MCP server and `scn --json` are in; next come released binaries, a server image,
+a production compose profile and a hosted instance; the regional cache and per-node daemon tiers with
 manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan, with
 acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
 

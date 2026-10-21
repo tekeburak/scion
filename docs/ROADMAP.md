@@ -5,7 +5,7 @@ ones. The README describes what Scion does today and what comes next in product 
 names no phase; this file is where the numbering lives.
 
 <p align="center">
-  <img src="assets/roadmap.svg" width="800" alt="Phases 0 to 3, 6, 5 and 7 done; phases 10 and 11 in progress; then phases 9, 4 and 8 planned in that order">
+  <img src="assets/roadmap.svg" width="800" alt="Phases 0 to 3, 6, 5, 7 and 11 done; phase 10 in progress; then phases 9, 4 and 8 planned in that order">
 </p>
 
 | Phase | Scope | Status |

@@ -45,12 +45,15 @@ a role in its repository, optionally limited to a directory, people sign in with
 through `scn login`, admins manage roles with `scn access`, and a hermetic simulation and
 fuzz targets check the server. But there are no released binaries yet (Phase 9) and there
 is no cache tier yet (Phase 4).
-The web interface and the HTTP/JSON API are in (Phase 11.1 to 11.3): `scion-server --web
-<addr>` serves server-rendered pages for files, log, blame, changesets and change requests
-under the same roles and directory grants as `scn`, people sign in with GitHub in the browser,
-`scn access grant anyone reader` makes a repository public, and `/api/v1`
-([`docs/API.md`](API.md)) runs the whole init → clone → commit → land loop over plain HTTP.
-Acting on change requests from the page and the MCP server for agents are next.
+The web interface and the agent API are in (Phase 11): `scion-server --web <addr>` (on
+`127.0.0.1:8080` in the compose stack) serves server-rendered pages for files, log, blame,
+changesets and change requests under the same roles and directory grants as `scn`; writers
+rebase, land and reject change requests from the page, admins create repositories and manage
+roles there, people sign in with GitHub in the browser, and `scn access grant anyone reader`
+makes a repository public. `/api/v1` ([`docs/API.md`](API.md)) runs the whole init → clone →
+commit → land loop over plain HTTP, `scion-mcp` ([`docs/MCP.md`](MCP.md)) serves agents over
+MCP, and `scn --json` prints machine-readable output. The README's "Web interface" section
+has screenshots.
 The MVP (Phase 3) is done: `scion-server` serves the object and control gRPC services over
 Postgres + S3. `scn` can `init` a repository, `clone --sparse`, `status`, `log`, `diff`,
 `blame`, `add`, `commit` (an anonymous head), `land` (a change request the server rebases

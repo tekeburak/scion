@@ -56,7 +56,7 @@ ROADMAP = [
     ("5", "Change requests, land worker", "done"),
     ("7", "IAM, fuzzing, simulation", "done"),
     ("10", "Performance", "active"),
-    ("11", "Web interface, agent API", "active"),
+    ("11", "Web interface, agent API", "done"),
     ("9", "Release and hosting", "planned"),
     ("4", "Cache + daemon tiers", "planned"),
     ("8", "Virtual checkouts (FUSE / NFS)", "planned"),

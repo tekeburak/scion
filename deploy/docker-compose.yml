@@ -1,5 +1,6 @@
 # Local development stack: metadata DB (Postgres) + object store (RustFS, S3-compatible)
-# + scion-server built from this checkout, listening on loopback only.
+# + scion-server built from this checkout, listening on loopback only: gRPC on :7420,
+# the web interface and /api/v1 on :8080.
 #
 # Usage:
 #   docker compose -f deploy/docker-compose.yml up -d --wait   # scn init http://127.0.0.1:7420 <repo>
@@ -73,6 +74,7 @@ services:
     build:
       context: ..
       dockerfile: deploy/scion-server.Dockerfile
+    command: ["--web", "0.0.0.0:8080"]
     depends_on:
       postgres:
         condition: service_healthy
@@ -93,8 +95,12 @@ services:
       # Client id of a GitHub OAuth app with device flow enabled, for `scn login`;
       # unset, only `scion-server token` tokens work.
       SCION_GITHUB_CLIENT_ID: ${SCION_GITHUB_CLIENT_ID:-}
+      # That app's client secret, for signing in from the browser; its callback URL is
+      # http://127.0.0.1:8080/login/callback. Unset, the pages show public repositories.
+      SCION_GITHUB_CLIENT_SECRET: ${SCION_GITHUB_CLIENT_SECRET:-}
     ports:
       - "127.0.0.1:7420:7420"
+      - "127.0.0.1:8080:8080"
     healthcheck:
       test: ["CMD", "bash", "-c", ": </dev/tcp/127.0.0.1/7420"]
       interval: 2s
