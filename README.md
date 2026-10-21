@@ -340,13 +340,13 @@ Read these numbers with their limits:
 
 - **Import** writes one immutable object per blob, tree and history page to a remote object
   store, where git writes a local packfile; parity with git's push is not a goal. The figure to
-  quote is the cold row, 17× git: into an empty bucket the object store's write rate is the
-  bound. Warm, with the objects already stored, it is 5.4× git.
+  quote is the cold row, 15× git: into an empty bucket the object store's write rate is the
+  bound. Warm, with the objects already stored, it is 5.7× git.
 - **Cold `log` and `blame`** pay one object-store round trip per pointer hop, which git's
   local packfile never does. Warm, both are at or below git.
 - **A single commit + land** goes through a change request and the serial land worker, so on
-  its own it takes 1.6× git's local commit and push. The worker pays off under contention: 16
-  writers landing at once finish in 0.19× git's time, because no writer repeats another's
+  its own it takes 1.4× git's local commit and push. The worker pays off under contention: 16
+  writers landing at once finish in 0.18× git's time, because no writer repeats another's
   fetch, rebase and push.
 - One machine, three runs, shared cloud VM: medians move by several milliseconds between
   runs. The CSV with every sample is [docs/bench-real.csv](docs/bench-real.csv); render it with
@@ -365,13 +365,11 @@ Read these numbers with their limits:
 
 ## What's next
 
-Access control is in place: server-signed tokens, repository roles, directory-scoped grants,
-GitHub sign-in and `scn access` for repository admins, and a seeded, hermetic simulation runs
-many clients landing, merging and reverting while the server fails and restarts, and every
-boundary that reads untrusted bytes is fuzzed. In parallel, a performance pass aims at every benchmark row being a multiple faster than git: trees and history pages move into the metadata
-database as the reference design keeps them, the object plane gains streaming batch requests, and
-landing becomes one round trip. The web interface's read-only pages are in; next come GitHub
-sign-in in the browser, change-request actions and repository settings from the page, an HTTP/JSON API and an MCP server so coding agents
+A performance pass is under way, aimed at every benchmark row being a multiple faster than git:
+a path log already reads all of its changesets in one batch and the server's memos keep their
+hot entries; next, trees and history pages move into the metadata database as the reference
+design keeps them, the object plane gains streaming batch requests, and landing becomes one
+round trip. The web interface's read-only pages are in; next come GitHub sign-in in the browser, change-request actions and repository settings from the page, an HTTP/JSON API and an MCP server so coding agents
 can read, commit and land through tools; released binaries, a server image, a production
 compose profile and a hosted instance; the regional cache and per-node daemon tiers with
 manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan, with
