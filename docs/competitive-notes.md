@@ -7,6 +7,31 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-10-21
+
+Star and fork counts are missing today: the GitHub API token of the watch run was refused, so
+only anonymous git reads worked (shallow clones under `/tmp`). The search for new projects
+created after 2026-10-13 could not run either. `competitive-stars.csv` starts today, backfilled
+from the star counts recorded on 2026-10-18 and 2026-10-19 (forks were not recorded). No tags exist on any of the four watched
+repositories.
+
+| Repository | Last push | Last 24 h | Direction |
+|---|---|---|---|
+| [bnsd55/open-scion](https://github.com/bnsd55/open-scion) (`bnsd55/openscion` redirects here) | 2026-10-21 | about 60 merged PRs | Operations before features. A versioned roadmap ending at "v1.0.0, single-server production". In one day: a logical archive (export, verify, restore) with a documented format, readiness and liveness endpoints with a bounded drain, an audit log, Prometheus alert rules with a runbook each, runbooks for a full disk, a failed migration and an fsck failure, a threat model, fuzzing nightly, CodeQL, OpenSSF Scorecard, an 80% coverage gate, reproducible and attested release artifacts, a land reference model, a kill-under-load soak test. `v0.1.0` still unreleased. |
+| [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub) *new* | 2026-10-18 | none (one commit in total) | A Node.js hosting hub, MIT: web UI (browse, history, blame, diff, in-browser edit, search, tokens), HTTP/JSON API, a JS `scn` CLI with sparse clone and `commit --propose`, change requests with discussion, SQLite single node. Has the web UI and HTTP API that Scion plans in Phase 11, but no daemon, no tiers, no git import, no benchmark. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 2026-10-16 | none | Quiet for five days. 23 crates (a CockroachDB store, a merge crate, redaction, policy). |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 2026-10-14 | none | Quiet for a week. GPL-3.0-only: nothing read beyond headings. Roadmap has Done / Next / Later sections and a web app under `apps/web`. |
+
+### What it means for Scion
+
+- **Operations are where the most active project now leads.** Scion has no backup and restore
+  story for its Postgres metadata and no readiness/drain endpoint, and Phase 9 (hosting) does
+  not list them. A hosted instance needs both. Opened as one `idea:` issue (#139, backup/restore).
+- **A web UI and HTTP API exist elsewhere already** in a small single-node form. Scion's
+  Phase 11 covers the same ground with the tiered server behind it; no change to the plan, but
+  Phase 11 is no longer something nobody else has.
+- **Benchmarks:** no new benchmark claim in any README since 2026-10-19.
+
 ## 2026-10-19
 
 Star counts from the GitHub search API that day. New since 2026-10-18 are marked *new*.
