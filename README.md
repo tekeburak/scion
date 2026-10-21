@@ -376,8 +376,10 @@ A performance pass is under way, aimed at every benchmark row being a multiple f
 a path log already reads all of its changesets in one batch and the server's memos keep their
 hot entries; next, trees and history pages move into the metadata database as the reference
 design keeps them, the object plane gains streaming batch requests, and landing becomes one
-round trip. The web interface's pages, browser sign-in and HTTP/JSON API are in; next come change-request actions and repository settings from the page and an MCP server so coding agents
-can read, commit and land through tools; released binaries, a server image, a production
+round trip. The web interface's pages, browser sign-in and HTTP/JSON API are in; next comes an
+MCP server so coding agents can read, commit and land through tools, then `scn --json` with
+structured error codes, then landing or rejecting change requests and creating repositories and
+granting roles from the web interface; released binaries, a server image, a production
 compose profile and a hosted instance; the regional cache and per-node daemon tiers with
 manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan, with
 acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
