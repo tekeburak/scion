@@ -305,8 +305,8 @@ Read these numbers with their limits:
   always online.
 - **Not a git replacement.** For a repository that does not have the problem described above,
   git is the right tool; Scion only imports from git and never speaks its wire protocol.
-- **Out of scope:** offline operation, Windows, a review UI, garbage collection, large-file
-  chunking (there is a per-blob size limit) and ignore files. See
+- **Out of scope:** offline operation, Windows, a separate code-review product, garbage
+  collection, large-file chunking (there is a per-blob size limit) and ignore files. See
   [`docs/FAQ.md`](docs/FAQ.md#what-is-scion-not-a-good-fit-for).
 
 ## What's next
@@ -316,8 +316,13 @@ issues one with `scion-server token` (for a person or a service principal such a
 sends it from `SCN_TOKEN`. Each request also needs a role in its repository (reader, writer,
 admin), granted with `scion-server grant` and removed with `revoke`. Next come directory-scoped
 grants, GitHub device-flow login (`scn login`) and managing access from `scn`, together with
-fuzzing and a hermetic simulation. After that, in order: released binaries, a server image and
-a production compose profile; the regional cache and per-node daemon tiers with
+fuzzing and a hermetic simulation. In parallel, a performance pass aims at every benchmark row
+being a multiple faster than git: trees and history pages move into the metadata database as
+the reference design keeps them, the object plane gains streaming batch requests, and landing
+becomes one round trip. After that, in order: a web interface (repository, history, blame and
+change-request pages with GitHub login), an HTTP/JSON API and an MCP server so coding agents
+can read, commit and land through tools; released binaries, a server image, a production
+compose profile and a hosted instance; the regional cache and per-node daemon tiers with
 manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan, with
 acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
 

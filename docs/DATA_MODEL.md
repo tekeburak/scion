@@ -144,28 +144,27 @@ not a patch.
 |---|---|---|
 | Changeset metadata + `file_changes` | metadata DB (`changesets`, `file_changes`) | `(repo, id)` |
 | Blob bytes | object store | `blobs/{id}` |
-| Trees | object store | `trees/{id}` |
+| Trees | metadata DB (`trees`) from Phase 10.3; object store `trees/{id}` until then | `(repo, id)` |
 | Root tree of a changeset | metadata DB (`derived`, type `root_tree`) | `(repo, "root_tree", v, changeset)` → `TreeId` |
-| Other derived data | object store, pointer in `derived` | per type |
+| Path-history pages and other derived data | metadata DB (`pages`) from Phase 10.3, pointer in `derived`; object store until then | per type |
 | Refs | metadata DB (`refs`) | `(repo, name)` |
 | Snapshot manifests (Phase 4, planned) | object store | `snapshots/{repo}/{changeset}.manifest` |
 
-Everything in the object store is immutable, zstd-compressed and addressed by hash. The object
-store is append-only; garbage collection is a non-goal for now.
+Everything in the object store and in the `trees` and `pages` tables is immutable, addressed
+by hash and append-only; objects in the store are zstd-compressed. Garbage collection is a
+non-goal for now.
 
 ### Deviation: trees in the object store
 
-The reference design keeps trees in the metadata database (Spanner) next to changesets and refs.
-Scion keeps them in the object store. Reasons:
-
-- a tree is immutable and content-addressed, exactly like a blob, so it can ride the same
-  daemon → cache → server path with no special casing;
-- the metadata database stays small (rows, not directory listings), which matters when it is
-  moved to a distributed SQL engine;
-- the object store is already the component sized for bulk immutable data.
-
-The cost is one extra object fetch to resolve a changeset's root tree the first time; in practice
-it is absorbed by the cache tiers.
+The reference design keeps trees in the metadata database (Spanner) next to changesets and
+refs. Scion first kept them in the object store, so that a tree could ride the same
+daemon → cache → server path as a blob and the metadata database stayed small. The real
+benchmark (Phase 6.9–6.13) showed the cost: a commit writes one object per rewritten tree and
+history page, an import pays one object-store round trip per tree, and a cold `log` or `blame`
+pays one per pointer hop. Phase 10.3 therefore moves trees and history pages to the metadata
+database, as the reference design has them: they are still immutable and content-addressed
+(the canonical encoding and the golden fixtures do not change), the tiers still cache them by
+id, and blobs stay one immutable object each in the object store.
 
 ## Repositories
 

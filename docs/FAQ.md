@@ -23,13 +23,13 @@ Because objects are append-only, an anonymous head cannot be lost, and sharing w
 sharing an id or submitting a change request for it (`scn land`). See
 [Refs and anonymous heads](DATA_MODEL.md#refs-and-anonymous-heads).
 
-## Why do trees live in the object store?
+## Where do trees live?
 
-A tree is immutable and content-addressed like a blob, so it travels the same cache path with no
-special case, and the metadata database stays small. The reference design keeps trees in its
-metadata database; Scion deliberately does not. The cost is one extra object fetch the first
-time a changeset's root tree is resolved. See
-[Deviation: trees in the object store](DATA_MODEL.md#deviation-trees-in-the-object-store).
+Today in the object store, like blobs. The real-repository benchmark showed what that costs
+(one object-store round trip per tree on import and per pointer hop on a cold `log` or
+`blame`), so trees and history pages are moving to the metadata database, where the reference
+design keeps them. They stay immutable and content-addressed; blobs stay in the object store.
+See [Deviation: trees in the object store](DATA_MODEL.md#deviation-trees-in-the-object-store).
 
 ## Why is a changeset so minimal?
 
@@ -152,4 +152,5 @@ CockroachDB stays a drop-in target, though CI does not test it yet; any S3-compa
 - Large binary files: there is a per-blob size limit and no chunking (non-goal).
 - Workflows built on many long-lived branches or forks: there are no server branches.
 - Reclaiming storage: objects are append-only and garbage collection is a non-goal.
-- Code review: there is no review UI (non-goal).
+- Code review beyond change requests: the planned web interface shows and lands change
+  requests; a separate review product is a non-goal.

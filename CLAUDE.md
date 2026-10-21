@@ -60,7 +60,7 @@ Each item is checkable in code review.
   abstraction only when the second concrete use exists in the same PR.
 - No configuration option that the roadmap does not call for. A value used once is a constant.
 - No scaffolding for non-goals (GC, large-file chunking, ignore files, offline mode, Windows,
-  git wire protocol, review UI).
+  git wire protocol, a review product beyond change-request pages).
 - Before adding complexity the roadmap does not mention (new crate, new table, new RPC, new
   derived type, new dependency with a build script), ask first.
 - Prefer deleting code to guarding it. A `TODO` must name the roadmap phase that resolves it.
