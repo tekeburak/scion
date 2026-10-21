@@ -57,8 +57,8 @@ work and are exercised end to end in CI on Postgres + S3. Every request needs a 
 signed by the server and a role in the repository it touches, optionally limited to a
 directory; people sign in with GitHub (`scn login`) and services use tokens from the operator. Landing goes through change requests and a serial
 land worker, and every request can be listed and traced to the changeset it landed;
-merges and reverts run on the server. The cache and daemon tiers, sign-in and released
-binaries follow (see [What's next](#whats-next)).
+merges and reverts run on the server. A web interface, released binaries and the cache and
+daemon tiers follow (see [What's next](#whats-next)).
 
 What works today:
 
@@ -319,13 +319,10 @@ Read these numbers with their limits:
 
 ## What's next
 
-Access control is under way. Every request needs a token signed by the server: an operator
-issues one with `scion-server token` (for a person or a service principal such as CI) and `scn`
-sends it from `SCN_TOKEN`. Each request also needs a role in its repository (reader, writer,
-admin), granted with `scion-server grant` and removed with `revoke`, optionally limited to a
-directory; people sign in with GitHub through `scn login`, and a repository's admins manage its
-roles with `scn access`. Next come fuzzing and a hermetic simulation. In parallel, a performance pass aims at every
-benchmark row being a multiple faster than git: trees and history pages move into the metadata
+Access control is in place: server-signed tokens, repository roles, directory-scoped grants,
+GitHub sign-in and `scn access` for repository admins. Next come fuzzing of every boundary that
+reads untrusted bytes and a seeded, hermetic simulation of many clients landing, merging and
+reverting while the server restarts. In parallel, a performance pass aims at every benchmark row being a multiple faster than git: trees and history pages move into the metadata
 database as the reference design keeps them, the object plane gains streaming batch requests, and
 landing becomes one round trip. After that, in order: a web interface (repository, history, blame
 and change-request pages with GitHub login), an HTTP/JSON API and an MCP server so coding agents
