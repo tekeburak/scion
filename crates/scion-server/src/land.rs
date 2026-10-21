@@ -180,8 +180,11 @@ async fn land_pending(
 ///
 /// Landing again is idempotent: rebased changesets are content-addressed,
 /// so a request stopped before its CAS recreates the same ids. One
-/// `resumed` after its CAS finds `main` already holding the change; it
-/// landed if `main` is its head or the rebased copy of it.
+/// `resumed` after its CAS finds its head, or the rebased copy of it, on
+/// `main`'s first-parent line above the request's base, where `main` may
+/// have moved on since; it landed there, and is not replayed again (a
+/// stack whose replay is no no-op, such as a change and its revert, would
+/// land twice).
 async fn land(
     meta: &dyn MetadataStore,
     objects: &dyn ObjectStore,
@@ -190,6 +193,11 @@ async fn land(
     resumed: bool,
 ) -> Result<LandOutcome, Status> {
     let scope = Scope::of(meta, repo, &cr.submitter, Role::Writer).await?;
+    if resumed {
+        if let Some(copy) = landed_copy(meta, repo, cr).await? {
+            return Ok(LandOutcome::Landed(copy));
+        }
+    }
     let mut head = cr.head;
     loop {
         let main = meta
@@ -209,13 +217,7 @@ async fn land(
                 ));
             }
             Rebased::Clean { head: new, .. } if new == main.target => {
-                return Ok(
-                    if resumed && is_copy(meta, repo, head, main.target).await? {
-                        LandOutcome::Landed(main.target)
-                    } else {
-                        LandOutcome::Rejected
-                    },
-                );
+                return Ok(LandOutcome::Rejected);
             }
             Rebased::Clean { head, .. } => head,
         };
@@ -225,6 +227,42 @@ async fn land(
             Err(e) => return Err(store_status(e)),
         }
     }
+}
+
+/// `cr`'s head or its rebased copy, if a stopped run put it on `main`: the
+/// walk down `main`'s first-parent line stops at `cr.base`'s generation, so
+/// it reads only what landed since the request was submitted.
+async fn landed_copy(
+    meta: &dyn MetadataStore,
+    repo: &str,
+    cr: &ChangeRequest,
+) -> Result<Option<ChangesetId>, Status> {
+    let generation = async |id| {
+        meta.generation(repo, id)
+            .await
+            .map_err(store_status)?
+            .ok_or_else(|| Status::data_loss(format!("changeset {id} is missing")))
+    };
+    let floor = generation(cr.base).await?;
+    let mut at = meta
+        .get_ref(repo, "main")
+        .await
+        .map_err(store_status)?
+        .map(|main| main.target);
+    while let Some(id) = at {
+        if generation(id).await? <= floor {
+            break;
+        }
+        if is_copy(meta, repo, cr.head, id).await? {
+            return Ok(Some(id));
+        }
+        at = meta
+            .get_changeset(repo, id)
+            .await
+            .map_err(store_status)?
+            .and_then(|cs| cs.first_parent());
+    }
+    Ok(None)
 }
 
 /// Whether `landed` is `head` or `head` replayed by [`rebase`], which keeps

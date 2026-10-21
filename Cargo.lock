@@ -3288,6 +3288,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "scion-sim"
+version = "0.0.1"
+dependencies = [
+ "async-trait",
+ "bytes",
+ "futures-util",
+ "scion-proto",
+ "scion-server",
+ "scion-store",
+ "scion-types",
+ "tokio",
+ "tonic",
+]
+
+[[package]]
 name = "scion-store"
 version = "0.0.1"
 dependencies = [

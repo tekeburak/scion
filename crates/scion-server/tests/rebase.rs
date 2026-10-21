@@ -135,6 +135,50 @@ async fn replays_a_stack_and_reports_conflicts() {
     );
 }
 
+/// A head that reaches `onto` only through a merge's second parent is
+/// replayed, not taken as it is: landing it would take `main`'s history off
+/// `main`'s first-parent line.
+#[tokio::test]
+async fn a_merge_of_main_into_a_stack_is_replayed_onto_main() {
+    let store = MemoryStore::with_repo(REPO);
+    let base = create(&store, None, files(&[("a", "a\n")]), &[], "base").await;
+    let main = create(&store, Some(base), files(&[("b", "b\n")]), &[], "main").await;
+    let mine = create(&store, Some(base), files(&[("c", "c\n")]), &[], "mine").await;
+    let merge = changeset(
+        vec![mine, main],
+        files(&[("b", "b\n")])
+            .into_iter()
+            .map(|(p, c)| (p, tracked(&c)))
+            .collect(),
+        "merge main",
+    );
+    let merge = scion_server::create_changesets(&store, &store, &[merge])
+        .await
+        .unwrap()[0]
+        .0;
+
+    let Rebased::Clean { head, created, .. } =
+        rebase(&store, &store, REPO, merge, main, &Scope::whole())
+            .await
+            .unwrap()
+    else {
+        panic!("clean")
+    };
+    assert_ne!(head, merge);
+    assert_eq!(created, 1, "the merge itself replays as nothing");
+    let replayed = store.get_changeset(REPO, head).await.unwrap().unwrap();
+    assert_eq!(
+        (replayed.message.as_str(), replayed.parents.as_slice()),
+        ("mine", &[main][..])
+    );
+    let names: Vec<String> = tree(&store, head)
+        .await
+        .keys()
+        .map(|p| p.as_str().to_owned())
+        .collect();
+    assert_eq!(names, ["a", "b", "c"]);
+}
+
 /// A stack of edits to paths in `pool`: each step sets or deletes some.
 fn arb_stack(
     pool: &'static [&'static str],

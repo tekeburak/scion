@@ -369,7 +369,11 @@ pub enum Rebased {
 /// `CreateChangeset` does; as the `Rebase` RPC does. The stack is `head`'s
 /// first-parent line; a merge in it is replayed against its first parent
 /// and keeps its other parents. Nothing is created if the stack changes a
-/// path outside `scope`, also when `head` already descends from `onto`.
+/// path outside `scope`, or when `onto` is on `head`'s first-parent line
+/// already. A `head` that reaches `onto` only through a merge's other
+/// parent is replayed, so `onto` stays on the result's first-parent line:
+/// landing it as it is would take `main`'s history off `main`'s
+/// first-parent line.
 pub async fn rebase(
     meta: &dyn MetadataStore,
     objects: &dyn ObjectStore,
@@ -387,13 +391,6 @@ pub async fn rebase(
             created,
         })
     };
-    let fast_forward = SkipList::is_ancestor(&ctx, onto, head)
-        .await
-        .map_err(derive_status)?;
-    if fast_forward && scope.is_whole() {
-        return clean(head, 0).await;
-    }
-
     // The stack to replay: `head`'s first parents down to the first changeset
     // `onto` contains, bounded so a stray `onto` cannot walk the log.
     let mut stack = Vec::new();
@@ -424,7 +421,7 @@ pub async fn rebase(
     if !paths.is_empty() {
         return Ok(Rebased::Denied { paths });
     }
-    if fast_forward {
+    if cur == onto {
         return clean(head, 0).await;
     }
 

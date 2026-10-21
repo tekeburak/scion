@@ -1,0 +1,22 @@
+[package]
+name = "scion-sim"
+description = "Hermetic, seeded simulation of scion-server: clients, land workers, faults and restarts in one process"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+scion-types.workspace = true
+scion-store.workspace = true
+scion-proto.workspace = true
+scion-server.workspace = true
+async-trait.workspace = true
+bytes.workspace = true
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+tokio.workspace = true
+tonic.workspace = true
+
+[lints]
+workspace = true

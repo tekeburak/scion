@@ -344,6 +344,7 @@ acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
 | Network | `scion-proto` (gRPC schema), `scion-server` (control plane, object origin, land worker) |
 | Client | `scion-client`: `.scn/` layout, index, sparse profile, clone, checkout, commit and update; `scn`: the CLI |
 | Import | `scion-ingest`: git → Scion importer (`import`, `verify`), checkpoints and incremental sync |
+| Testing | `scion-sim`: seeded, hermetic simulation of the server with faults and restarts |
 
 ## Development
 
@@ -351,7 +352,8 @@ acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
 # toolchain is pinned by rust-toolchain.toml; scion-proto also needs `protoc` on PATH
 # scion-ingest's tests also need `git` on PATH (apt-get install git / brew install git)
 # scripts/bench-real also needs openssl and curl (apt-get install openssl curl / brew install openssl curl)
-cargo test --workspace
+cargo test --workspace                     # includes 200 seeds of scion-sim
+SCION_SIM_SEED=42 cargo test -p scion-sim --test seeds   # replay one simulation seed
 cargo clippy --workspace --all-targets -- -D warnings
 
 # local storage backends (Postgres + an S3-compatible server) for integration tests; the

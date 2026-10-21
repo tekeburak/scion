@@ -11,6 +11,7 @@ members = [
     "crates/scion-client",
     "crates/scn",
     "crates/scion-ingest",
+    "crates/scion-sim",
 ]
 
 [workspace.package]

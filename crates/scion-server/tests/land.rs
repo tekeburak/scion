@@ -13,7 +13,7 @@ use scion_proto::v1::{
     LogRequest, SubmitChangeRequestRequest,
 };
 use scion_store::{MemoryStore, MetadataStore, ObjectStore};
-use scion_types::{Changeset, ChangesetId, Decode, RepoPath};
+use scion_types::{Changeset, ChangesetId, Decode, FileChange, RepoPath};
 
 async fn commit(store: &MemoryStore, parent: ChangesetId, path: &str) -> ChangesetId {
     edit(store, parent, path, path).await
@@ -258,6 +258,58 @@ async fn a_request_left_landing_lands_once_after_a_restart() {
         let log: Vec<ChangesetId> = main_log(&mut c).await.iter().map(Changeset::id).collect();
         assert_eq!(log, [rebased, other, root], "landed once ({moved_main})");
     }
+}
+
+/// A worker stopped after moving `main` and before recording the outcome;
+/// `main` moved on before the restart. The resumed request finds its copy
+/// below the new tip instead of replaying a stack whose replay is no no-op
+/// (a file written, then deleted) a second time.
+#[tokio::test]
+async fn a_request_whose_copy_is_below_main_lands_once_after_a_restart() {
+    let (store, root) = repository().await;
+    let other = commit(&store, root, "x.txt").await;
+    advance(&store, other).await;
+    let write = commit(&store, root, "y.txt").await;
+    let changes = BTreeMap::from([(RepoPath::new("y.txt").unwrap(), FileChange::Deleted)]);
+    let head = store
+        .put_changeset(&changeset(vec![write], changes, "delete y"))
+        .await
+        .unwrap();
+    let cr = store
+        .submit_change_request(REPO, head, other, "sp:test")
+        .await
+        .unwrap();
+    store
+        .claim_next_change_request(REPO)
+        .await
+        .unwrap()
+        .unwrap();
+    let scion_server::Rebased::Clean { head: rebased, .. } = scion_server::rebase(
+        &*store,
+        &*store,
+        REPO,
+        head,
+        other,
+        &scion_server::Scope::whole(),
+    )
+    .await
+    .unwrap() else {
+        panic!("no conflict");
+    };
+    advance(&store, rebased).await;
+    let later = commit(&store, rebased, "z.txt").await;
+    advance(&store, later).await;
+
+    let mut c = start(store.clone()).await;
+    let cr = finished(&mut c, cr.id).await;
+    assert_eq!(cr.status(), ChangeRequestStatus::Landed);
+    assert_eq!(cr.landed.as_deref(), Some(rebased.as_bytes().as_slice()));
+    let log: Vec<String> = main_log(&mut c)
+        .await
+        .into_iter()
+        .map(|cs| cs.message)
+        .collect();
+    assert_eq!(log, ["z.txt", "delete y", "y.txt", "x.txt", "root"]);
 }
 
 #[tokio::test]
