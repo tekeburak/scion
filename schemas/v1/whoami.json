@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/whoami.json",
+  "title": "scn whoami --json",
+  "description": "Who the token names and, inside a working copy, its roles in that repository.",
+  "type": "object",
+  "properties": {
+    "server": {
+      "type": "string"
+    },
+    "repo": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "principal": {
+      "type": "string"
+    },
+    "expires_unix_seconds": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "grants": {
+      "type": "array",
+      "items": {
+        "$ref": "defs.json#/$defs/grant"
+      }
+    }
+  },
+  "required": [
+    "server",
+    "repo",
+    "principal",
+    "expires_unix_seconds",
+    "grants"
+  ],
+  "additionalProperties": false
+}

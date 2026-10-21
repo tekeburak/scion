@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/error.json",
+  "title": "scn error --json",
+  "description": "Any command that fails prints this on stdout with `--json` and exits non-zero (2 for usage). Server refusals carry the gRPC code's name, as the HTTP API does; the others are scn's own.",
+  "type": "object",
+  "properties": {
+    "error": {
+      "type": "object",
+      "properties": {
+        "code": {
+          "enum": [
+            "usage",
+            "local",
+            "not_a_working_copy",
+            "invalid_argument",
+            "unauthenticated",
+            "permission_denied",
+            "not_found",
+            "already_exists",
+            "failed_precondition",
+            "resource_exhausted",
+            "unavailable",
+            "deadline_exceeded",
+            "internal",
+            "conflict",
+            "needs_rebase",
+            "dirty",
+            "untracked_in_the_way",
+            "changed_since",
+            "nothing_to_commit",
+            "unresolved_conflicts"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "paths": {
+          "description": "The paths the failure is about: conflicting, dirty, in the way, changed since, unresolved, or not permitted.",
+          "type": "array",
+          "items": {
+            "$ref": "defs.json#/$defs/path"
+          }
+        }
+      },
+      "required": [
+        "code",
+        "message",
+        "paths"
+      ],
+      "additionalProperties": false
+    }
+  },
+  "required": [
+    "error"
+  ],
+  "additionalProperties": false
+}

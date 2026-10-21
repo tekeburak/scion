@@ -114,6 +114,11 @@ What works today:
   changesets, write files as a new changeset and land it, through Model Context Protocol tools
   and `scion://<repo>/<path>@<revision>` resources, on stdio or streamable HTTP, with the same
   tokens and roles.
+- **Output for scripts and agents**: `scn --json <command>` prints one JSON document per
+  command, described by a JSON Schema in [`schemas/v1`](schemas/v1); a failure prints an error
+  with a stable code (`conflict`, `needs_rebase`, `dirty`, `permission_denied`, …) and the paths
+  it is about. `scn explain-conflict` names, for each path that keeps the head from rebasing onto
+  `main`, the changesets on both sides that changed it since the merge base.
 - **Robustness checks**: a seeded, hermetic simulation runs many clients committing, landing,
   merging and reverting while land workers stop and the server restarts, and checks that
   `main` stays linear and nothing landed is lost or written twice; fuzz targets cover every
@@ -381,9 +386,9 @@ A performance pass is under way, aimed at every benchmark row being a multiple f
 a path log already reads all of its changesets in one batch and the server's memos keep their
 hot entries; next, trees and history pages move into the metadata database as the reference
 design keeps them, the object plane gains streaming batch requests, and landing becomes one
-round trip. The web interface's pages, browser sign-in, HTTP/JSON API and MCP server are in; next come
-structured `--json` output from every `scn` command, and change-request actions and repository
-settings from the page; released binaries, a server image, a production
+round trip. The web interface's pages, browser sign-in, HTTP/JSON API, MCP server and `scn --json`
+are in; next come landing or rejecting change requests and creating repositories and granting
+roles from the web interface; released binaries, a server image, a production
 compose profile and a hosted instance; the regional cache and per-node daemon tiers with
 manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan, with
 acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).

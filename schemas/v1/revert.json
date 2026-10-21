@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/revert.json",
+  "title": "scn revert --json",
+  "description": "The changeset undone and the revert, the working copy's new head.",
+  "type": "object",
+  "properties": {
+    "reverted": {
+      "$ref": "defs.json#/$defs/id"
+    },
+    "head": {
+      "$ref": "defs.json#/$defs/id"
+    }
+  },
+  "required": [
+    "reverted",
+    "head"
+  ],
+  "additionalProperties": false
+}

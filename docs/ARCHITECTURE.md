@@ -154,6 +154,17 @@ the client asks for the merge base and the two diffs, moves the working copy to 
 writes the head's changes on top, merged per file with `scion-diff3`, conflict markers where
 both sides changed the same lines; the next `scn commit` turns the resolution into one
 changeset on the target, which then lands as a fast-forward.
+`scn explain-conflict [rev]` says why before anything moves: the `Rebase` RPC names the
+conflicting paths (a clean one only leaves changesets nothing points to), and per path two
+bounded `PathLog` reads list the changesets on each side since the path's last change at the
+merge base, at most ten a side.
+
+**Output for agents.** `scn --json` makes every command print one JSON document, and a
+failure an error document whose `code` is the gRPC code's name for server refusals (as the
+HTTP API spells it) or one of `scn`'s own (`conflict`, `needs_rebase`, `dirty`, …), with the
+paths it is about. The schemas are hand-written JSON Schema files under `schemas/v1/`;
+changesets and change requests have the HTTP API's shapes. A test runs every command with
+`--json` and checks each document against its schema.
 
 **Change requests on the server.** There is no CI-gated merge queue and no global repository
 lock. `SubmitChangeRequest(repo, head)` records the request with `main`'s current changeset as

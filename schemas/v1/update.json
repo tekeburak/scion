@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/update.json",
+  "title": "scn update --json",
+  "description": "The rebase: `head` is the working copy's new head. With `--conflicts` and a conflict, `head` is `onto` and `conflicts` lists the files holding markers.",
+  "type": "object",
+  "properties": {
+    "previous": {
+      "$ref": "defs.json#/$defs/id"
+    },
+    "onto": {
+      "$ref": "defs.json#/$defs/id"
+    },
+    "head": {
+      "$ref": "defs.json#/$defs/id"
+    },
+    "rebased": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "$ref": "defs.json#/$defs/path"
+      }
+    }
+  },
+  "required": [
+    "previous",
+    "onto",
+    "head",
+    "rebased",
+    "conflicts"
+  ],
+  "additionalProperties": false
+}
