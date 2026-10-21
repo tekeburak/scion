@@ -55,7 +55,7 @@ type Result<T, E = Box<dyn std::error::Error>> = std::result::Result<T, E>;
 const SHORT_ID: usize = 12;
 
 #[derive(Parser)]
-#[command(name = "scn", version, about = "Scion source control client")]
+#[command(name = "scn", version = scion_types::version(), about = "Scion source control client")]
 struct Cli {
     /// Print one JSON document (see `schemas/v1/`) instead of text.
     #[arg(long, global = true)]

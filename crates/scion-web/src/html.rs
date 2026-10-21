@@ -18,6 +18,7 @@ body{font:14px/1.5 system-ui,sans-serif;margin:0;color:#1f2328;background:#fff}
 header{padding:10px 24px;border-bottom:1px solid #d0d7de;background:#f6f8fa}
 header a{font-weight:600;color:inherit;text-decoration:none}
 main{max-width:1100px;margin:0 auto;padding:16px 24px}
+footer{max-width:1100px;margin:0 auto;padding:16px 24px;color:#57606a;font-size:12px}
 a{color:#0969da}
 nav.crumbs{margin-bottom:12px}
 nav.tabs a{margin-right:16px}
@@ -123,6 +124,7 @@ fn page(title: &str, body: &Markup) -> Markup {
             body {
                 header { a href="/" { "Scion" } }
                 main { (body) }
+                footer { "Scion " (scion_types::version()) }
             }
         }
     }

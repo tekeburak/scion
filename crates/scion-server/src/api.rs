@@ -91,6 +91,7 @@ pub(crate) fn router(
             get(list_grants).put(grant).delete(revoke),
         )
         .route("/whoami", get(who_am_i))
+        .route("/version", get(server_version))
         // A blob travels in one body, as in one gRPC message.
         .layer(DefaultBodyLimit::max(MAX_MESSAGE_BYTES))
         .with_state(Api {
@@ -1531,6 +1532,18 @@ struct Me {
     principal: String,
     expires_unix_seconds: i64,
     grants: Vec<GrantJson>,
+}
+
+#[derive(Debug, Serialize)]
+struct ServerVersion {
+    version: &'static str,
+}
+
+/// The server's version, to anyone: the web interface's footer shows it too.
+async fn server_version() -> Json<ServerVersion> {
+    Json(ServerVersion {
+        version: scion_types::version(),
+    })
 }
 
 async fn who_am_i(

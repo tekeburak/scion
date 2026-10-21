@@ -3479,6 +3479,7 @@ dependencies = [
  "schemars",
  "scion-server",
  "scion-store",
+ "scion-types",
  "serde",
  "serde_json",
  "tokio",

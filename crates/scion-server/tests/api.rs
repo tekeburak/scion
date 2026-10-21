@@ -711,3 +711,11 @@ async fn pages_create_a_repository_and_manage_its_access() {
     assert_eq!(form("sp:test", "/site/settings/grant", public).await.0, 303);
     assert_eq!(visit().await, 200);
 }
+
+#[tokio::test]
+async fn version_needs_no_token() {
+    let (base, _) = serve().await;
+    let (status, reply) = Client::new(&base, None).get("/version").await;
+    assert_eq!(status, 200, "{reply}");
+    assert_eq!(reply, json!({"version": scion_types::version()}));
+}

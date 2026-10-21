@@ -782,3 +782,15 @@ async fn land_without_waiting_and_read_the_request_back() {
     let (ok, _, err) = scn_try(&a, &["land", "--status", "999999"]);
     assert!(!ok && err.contains("999999"), "{err}");
 }
+
+#[test]
+fn version_is_the_workspace_version() {
+    let out = Command::new(env!("CARGO_BIN_EXE_scn"))
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let printed = String::from_utf8(out.stdout).unwrap();
+    let want = concat!("scn ", env!("CARGO_PKG_VERSION"));
+    assert!(printed.starts_with(want), "{printed}");
+}

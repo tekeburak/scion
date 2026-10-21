@@ -15,7 +15,8 @@ usage: scion-server [--web <addr>]                            serve
        scion-server backfill <repo> <type>
        scion-server grant <repo|*> <principal> <role> [--path <dir>]
        scion-server revoke <repo|*> <principal> [--path <dir>]
-       scion-server token <principal> --ttl <duration>";
+       scion-server token <principal> --ttl <duration>
+       scion-server --version";
 
 /// A parsed `scion-server` command line.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +35,8 @@ pub enum Command {
     },
     /// Issue a token for a principal, valid for `ttl`.
     Token { principal: String, ttl: Duration },
+    /// Print the version.
+    Version,
 }
 
 impl Command {
@@ -43,6 +46,7 @@ impl Command {
         let args: Vec<&str> = args.iter().map(String::as_str).collect();
         match args.as_slice() {
             [] => Ok(Self::Serve { web: None }),
+            ["--version"] => Ok(Self::Version),
             ["--web", addr] => Ok(Self::Serve {
                 web: Some((*addr).to_owned()),
             }),

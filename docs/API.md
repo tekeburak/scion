@@ -134,6 +134,7 @@ changeset, or no `changeset` and the paths that stopped it in `conflicts`. `date
 | `PUT /repos/{repo}/grants` | `Grant` | `admin` of the whole repository | `{"principal", "role", "path"?}`; `anyone` may only be `reader` | 204 |
 | `DELETE /repos/{repo}/grants?principal=&path=` | `Revoke` | `admin` of the whole repository | | 204, or 404 if there was no such grant |
 | `GET /whoami?repo=` | `WhoAmI` | a token | | `{"principal", "expires_unix_seconds", "grants"}` |
+| `GET /version` | — | — | | `{"version"}`: the server's version, as `scion-server --version` prints it |
 
 ## From init to land
 

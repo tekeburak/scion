@@ -125,3 +125,15 @@ async fn grants_a_directory_of_an_existing_repository() {
     );
     assert_eq!(meta.grants_for("web", "sp:ci").await.unwrap().len(), 1);
 }
+
+#[test]
+fn version_is_the_workspace_version() {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_scion-server"))
+        .arg("--version")
+        .output()
+        .unwrap();
+    assert!(out.status.success());
+    let printed = String::from_utf8(out.stdout).unwrap();
+    let want = concat!("scion-server ", env!("CARGO_PKG_VERSION"));
+    assert!(printed.starts_with(want), "{printed}");
+}

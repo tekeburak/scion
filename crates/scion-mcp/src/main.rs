@@ -12,7 +12,7 @@ use rmcp::ServiceExt;
 use scion_mcp::Scion;
 
 #[derive(Parser)]
-#[command(name = "scion-mcp", version, about = "Scion MCP server for agents")]
+#[command(name = "scion-mcp", version = scion_types::version(), about = "Scion MCP server for agents")]
 struct Cli {
     /// The server's API, e.g. `http://127.0.0.1:8080/api/v1` (`scion-server --web`).
     #[arg(long, env = "SCION_API")]

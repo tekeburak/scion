@@ -3,6 +3,7 @@
 //! ```text
 //! scion-ingest import <git-dir> <repo> [<rev>]
 //! scion-ingest verify <git-dir> <repo> [--sample <n>]
+//! scion-ingest --version
 //! ```
 //!
 //! `import` imports every commit reachable from `<rev>` (default `HEAD`) and
@@ -30,6 +31,10 @@ enum Cmd<'a> {
 
 async fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let (cmd, git_dir, repo) = match args {
+        [v] if v == "--version" => {
+            println!("scion-ingest {}", scion_types::version());
+            return Ok(());
+        }
         [c, git_dir, repo] if c == "import" => (Cmd::Import { rev: "HEAD" }, git_dir, repo),
         [c, git_dir, repo, rev] if c == "import" => (Cmd::Import { rev }, git_dir, repo),
         [c, git_dir, repo] if c == "verify" => (Cmd::Verify { sample: None }, git_dir, repo),
