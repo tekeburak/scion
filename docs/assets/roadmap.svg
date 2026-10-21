@@ -47,9 +47,9 @@
 <text x="1069.3" y="160" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#4ade80" font-weight="600" text-anchor="start">done</text>
 <text x="1069.3" y="184" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">Web interface,</text>
 <text x="1069.3" y="202" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">agent API</text>
-<rect x="1177.0" y="96" width="111.7" height="124" rx="12" fill="#151d2e" stroke="#2a3650" stroke-width="2" stroke-dasharray="8 6"/>
+<rect x="1177.0" y="96" width="111.7" height="124" rx="12" fill="#33270f" stroke="#f5b545" stroke-width="2"/>
 <text x="1193.0" y="134" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="700" text-anchor="start">Phase 9</text>
-<text x="1193.0" y="160" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="600" text-anchor="start">planned</text>
+<text x="1193.0" y="160" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#f5b545" font-weight="600" text-anchor="start">in progress</text>
 <text x="1193.0" y="184" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">Release and hosting</text>
 <rect x="1300.7" y="96" width="111.7" height="124" rx="12" fill="#151d2e" stroke="#2a3650" stroke-width="2" stroke-dasharray="8 6"/>
 <text x="1316.7" y="134" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="19" fill="#e8edf5" font-weight="700" text-anchor="start">Phase 4</text>
@@ -61,6 +61,6 @@
 <text x="1440.3" y="160" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="15" fill="#93a1b8" font-weight="600" text-anchor="start">planned</text>
 <text x="1440.3" y="184" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">Virtual checkouts</text>
 <text x="1440.3" y="202" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="13" fill="#93a1b8" font-weight="400" text-anchor="start">(FUSE / NFS)</text>
-<text x="64" y="260" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#e8edf5" font-weight="400" text-anchor="start">Done: git import, sparse clone, log, blame, change requests + land worker, merge, revert, access control, fuzzing</text>
-<text x="64" y="286" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#f5b545" font-weight="600" text-anchor="start">now: performance, web interface and agent API; then release, cache tiers, virtual checkouts</text>
+<text x="64" y="260" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#e8edf5" font-weight="400" text-anchor="start">Done: git import, sparse clone, log, blame, change requests + land worker, merge, revert, access control, web interface, agent API</text>
+<text x="64" y="286" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="16" fill="#f5b545" font-weight="600" text-anchor="start">now: performance, release and hosting; then cache tiers, virtual checkouts</text>
 </svg>

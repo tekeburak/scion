@@ -5,7 +5,7 @@ ones. The README describes what Scion does today and what comes next in product 
 names no phase; this file is where the numbering lives.
 
 <p align="center">
-  <img src="assets/roadmap.svg" width="800" alt="Phases 0 to 3, 6, 5, 7 and 11 done; phase 10 in progress; then phases 9, 4 and 8 planned in that order">
+  <img src="assets/roadmap.svg" width="800" alt="Phases 0 to 3, 6, 5, 7 and 11 done; phases 10 and 9 in progress; then phases 4 and 8 planned in that order">
 </p>
 
 | Phase | Scope | Status |
@@ -19,8 +19,8 @@ names no phase; this file is where the numbering lives.
 | 5 | Server-side rebase/merge UX, change requests, serial land worker | done |
 | 7 | IAM (GitHub device-flow login, service principals, repo + directory ACLs), fuzzing, hermetic simulation | done |
 | 10 | Performance: trees and history pages in Postgres, streaming object plane, one-round-trip land, memos; every benchmark row a multiple faster than git | in progress |
-| 11 | Web interface and agent API: server-rendered pages, GitHub login, HTTP/JSON API, MCP server, `scn --json` | in progress |
-| 9 | Release and hosting: versioned binaries, server image, production compose profile, a hosted instance, five-minute quickstart | planned |
+| 11 | Web interface and agent API: server-rendered pages, GitHub login, HTTP/JSON API, MCP server, `scn --json` | done |
+| 9 | Release and hosting: versioned binaries, server image, production compose profile, a hosted instance, five-minute quickstart | in progress |
 | 4 | `scion-cache` and `scion-daemon` tiers, manifest-based seeding | planned |
 | 8 | Virtualized checkouts (FUSE / NFS) | planned |
 
@@ -432,11 +432,79 @@ change-request pages are part of this interface; a separate review product is st
 
 ## Phase 9: release and hosting
 
-Steps are added when the phase starts (after Phase 11, so what is released is what people see).
-Scope: versioned `scn`, `scion-server`, `scion-ingest` and `scion-mcp` binaries for Linux and
-macOS built by CI on a tag; container images; a production compose profile (Postgres, S3
-credentials, TLS termination in front); a hosted instance on a managed platform (gRPC + HTTP
-behind one address, managed Postgres, an S3-compatible bucket), with its infrastructure script
-under `infra/` and the operator steps that need cloud credentials written down for the owner;
-quotas (no anonymous writes, per-blob size limit); a five-minute quickstart that installs `scn`,
-logs in, clones and lands; and release notes generated from merged `Phase N.M:` PRs.
+What is released is what people already see: `scn`, `scion-server`, `scion-ingest` and
+`scion-mcp`, the server image and a hosted instance of the server. Every build runs on the
+self-hosted Linux runners (`[self-hosted, linux, konuq-ci]`); macOS binaries are
+cross-compiled there. A release is a `v*` tag the owner pushes; CI builds, checksums and
+publishes it, and nothing else ever publishes. No new cloud resource is created from this
+repository: `infra/` holds the scripts and the owner runs them with their own credentials,
+following the commands written in the docs. Quotas stay what the boundary already enforces
+(no anonymous writes, one per-blob size limit); no billing, sign-up flow or per-user storage
+accounting. Backup and restore of the metadata database is the managed platform's, not ours.
+
+- **9.1 One version.** The workspace version is the single version of every binary;
+  `--version` on `scn`, `scion-server`, `scion-ingest` and `scion-mcp` prints it with the
+  commit it was built from (`SCION_COMMIT` read with `option_env!`, no build script), and the
+  web interface's footer and `GET /api/v1/version` show the server's. *Accepted when* a test
+  runs each binary with `--version` and sees the workspace version.
+- **9.2 Linux binaries on a tag.** `.github/workflows/release.yml` builds the four binaries as
+  static `x86_64` and `aarch64` musl executables on a `v*` tag (and on `workflow_dispatch` as a
+  dry run that publishes nothing), packs one `scion-<version>-<target>.tar.gz` per target with
+  a `SHA256SUMS` file, and publishes a draft GitHub release. *Accepted when* a dry run produces
+  both archives and `scn --version` from the `x86_64` archive runs in a bare `debian:stable-slim`
+  container.
+- **9.3 macOS binaries.** The same workflow cross-compiles `aarch64-apple-darwin` and
+  `x86_64-apple-darwin` on the Linux runners with `cargo-zigbuild`; if a dependency makes that
+  impossible, the step asks before using any other runner. *Accepted when* a dry run adds both
+  archives to `SHA256SUMS` and `file` reports a Mach-O executable of the right architecture for
+  each binary.
+- **9.4 Install script.** `scripts/install.sh` (POSIX `sh`) picks the archive for the
+  machine's OS and architecture from the latest release or `SCION_VERSION`, checks it against
+  `SHA256SUMS`, and installs the binaries into `~/.local/bin` or `SCION_INSTALL_DIR`.
+  *Accepted when* a CI test runs it against a release directory served from disk, a corrupted
+  archive is refused with the file named, and `shellcheck` passes.
+- **9.5 Server image.** The release workflow builds `ghcr.io/<owner>/scion-server:<version>`
+  from the static binary on a minimal base, running as a non-root user, for `linux/amd64` and
+  `linux/arm64`; the compose development stack keeps building from the checkout. *Accepted
+  when* a dry run builds the image and, started against the compose stack's Postgres and
+  RustFS, it serves the repository list page and `scn clone` against it succeeds.
+- **9.6 TLS from `scn` and the clients.** `scn`, `scion-ingest`, `scion-mcp` and
+  `scion-client` accept `https://` server addresses and verify them against the webpki roots
+  (tonic's rustls feature; `rustls` is already in the tree); the server itself stays plain
+  HTTP/2 behind a terminating proxy. *Accepted when* an e2e test clones and lands through a
+  TLS proxy with a test certificate, and a certificate for another name is refused with a
+  message naming the host.
+- **9.7 Production compose profile.** `deploy/compose.prod.yml`: the release image, Postgres
+  with a volume, an external S3 bucket from environment variables, and Caddy terminating TLS on
+  one address that sends gRPC (`application/grpc`) to `:7420` and everything else to the web
+  interface; secrets come from an `.env` file whose template lists each one. *Accepted when* a
+  CI job brings the profile up with a local certificate authority, and `scn` logs in with a
+  token, inits, clones, commits and lands through the one `https://` address.
+- **9.8 Write limits at every surface.** The per-blob size limit is one constant enforced on
+  every write path (gRPC, `/api/v1`, MCP) with an error that names the limit, and every write
+  route on the three surfaces refuses a request without a principal. *Accepted when* a
+  table-driven test sends an oversized blob and an anonymous write to every write route and
+  gets the named refusal from each.
+- **9.9 Hosted instance infrastructure.** `infra/` holds one script for a managed container
+  platform (HTTP/2 to the container, so gRPC and HTTP share one address; managed Postgres; an
+  S3-compatible bucket) that creates or updates the instance from the release image, and
+  `docs/HOSTING.md` lists the commands the owner runs with their own credentials, the secrets
+  to set and how to roll back to the previous image. The platform is the owner's decision,
+  recorded in an issue before this step starts. *Accepted when* the script passes `shellcheck`,
+  its dry-run mode prints every platform command it would run, and `docs/HOSTING.md` covers
+  first deploy, upgrade, rollback, key rotation (`SCION_TOKEN_KEY`) and the GitHub OAuth app's
+  callback URL.
+- **9.10 Release notes.** `scripts/release-notes <from-tag> <to-ref>` turns the squash
+  commits between two refs into notes: `Phase N.M:` titles grouped under their phase's scope
+  from the table above, other `fix:` and `deps:` titles listed after, PR numbers linked; the
+  release workflow puts its output into the draft release. *Accepted when* a test over a
+  fixture history produces the expected notes and an unknown phase number fails the script.
+- **9.11 Five-minute quickstart.** The README's "Getting started" starts from the install
+  script and a server address (the hosted instance, or the production profile for one's own),
+  then logs in, clones a public demo repository, commits and lands; a CI job runs the same
+  commands against the production profile and fails past five minutes. *Accepted when* the
+  job is green and its measured time is printed in the job summary.
+- **9.12 Docs.** `docs/ARCHITECTURE.md` gains "Deployment" (one binary per tier, TLS at the
+  proxy, what the image holds); the README's status lists installable releases; the status
+  figures show Phase 9 done. *Accepted when* `scripts/render-assets.py --check` passes and every
+  command in `docs/HOSTING.md` and the quickstart matches the scripts it names.
