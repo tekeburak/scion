@@ -60,8 +60,8 @@ impl ObjectService for ObjectServer {
         .await?;
         let id = tree_id(&request.get_ref().id)?;
         let tree = self
-            .objects
-            .get_tree(id)
+            .meta
+            .get_tree(&request.get_ref().repo, id)
             .await
             .map_err(store_status)?
             .ok_or_else(|| Status::not_found(format!("tree {id}")))?;
@@ -119,9 +119,14 @@ impl ObjectService for ObjectServer {
             authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader),
         )
         .await?;
-        let tree = Tree::decode(&request.get_ref().tree)
-            .map_err(|e| Status::invalid_argument(format!("tree: {e}")))?;
-        let id = self.objects.put_tree(&tree).await.map_err(store_status)?;
+        let req = request.get_ref();
+        let tree =
+            Tree::decode(&req.tree).map_err(|e| Status::invalid_argument(format!("tree: {e}")))?;
+        self.meta
+            .put_trees(&req.repo, std::slice::from_ref(&tree))
+            .await
+            .map_err(store_status)?;
+        let id = tree.id();
         Ok(Response::new(PutTreeResponse {
             id: id.as_bytes().to_vec(),
         }))

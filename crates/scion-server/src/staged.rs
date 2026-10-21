@@ -5,7 +5,8 @@
 //! from memory and holds the writes, so a batch derives without waiting on
 //! the stores. It also answers for the batch's own changesets, so derivation
 //! need not wait for their rows to be inserted. [`Staged::store_objects`]
-//! writes every object concurrently and [`Staged::store_pointers`], called
+//! writes the batch's trees and pages in one statement each, alongside its
+//! derived blobs, and [`Staged::store_pointers`], called
 //! once the objects and the changeset rows are stored, every derived pointer
 //! in one call. A pointer never names a missing object or changeset, so an
 //! interrupted batch leaves only changesets whose derived data is computed
@@ -22,8 +23,9 @@ use scion_store::{
     ObjectStore, RefState, Result,
 };
 use scion_types::{BlobId, Changeset, ChangesetId, Tree, TreeId};
+use tokio::try_join;
 
-/// Most object writes in flight at once when a batch is stored.
+/// Most blob writes in flight at once when a batch is stored.
 const STORE_CONCURRENCY: usize = 64;
 
 /// Objects and derived pointers written by one batch, over the stores they
@@ -40,6 +42,7 @@ pub(crate) struct Staged<'a> {
 #[derive(Default)]
 struct Writes {
     trees: HashMap<TreeId, Tree>,
+    pages: HashMap<BlobId, Bytes>,
     blobs: HashMap<BlobId, Bytes>,
     derived: HashMap<(String, u32, ChangesetId), Vec<u8>>,
 }
@@ -68,22 +71,26 @@ impl<'a> Staged<'a> {
 
     /// Store the objects staged so far.
     pub(crate) async fn store_objects(&self) -> Result<()> {
-        let (trees, blobs) = {
+        let (trees, pages, blobs) = {
             let mut writes = self.writes();
             (
                 std::mem::take(&mut writes.trees),
+                std::mem::take(&mut writes.pages),
                 std::mem::take(&mut writes.blobs),
             )
         };
-        let objects = trees
-            .into_values()
-            .map(Object::Tree)
-            .chain(blobs.into_values().map(Object::Blob));
-        stream::iter(objects)
-            .map(|object| put(self.objects, object))
+        let trees: Vec<Tree> = trees.into_values().collect();
+        let pages: Vec<Bytes> = pages.into_values().collect();
+        let blobs = stream::iter(blobs.into_values())
+            .map(|blob| self.objects.put_blob(blob))
             .buffer_unordered(STORE_CONCURRENCY)
-            .try_collect()
-            .await
+            .try_collect::<Vec<BlobId>>();
+        try_join!(
+            self.meta.put_trees(self.repo, &trees),
+            self.meta.put_pages(self.repo, &pages),
+            blobs,
+        )?;
+        Ok(())
     }
 
     /// Store the staged derived pointers. Called after
@@ -95,18 +102,6 @@ impl<'a> Staged<'a> {
             .map(|((ty, version, cs), pointer)| (ty, version, cs, pointer))
             .collect();
         self.meta.put_derived_many(self.repo, pointers).await
-    }
-}
-
-enum Object {
-    Tree(Tree),
-    Blob(Bytes),
-}
-
-async fn put(objects: &dyn ObjectStore, object: Object) -> Result<()> {
-    match object {
-        Object::Tree(tree) => objects.put_tree(&tree).await.map(drop),
-        Object::Blob(blob) => objects.put_blob(blob).await.map(drop),
     }
 }
 
@@ -134,23 +129,6 @@ impl ObjectStore for Staged<'_> {
         }
         Ok(present)
     }
-
-    async fn put_tree(&self, tree: &Tree) -> Result<TreeId> {
-        let id = tree.id();
-        self.writes()
-            .trees
-            .entry(id)
-            .or_insert_with(|| tree.clone());
-        Ok(id)
-    }
-
-    async fn get_tree(&self, id: TreeId) -> Result<Option<Tree>> {
-        let staged = self.writes().trees.get(&id).cloned();
-        match staged {
-            Some(tree) => Ok(Some(tree)),
-            None => self.objects.get_tree(id).await,
-        }
-    }
 }
 
 #[async_trait]
@@ -161,6 +139,69 @@ impl MetadataStore for Staged<'_> {
 
     async fn put_changesets(&self, batch: &[Changeset]) -> Result<()> {
         self.meta.put_changesets(batch).await
+    }
+
+    async fn put_trees(&self, repo: &str, trees: &[Tree]) -> Result<()> {
+        debug_assert_eq!(repo, self.repo, "a batch derives one repository");
+        let mut writes = self.writes();
+        for tree in trees {
+            writes
+                .trees
+                .entry(tree.id())
+                .or_insert_with(|| tree.clone());
+        }
+        Ok(())
+    }
+
+    async fn get_trees(&self, repo: &str, ids: &[TreeId]) -> Result<Vec<Option<Tree>>> {
+        debug_assert_eq!(repo, self.repo, "a batch derives one repository");
+        let mut out: Vec<Option<Tree>> = {
+            let writes = self.writes();
+            ids.iter().map(|id| writes.trees.get(id).cloned()).collect()
+        };
+        let missing: Vec<TreeId> = ids
+            .iter()
+            .zip(&out)
+            .filter(|(_, tree)| tree.is_none())
+            .map(|(id, _)| *id)
+            .collect();
+        if !missing.is_empty() {
+            let mut read = self.meta.get_trees(repo, &missing).await?.into_iter();
+            for slot in out.iter_mut().filter(|slot| slot.is_none()) {
+                *slot = read.next().flatten();
+            }
+        }
+        Ok(out)
+    }
+
+    async fn put_pages(&self, repo: &str, pages: &[Bytes]) -> Result<()> {
+        debug_assert_eq!(repo, self.repo, "a batch derives one repository");
+        let mut writes = self.writes();
+        for page in pages {
+            writes.pages.insert(BlobId::hash(page), page.clone());
+        }
+        Ok(())
+    }
+
+    async fn get_pages(&self, repo: &str, ids: &[BlobId]) -> Result<Vec<Option<Bytes>>> {
+        debug_assert_eq!(repo, self.repo, "a batch derives one repository");
+        let mut out: Vec<Option<Bytes>> = {
+            let writes = self.writes();
+            ids.iter().map(|id| writes.pages.get(id).cloned()).collect()
+        };
+        let missing: Vec<BlobId> = ids
+            .iter()
+            .zip(&out)
+            .filter(|(_, page)| page.is_none())
+            .map(|(id, _)| *id)
+            .collect();
+        if !missing.is_empty() {
+            let mut read = self.meta.get_pages(repo, &missing).await?.into_iter();
+            for slot in out.iter_mut().filter(|slot| slot.is_none()) {
+                *slot = read.next().flatten();
+            }
+        }
+        Ok(out)
     }
 
     async fn get_changeset(&self, repo: &str, id: ChangesetId) -> Result<Option<Changeset>> {

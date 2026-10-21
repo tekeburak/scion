@@ -170,7 +170,7 @@ async fn three_way(
     theirs: &BTreeMap<RepoPath, Change>,
 ) -> Result<ThreeWay> {
     let objects = ctx.objects;
-    let ours_changes = changes_from_diff(tree_diff(objects, base, Some(ours)).await?);
+    let ours_changes = changes_from_diff(tree_diff(ctx, base, Some(ours)).await?);
     let base_root = base.map(RootTree);
     let mut out = ThreeWay::default();
 
@@ -217,7 +217,7 @@ async fn three_way(
             }
             (Some(Change::Set(o, _)), Change::Set(t, _)) => {
                 let base_entry = match &base_root {
-                    Some(root) => root.lookup(objects, path).await?,
+                    Some(root) => root.lookup(ctx, path).await?,
                     None => None,
                 };
                 let base_kind = kind_of(base_entry.as_ref());
@@ -272,7 +272,7 @@ pub async fn merge(ctx: &Deriver<'_>, ours: ChangesetId, theirs: ChangesetId) ->
     };
     let ours_tree = ctx.derive::<RootTree>(ours).await?.0;
     let theirs_tree = ctx.derive::<RootTree>(theirs).await?.0;
-    let theirs_changes = changes_from_diff(tree_diff(ctx.objects, base, Some(theirs_tree)).await?)
+    let theirs_changes = changes_from_diff(tree_diff(ctx, base, Some(theirs_tree)).await?)
         .into_iter()
         .map(|(path, change)| match change {
             Change::Set(entry, _) => {

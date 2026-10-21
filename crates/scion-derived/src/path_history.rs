@@ -35,14 +35,12 @@ use std::collections::BTreeMap;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use futures_util::{Stream, StreamExt, TryStreamExt, stream};
-use scion_store::ObjectStore;
+use futures_util::{Stream, TryStreamExt, stream};
 use scion_types::canonical::{CanonicalError, Reader, Writer};
 use scion_types::{
     BlobId, Changeset, ChangesetId, PathComponent, RepoPath, Tree, TreeEntry, TreeId,
 };
 
-use crate::root_tree::WRITE_CONCURRENCY;
 use crate::{Derivable, DeriveError, Deriver, Result, RootTree};
 
 /// A page is closed once its nodes' encodings reach this many bytes. Small
@@ -150,28 +148,20 @@ impl HistoryEntry {
     /// The entry `name` (this entry's own name) had at
     /// `first_parent(last_changed)`: the previous change to it, or `None` if
     /// it did not exist there. One node read.
-    pub async fn previous(
-        &self,
-        objects: &dyn ObjectStore,
-        name: &PathComponent,
-    ) -> Result<Option<Self>> {
+    pub async fn previous(&self, ctx: &Deriver<'_>, name: &PathComponent) -> Result<Option<Self>> {
         let Some(at) = self.replaced() else {
             return Ok(None);
         };
-        HistoryNode::entry(objects, at, name).await
+        HistoryNode::entry(ctx, at, name).await
     }
 
     /// The entry `name` has at its anchor, checked to be at the anchor's
     /// height; `None` at height 0. One node read.
-    async fn anchored(
-        &self,
-        objects: &dyn ObjectStore,
-        name: &PathComponent,
-    ) -> Result<Option<Self>> {
+    async fn anchored(&self, ctx: &Deriver<'_>, name: &PathComponent) -> Result<Option<Self>> {
         let (Some(at), Some(height)) = (self.change().anchor, self.change().anchor_height()) else {
             return Ok(None);
         };
-        match HistoryNode::entry(objects, at, name).await? {
+        match HistoryNode::entry(ctx, at, name).await? {
             Some(entry) if entry.change().height == height => Ok(Some(entry)),
             _ => Err(DeriveError::CorruptObject(at.page)),
         }
@@ -183,7 +173,7 @@ impl HistoryEntry {
     /// each is walked as soon as the anchor is known.
     pub fn chain<'a>(
         self,
-        objects: &'a dyn ObjectStore,
+        ctx: &'a Deriver<'a>,
         name: &'a PathComponent,
         lowest: u64,
     ) -> impl Stream<Item = Result<Self>> + Send + 'a {
@@ -192,13 +182,13 @@ impl HistoryEntry {
                 return Ok(None);
             };
             let next = match start.change().anchor_height() {
-                Some(height) if height >= lowest => start.anchored(objects, name).await?,
+                Some(height) if height >= lowest => start.anchored(ctx, name).await?,
                 _ => None,
             };
             Ok(Some((start, next)))
         });
         starts
-            .map_ok(move |start| start.segment(objects, name, lowest))
+            .map_ok(move |start| start.segment(ctx, name, lowest))
             .try_buffered(SEGMENTS)
             .map_ok(|segment| stream::iter(segment.into_iter().map(Ok)))
             .try_flatten()
@@ -208,7 +198,7 @@ impl HistoryEntry {
     /// `lowest` (inclusive), newest first.
     async fn segment(
         self,
-        objects: &dyn ObjectStore,
+        ctx: &Deriver<'_>,
         name: &PathComponent,
         lowest: u64,
     ) -> Result<Vec<Self>> {
@@ -220,7 +210,7 @@ impl HistoryEntry {
         let mut out = vec![self];
         let mut entry = self;
         while entry.change().height > stop {
-            match entry.previous(objects, name).await? {
+            match entry.previous(ctx, name).await? {
                 Some(before) if before.change().height + 1 == entry.change().height => {
                     out.push(before);
                     entry = before;
@@ -378,20 +368,17 @@ pub(crate) fn decode_node(bytes: &[u8], page: BlobId, index: u32) -> Option<Hist
 }
 
 impl HistoryNode {
-    async fn page(objects: &dyn ObjectStore, at: NodeAt) -> Result<Bytes> {
-        objects
-            .get_blob(at.page)
-            .await?
-            .ok_or(DeriveError::MissingObject(at.page))
+    async fn page(ctx: &Deriver<'_>, at: NodeAt) -> Result<Bytes> {
+        ctx.page(at.page).await
     }
 
     /// The entry `name` of the node at `at`, without decoding the rest.
     async fn entry(
-        objects: &dyn ObjectStore,
+        ctx: &Deriver<'_>,
         at: NodeAt,
         name: &PathComponent,
     ) -> Result<Option<HistoryEntry>> {
-        let bytes = Self::page(objects, at).await?;
+        let bytes = Self::page(ctx, at).await?;
         let mut found = None;
         walk_node(&bytes, at.page, at.index, |n, entry| {
             let hit = n == name.as_str().as_bytes();
@@ -404,8 +391,8 @@ impl HistoryNode {
         Ok(found)
     }
 
-    async fn load(objects: &dyn ObjectStore, at: NodeAt) -> Result<Self> {
-        let bytes = Self::page(objects, at).await?;
+    async fn load(ctx: &Deriver<'_>, at: NodeAt) -> Result<Self> {
+        let bytes = Self::page(ctx, at).await?;
         decode_node(&bytes, at.page, at.index).ok_or(DeriveError::CorruptObject(at.page))
     }
 }
@@ -502,21 +489,13 @@ impl Derivable for PathHistory {
             _ => None,
         };
         let mut pages = Pages::default();
-        let root = rebuild(ctx.objects, new_root, old, cs_id, &mut pages).await?;
+        let root = rebuild(ctx, new_root, old, cs_id, &mut pages).await?;
         pages.close();
         let root = pages.at(root);
         // Page ids are content hashes, so every page is written in one
-        // concurrent batch; nothing points at them until the pointer is
-        // recorded.
-        stream::iter(
-            pages
-                .closed
-                .into_iter()
-                .map(|(_, page)| ctx.objects.put_blob(page)),
-        )
-        .buffer_unordered(WRITE_CONCURRENCY)
-        .try_for_each(|_| async { Ok(()) })
-        .await?;
+        // batch; nothing points at them until the pointer is recorded.
+        let closed: Vec<Bytes> = pages.closed.into_iter().map(|(_, page)| page).collect();
+        ctx.meta.put_pages(ctx.repo, &closed).await?;
         Ok(Self(root))
     }
 
@@ -539,7 +518,7 @@ impl Derivable for PathHistory {
 /// for the same directory, attributing every difference to `cs`. Every new
 /// node is appended to `pages`, children first.
 async fn rebuild(
-    objects: &dyn ObjectStore,
+    ctx: &Deriver<'_>,
     new_tree: TreeId,
     old: Option<(TreeId, NodeAt)>,
     cs: ChangesetId,
@@ -551,12 +530,9 @@ async fn rebuild(
         }
     }
 
-    let new = load_tree(objects, new_tree).await?;
+    let new = ctx.tree(new_tree).await?;
     let (old_tree, old_history) = match old {
-        Some((t, h)) => (
-            load_tree(objects, t).await?,
-            HistoryNode::load(objects, h).await?,
-        ),
+        Some((t, h)) => (ctx.tree(t).await?, HistoryNode::load(ctx, h).await?),
         None => (Tree::empty(), HistoryNode::default()),
     };
 
@@ -587,7 +563,7 @@ async fn rebuild(
                     }
                     _ => None,
                 };
-                Some(Box::pin(rebuild(objects, *id, old_sub, cs, pages)).await?)
+                Some(Box::pin(rebuild(ctx, *id, old_sub, cs, pages)).await?)
             }
         };
         entries.push(NewEntry {
@@ -603,24 +579,13 @@ async fn rebuild(
     Ok(pages.push(entries))
 }
 
-async fn load_tree(objects: &dyn ObjectStore, id: TreeId) -> Result<Tree> {
-    objects
-        .get_tree(id)
-        .await?
-        .ok_or(DeriveError::MissingTree(id))
-}
-
 impl PathHistory {
     /// The history entry at `path`, or `None` if the path does not exist.
-    pub async fn lookup(
-        &self,
-        objects: &dyn ObjectStore,
-        path: &RepoPath,
-    ) -> Result<Option<HistoryEntry>> {
+    pub async fn lookup(&self, ctx: &Deriver<'_>, path: &RepoPath) -> Result<Option<HistoryEntry>> {
         let mut at = self.0;
         let mut components = path.components().peekable();
         while let Some(component) = components.next() {
-            let entry = HistoryNode::entry(objects, at, &component).await?;
+            let entry = HistoryNode::entry(ctx, at, &component).await?;
             match entry {
                 Some(HistoryEntry::Dir { node, .. }) if components.peek().is_some() => at = node,
                 _ if components.peek().is_some() => return Ok(None),
@@ -638,7 +603,9 @@ mod tests {
     use scion_types::FileChange;
 
     use super::*;
-    use crate::test_util::{Counting, Flat, REPO, arb_changes, changeset, materialize, tracked};
+    use crate::test_util::{
+        CountingMeta, Flat, REPO, arb_changes, changeset, materialize, tracked,
+    };
 
     // ---- naive reference ------------------------------------------------
 
@@ -774,7 +741,9 @@ mod tests {
 
     /// Nodes in `page`.
     async fn page_len(store: &MemoryStore, page: BlobId) -> u64 {
-        let bytes = store.get_blob(page).await.unwrap().unwrap();
+        let bytes = store.get_pages(REPO, &[page]).await.unwrap()[0]
+            .clone()
+            .unwrap();
         Reader::new(&bytes).seq_len().unwrap()
     }
 
@@ -800,19 +769,19 @@ mod tests {
         let h1 = d.derive::<PathHistory>(child).await.unwrap();
         assert_eq!(h0, h1);
         let entry = h1
-            .lookup(&store, &RepoPath::new("a/f").unwrap())
+            .lookup(&d, &RepoPath::new("a/f").unwrap())
             .await
             .unwrap()
             .unwrap();
         assert_eq!(entry.last_changed(), root);
         assert!(
-            h1.lookup(&store, &RepoPath::new("a/missing").unwrap())
+            h1.lookup(&d, &RepoPath::new("a/missing").unwrap())
                 .await
                 .unwrap()
                 .is_none()
         );
         assert!(
-            h1.lookup(&store, &RepoPath::new("a/f/x").unwrap())
+            h1.lookup(&d, &RepoPath::new("a/f/x").unwrap())
                 .await
                 .unwrap()
                 .is_none()
@@ -848,9 +817,9 @@ mod tests {
         let h = d.derive::<PathHistory>(merge).await.unwrap();
         assert_eq!(h, d.derive::<PathHistory>(left).await.unwrap());
         let last = |p: &str| {
-            let store = &store;
+            let d = &d;
             let p = RepoPath::new(p).unwrap();
-            async move { h.lookup(store, &p).await.unwrap().map(|e| e.last_changed()) }
+            async move { h.lookup(d, &p).await.unwrap().map(|e| e.last_changed()) }
         };
         assert_eq!(last("x").await, Some(root));
         assert_eq!(last("l").await, Some(left));
@@ -876,13 +845,13 @@ mod tests {
             .put_changeset(&changeset(vec![], changes, "big"))
             .await
             .unwrap();
-        let counting = Counting::new(&store);
-        Deriver::new(REPO, &store, &counting)
+        let counting = CountingMeta::new(&store);
+        Deriver::new(REPO, &counting, &store)
             .derive::<PathHistory>(root)
             .await
             .unwrap();
         assert!(
-            counting.blob_puts() > 1,
+            counting.page_puts() > 1,
             "a large change spans several pages"
         );
 
@@ -896,12 +865,12 @@ mod tests {
             .await
             .unwrap();
 
-        let counting = Counting::new(&store);
-        let h = Deriver::new(REPO, &store, &counting)
+        let counting = CountingMeta::new(&store);
+        let h = Deriver::new(REPO, &counting, &store)
             .derive::<PathHistory>(child)
             .await
             .unwrap();
-        assert_eq!(counting.blob_puts(), 1, "one page of history nodes");
+        assert_eq!(counting.page_puts(), 1, "one page of history nodes");
         assert_eq!(
             page_len(&store, h.0.page).await,
             DEPTH as u64 + 1,
@@ -909,10 +878,12 @@ mod tests {
         );
         assert_eq!(counting.tree_puts(), DEPTH + 1, "tree nodes rewritten");
 
+        let d = Deriver::new(REPO, &store, &store);
+
         let last = |p: &str| {
-            let store = &store;
+            let d = &d;
             let p = RepoPath::new(p).unwrap();
-            async move { h.lookup(store, &p).await.unwrap().map(|e| e.last_changed()) }
+            async move { h.lookup(d, &p).await.unwrap().map(|e| e.last_changed()) }
         };
         assert_eq!(last("d0_7/d1_9/d2/d3/f_7_9.txt").await, Some(child));
         assert_eq!(last("d0_7/d1_9").await, Some(child));
@@ -941,14 +912,14 @@ mod tests {
 
                     let history = d.derive::<PathHistory>(id).await.unwrap();
                     for (path, is_dir) in all_paths(&flats[i]) {
-                        let entry = history.lookup(&store, &path).await.unwrap();
+                        let entry = history.lookup(&d, &path).await.unwrap();
                         let expected = naive_last_changed(&ids, &flats, i, &path);
                         prop_assert_eq!(entry.map(|e| e.last_changed()), expected, "step {} path {}", i, path);
                         prop_assert_eq!(matches!(entry, Some(HistoryEntry::Dir { .. })), is_dir, "kind of {}", path);
                     }
                     // A path that does not exist has no history.
                     let absent = RepoPath::new("zz/zz").unwrap();
-                    prop_assert_eq!(history.lookup(&store, &absent).await.unwrap(), None);
+                    prop_assert_eq!(history.lookup(&d, &absent).await.unwrap(), None);
                 }
                 Ok(())
             })?;

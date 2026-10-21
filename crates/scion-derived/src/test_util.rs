@@ -1,5 +1,5 @@
-//! Shared test helpers: naive materialisation, changeset builders, a counting
-//! object store, and proptest generators.
+//! Shared test helpers: naive materialisation, changeset builders, counting
+//! stores, and proptest generators.
 
 use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -21,12 +21,12 @@ pub const REPO: &str = "t";
 /// `path -> file`: the naive, fully materialised view of a tree.
 pub type Flat = BTreeMap<RepoPath, (BlobId, FileType, u64)>;
 
-/// Flatten a tree into `path -> file`.
-pub async fn materialize(objects: &dyn ObjectStore, root: TreeId) -> Flat {
+/// Flatten a tree of [`REPO`] into `path -> file`.
+pub async fn materialize(meta: &dyn MetadataStore, root: TreeId) -> Flat {
     let mut out = Flat::new();
     let mut stack = vec![(None::<RepoPath>, root)];
     while let Some((prefix, id)) = stack.pop() {
-        let tree = objects.get_tree(id).await.unwrap().expect("tree exists");
+        let tree = meta.get_tree(REPO, id).await.unwrap().expect("tree exists");
         for (name, entry) in tree.entries {
             let path = match &prefix {
                 Some(p) => p.join(&name),
@@ -70,37 +70,27 @@ pub fn tracked(content: &[u8]) -> FileChange {
     }
 }
 
-/// Counts writes so tests can bound the number of rewritten nodes.
+/// Counts blob reads and writes.
 #[derive(Debug)]
 pub struct Counting<'a> {
     pub inner: &'a MemoryStore,
-    pub tree_puts: AtomicUsize,
     pub blob_puts: AtomicUsize,
     pub blob_gets: AtomicUsize,
-    pub tree_gets: AtomicUsize,
 }
 
 impl<'a> Counting<'a> {
     pub fn new(inner: &'a MemoryStore) -> Self {
         Self {
             inner,
-            tree_puts: AtomicUsize::new(0),
             blob_puts: AtomicUsize::new(0),
             blob_gets: AtomicUsize::new(0),
-            tree_gets: AtomicUsize::new(0),
         }
-    }
-    pub fn tree_puts(&self) -> usize {
-        self.tree_puts.load(Ordering::Relaxed)
     }
     pub fn blob_puts(&self) -> usize {
         self.blob_puts.load(Ordering::Relaxed)
     }
     pub fn blob_gets(&self) -> usize {
         self.blob_gets.load(Ordering::Relaxed)
-    }
-    pub fn tree_gets(&self) -> usize {
-        self.tree_gets.load(Ordering::Relaxed)
     }
 }
 
@@ -116,14 +106,6 @@ impl ObjectStore for Counting<'_> {
     }
     async fn has_blobs(&self, ids: &[BlobId]) -> scion_store::Result<Vec<bool>> {
         self.inner.has_blobs(ids).await
-    }
-    async fn put_tree(&self, tree: &Tree) -> scion_store::Result<TreeId> {
-        self.tree_puts.fetch_add(1, Ordering::Relaxed);
-        self.inner.put_tree(tree).await
-    }
-    async fn get_tree(&self, id: TreeId) -> scion_store::Result<Option<Tree>> {
-        self.tree_gets.fetch_add(1, Ordering::Relaxed);
-        self.inner.get_tree(id).await
     }
 }
 
@@ -143,13 +125,18 @@ pub fn arb_changes() -> impl Strategy<Value = BTreeMap<RepoPath, FileChange>> {
     prop::collection::btree_map(arb_path(), arb_change(), 0..6)
 }
 
-/// Counts metadata reads so tests can bound the work an ancestry query does.
+/// Counts metadata reads and writes so tests can bound the work an ancestry
+/// query does and the number of tree and history nodes rewritten.
 #[derive(Debug)]
 pub struct CountingMeta<'a> {
     pub inner: &'a MemoryStore,
     pub derived_reads: AtomicUsize,
     pub changeset_reads: AtomicUsize,
     pub queries: AtomicUsize,
+    pub tree_puts: AtomicUsize,
+    pub tree_gets: AtomicUsize,
+    pub page_puts: AtomicUsize,
+    pub page_gets: AtomicUsize,
 }
 
 impl<'a> CountingMeta<'a> {
@@ -159,7 +146,27 @@ impl<'a> CountingMeta<'a> {
             derived_reads: AtomicUsize::new(0),
             changeset_reads: AtomicUsize::new(0),
             queries: AtomicUsize::new(0),
+            tree_puts: AtomicUsize::new(0),
+            tree_gets: AtomicUsize::new(0),
+            page_puts: AtomicUsize::new(0),
+            page_gets: AtomicUsize::new(0),
         }
+    }
+    /// Trees written, however many calls wrote them.
+    pub fn tree_puts(&self) -> usize {
+        self.tree_puts.load(Ordering::Relaxed)
+    }
+    /// Trees read, however many calls read them.
+    pub fn tree_gets(&self) -> usize {
+        self.tree_gets.load(Ordering::Relaxed)
+    }
+    /// Path-history pages written.
+    pub fn page_puts(&self) -> usize {
+        self.page_puts.load(Ordering::Relaxed)
+    }
+    /// Path-history pages read.
+    pub fn page_gets(&self) -> usize {
+        self.page_gets.load(Ordering::Relaxed)
     }
     pub fn derived_reads(&self) -> usize {
         self.derived_reads.load(Ordering::Relaxed)
@@ -182,6 +189,34 @@ impl MetadataStore for CountingMeta<'_> {
     async fn put_changesets(&self, batch: &[Changeset]) -> scion_store::Result<()> {
         self.queries.fetch_add(1, Ordering::Relaxed);
         self.inner.put_changesets(batch).await
+    }
+    async fn put_trees(&self, repo: &str, trees: &[Tree]) -> scion_store::Result<()> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
+        self.tree_puts.fetch_add(trees.len(), Ordering::Relaxed);
+        self.inner.put_trees(repo, trees).await
+    }
+    async fn get_trees(
+        &self,
+        repo: &str,
+        ids: &[TreeId],
+    ) -> scion_store::Result<Vec<Option<Tree>>> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
+        self.tree_gets.fetch_add(ids.len(), Ordering::Relaxed);
+        self.inner.get_trees(repo, ids).await
+    }
+    async fn put_pages(&self, repo: &str, pages: &[Bytes]) -> scion_store::Result<()> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
+        self.page_puts.fetch_add(pages.len(), Ordering::Relaxed);
+        self.inner.put_pages(repo, pages).await
+    }
+    async fn get_pages(
+        &self,
+        repo: &str,
+        ids: &[BlobId],
+    ) -> scion_store::Result<Vec<Option<Bytes>>> {
+        self.queries.fetch_add(1, Ordering::Relaxed);
+        self.page_gets.fetch_add(ids.len(), Ordering::Relaxed);
+        self.inner.get_pages(repo, ids).await
     }
     async fn get_changeset(
         &self,

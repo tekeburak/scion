@@ -71,13 +71,14 @@ resumable, and there is no delta compression or packfile generation anywhere.
 
 - **Metadata** (Postgres; CockroachDB is a drop-in target): the changeset write-ahead log,
   `file_changes`, refs (one row each, moved by compare-and-swap on a version column), derived
-  data pointers, change requests, ingestion checkpoints. Schema: `migrations/`.
+  data pointers, trees and path-history pages (immutable, content-addressed rows), change
+  requests, ingestion checkpoints. Schema: `migrations/`.
 - **Objects** (S3-compatible via the `object_store` crate; GCS/Azure/local disk also work):
-  `blobs/{id}`, `trees/{id}`, `snapshots/{repo}/{changeset}.manifest`. All keys are immutable and
+  `blobs/{id}`, `snapshots/{repo}/{changeset}.manifest`. All keys are immutable and
   zstd-compressed.
 
-Trees live in the object store rather than the metadata database. This is a deliberate deviation
-from the reference design; `docs/DATA_MODEL.md` explains the trade-off.
+Trees live in the metadata database, as in the reference design, since Phase 10.3;
+`docs/DATA_MODEL.md` explains why they first lived in the object store and what that cost.
 
 The local development stack (`deploy/docker-compose.yml`) uses RustFS rather than MinIO as the
 S3-compatible server because MinIO no longer publishes pullable community container images

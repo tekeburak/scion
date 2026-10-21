@@ -8,13 +8,11 @@
 use std::collections::BTreeMap;
 
 use async_trait::async_trait;
-use futures_util::{StreamExt, TryStreamExt, stream};
-use scion_store::ObjectStore;
 use scion_types::{
     BlobId, Changeset, FileChange, FileType, PathComponent, Tree, TreeEntry, TreeId,
 };
 
-use crate::{Derivable, DeriveError, Deriver, Result};
+use crate::{Derivable, Deriver, Result};
 
 /// The root tree id of a changeset.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,9 +25,7 @@ impl Derivable for RootTree {
 
     async fn derive(ctx: &Deriver<'_>, cs: &Changeset, parents: &[Self]) -> Result<Self> {
         let base = parents.first().map(|p| p.0);
-        Ok(Self(
-            apply_changes(ctx.objects, base, &cs.file_changes).await?,
-        ))
+        Ok(Self(apply_changes(ctx, base, &cs.file_changes).await?))
     }
 
     fn to_pointer(&self) -> Vec<u8> {
@@ -45,22 +41,16 @@ impl RootTree {
     /// The tree entry at `path`, or `None` if the path does not exist.
     pub async fn lookup(
         &self,
-        objects: &dyn ObjectStore,
+        ctx: &Deriver<'_>,
         path: &scion_types::RepoPath,
     ) -> Result<Option<TreeEntry>> {
-        let mut tree = objects
-            .get_tree(self.0)
-            .await?
-            .ok_or(DeriveError::MissingTree(self.0))?;
+        let mut tree = ctx.tree(self.0).await?;
         let components: Vec<PathComponent> = path.components().collect();
         let (last, dirs) = components.split_last().expect("paths are non-empty");
         for component in dirs {
             match tree.entries.get(component) {
                 Some(TreeEntry::Tree { id }) => {
-                    tree = objects
-                        .get_tree(*id)
-                        .await?
-                        .ok_or(DeriveError::MissingTree(*id))?;
+                    tree = ctx.tree(*id).await?;
                 }
                 _ => return Ok(None),
             }
@@ -102,23 +92,20 @@ fn build_trie(changes: &BTreeMap<scion_types::RepoPath, FileChange>) -> Node {
     root
 }
 
-/// Most object writes a derivation keeps in flight at once.
-pub(crate) const WRITE_CONCURRENCY: usize = 16;
-
 /// Apply `changes` to the tree `base` (`None` = empty), returning the new root.
 ///
 /// Tree ids are computed locally, so every rewritten directory is written in
-/// one concurrent batch at the end instead of one round trip per level.
+/// one batch at the end instead of one round trip per level.
 /// Nothing points at the new root until the caller records it, so a failed
 /// batch leaves no reachable hole.
 async fn apply_changes(
-    objects: &dyn ObjectStore,
+    ctx: &Deriver<'_>,
     base: Option<TreeId>,
     changes: &BTreeMap<scion_types::RepoPath, FileChange>,
 ) -> Result<TreeId> {
     let trie = build_trie(changes);
     let mut rewritten = Vec::new();
-    let root = if let Some(id) = apply_node(objects, base, &trie, &mut rewritten).await? {
+    let root = if let Some(id) = apply_node(ctx, base, &trie, &mut rewritten).await? {
         id
     } else {
         let empty = Tree::empty();
@@ -126,14 +113,7 @@ async fn apply_changes(
         rewritten.push(empty);
         id
     };
-    let puts: Vec<_> = rewritten
-        .iter()
-        .map(|tree| objects.put_tree(tree))
-        .collect();
-    stream::iter(puts)
-        .buffer_unordered(WRITE_CONCURRENCY)
-        .try_for_each(|_| async { Ok(()) })
-        .await?;
+    ctx.meta.put_trees(ctx.repo, &rewritten).await?;
     Ok(root)
 }
 
@@ -141,16 +121,13 @@ async fn apply_changes(
 /// `None` when the directory ends up empty so the parent drops the entry
 /// (empty directories do not exist in trees).
 async fn apply_node(
-    objects: &dyn ObjectStore,
+    ctx: &Deriver<'_>,
     existing: Option<TreeId>,
     node: &Node,
     rewritten: &mut Vec<Tree>,
 ) -> Result<Option<TreeId>> {
     let mut tree = match existing {
-        Some(id) => objects
-            .get_tree(id)
-            .await?
-            .ok_or(DeriveError::MissingTree(id))?,
+        Some(id) => ctx.tree(id).await?,
         None => Tree::empty(),
     };
 
@@ -181,7 +158,7 @@ async fn apply_node(
                 Some(TreeEntry::Tree { id }) => Some(*id),
                 _ => None,
             };
-            match Box::pin(apply_node(objects, sub, child, rewritten)).await? {
+            match Box::pin(apply_node(ctx, sub, child, rewritten)).await? {
                 // A directory replaces whatever was there, file included.
                 Some(id) => {
                     tree.entries.insert(name.clone(), TreeEntry::Tree { id });
@@ -210,11 +187,14 @@ mod tests {
     use std::collections::BTreeMap;
 
     use proptest::prelude::*;
-    use scion_store::{MemoryStore, MetadataStore, ObjectStore};
+    use scion_store::{MemoryStore, MetadataStore};
     use scion_types::{ChangesetId, RepoPath};
 
     use super::*;
-    use crate::test_util::{Counting, Flat, REPO, arb_changes, changeset, materialize, tracked};
+    use crate::DeriveError;
+    use crate::test_util::{
+        CountingMeta, Flat, REPO, arb_changes, changeset, materialize, tracked,
+    };
 
     // ---- naive reference ------------------------------------------------
 
@@ -246,13 +226,13 @@ mod tests {
     }
 
     /// Build a tree from scratch from a flat map.
-    async fn tree_from_flat(objects: &dyn ObjectStore, flat: &Flat) -> TreeId {
+    async fn tree_from_flat(meta: &dyn MetadataStore, flat: &Flat) -> TreeId {
         #[derive(Default)]
         struct Dir {
             files: BTreeMap<PathComponent, (BlobId, FileType, u64)>,
             dirs: BTreeMap<PathComponent, Dir>,
         }
-        async fn write(objects: &dyn ObjectStore, dir: &Dir) -> TreeId {
+        async fn write(meta: &dyn MetadataStore, dir: &Dir) -> TreeId {
             let mut tree = Tree::empty();
             for (name, (id, kind, size)) in &dir.files {
                 tree.entries.insert(
@@ -265,10 +245,13 @@ mod tests {
                 );
             }
             for (name, sub) in &dir.dirs {
-                let id = Box::pin(write(objects, sub)).await;
+                let id = Box::pin(write(meta, sub)).await;
                 tree.entries.insert(name.clone(), TreeEntry::Tree { id });
             }
-            objects.put_tree(&tree).await.unwrap()
+            meta.put_trees(REPO, std::slice::from_ref(&tree))
+                .await
+                .unwrap();
+            tree.id()
         }
 
         let mut root = Dir::default();
@@ -281,7 +264,7 @@ mod tests {
             }
             dir.files.insert(last.clone(), *file);
         }
-        write(objects, &root).await
+        write(meta, &root).await
     }
 
     // ---- tests ----------------------------------------------------------
@@ -315,11 +298,11 @@ mod tests {
         let RootTree(t2) = d.derive::<RootTree>(child).await.unwrap();
         let flat = materialize(&store, t2).await;
         assert_eq!(flat.len(), 2);
-        let a = store.get_tree(t2).await.unwrap().unwrap();
+        let a = store.get_tree(REPO, t2).await.unwrap().unwrap();
         let Some(TreeEntry::Tree { id }) = a.entries.get(&PathComponent::new("a").unwrap()) else {
             panic!()
         };
-        let a = store.get_tree(*id).await.unwrap().unwrap();
+        let a = store.get_tree(REPO, *id).await.unwrap().unwrap();
         assert!(!a.entries.contains_key(&PathComponent::new("b").unwrap()));
     }
 
@@ -363,8 +346,8 @@ mod tests {
             .await
             .unwrap();
 
-        let counting = Counting::new(&store);
-        Deriver::new(REPO, &store, &counting)
+        let counting = CountingMeta::new(&store);
+        Deriver::new(REPO, &counting, &store)
             .derive::<RootTree>(child)
             .await
             .unwrap();
@@ -401,8 +384,8 @@ mod tests {
             .await
             .unwrap();
 
-        let counting = Counting::new(&store);
-        let d = Deriver::new(REPO, &store, &counting);
+        let counting = CountingMeta::new(&store);
+        let d = Deriver::new(REPO, &counting, &store);
         let RootTree(t) = d.derive::<RootTree>(merge).await.unwrap();
         // root, left, right, merge: one root-level tree each.
         assert_eq!(counting.tree_puts(), 4);

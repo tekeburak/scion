@@ -11,7 +11,8 @@ use std::sync::Arc;
 use std::time::{Duration, UNIX_EPOCH};
 
 use async_trait::async_trait;
-use scion_types::{Changeset, ChangesetId, Decode, Encode, FileChange};
+use bytes::Bytes;
+use scion_types::{BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, Tree, TreeId};
 use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
 use sqlx::{Executor, Postgres};
 
@@ -30,20 +31,28 @@ const CHANGESET_MEMO_BYTES: usize = 32 << 20;
 const DERIVED_MEMO_BYTES: usize = 16 << 20;
 /// Bytes of repository ids kept in memory.
 const REPO_MEMO_BYTES: usize = 1 << 20;
+/// Bytes of recently read or written trees kept in memory: deriving a
+/// changeset reads back the directories its parent just wrote.
+const TREE_MEMO_BYTES: usize = 64 << 20;
+/// Bytes of recently read or written path-history pages kept in memory.
+const PAGE_MEMO_BYTES: usize = 64 << 20;
 
 type DerivedKey = (String, String, u32, ChangesetId);
 
 /// A [`MetadataStore`] backed by Postgres.
 ///
-/// Changesets, derived pointers and repository ids are write-once, so the
-/// recently read or written ones are memoised in a bounded amount of memory;
-/// refs are always read from the database. Clones share the memo.
+/// Changesets, derived pointers, trees, pages and repository ids are
+/// write-once, so the recently read or written ones are memoised in a bounded
+/// amount of memory; refs are always read from the database. Clones share
+/// the memo.
 #[derive(Debug, Clone)]
 pub struct PostgresStore {
     pool: PgPool,
     repo_ids: Arc<Recent<String, i64>>,
     changesets: Arc<Recent<(String, ChangesetId), Changeset>>,
     derived: Arc<Recent<DerivedKey, Vec<u8>>>,
+    trees: Arc<Recent<(String, TreeId), Tree>>,
+    pages: Arc<Recent<(String, BlobId), Bytes>>,
 }
 
 impl From<sqlx::Error> for StoreError {
@@ -90,6 +99,8 @@ impl PostgresStore {
             repo_ids: Arc::new(Recent::new(REPO_MEMO_BYTES)),
             changesets: Arc::new(Recent::new(CHANGESET_MEMO_BYTES)),
             derived: Arc::new(Recent::new(DERIVED_MEMO_BYTES)),
+            trees: Arc::new(Recent::new(TREE_MEMO_BYTES)),
+            pages: Arc::new(Recent::new(PAGE_MEMO_BYTES)),
         }
     }
 
@@ -341,8 +352,177 @@ fn find_landings_sql() -> String {
     )
 }
 
+/// The tree `id` from its stored canonical encoding, checked against its id.
+fn decode_tree(id: TreeId, bytes: &[u8]) -> Result<Tree> {
+    let tree = Tree::decode(bytes).map_err(|e| StoreError::Corrupt(format!("tree {id}: {e}")))?;
+    if tree.id() != id {
+        return Err(StoreError::Corrupt(format!(
+            "tree {id} hashes to {}",
+            tree.id()
+        )));
+    }
+    Ok(tree)
+}
+
+impl PostgresStore {
+    /// Insert `(id, bytes)` rows of `repo` into `table` (`trees` or `pages`)
+    /// in one statement; rows already stored are kept.
+    async fn insert_objects(
+        &self,
+        table: &str,
+        repo: &str,
+        ids: Vec<Vec<u8>>,
+        bytes: Vec<&[u8]>,
+    ) -> Result<()> {
+        if ids.is_empty() {
+            return Ok(());
+        }
+        let repo_id = self.repo(repo).await?;
+        sqlx::query(&format!(
+            "INSERT INTO {table} (repo, id, bytes) \
+             SELECT $1, * FROM UNNEST($2::bytea[], $3::bytea[]) \
+             ON CONFLICT (repo, id) DO NOTHING"
+        ))
+        .bind(repo_id)
+        .bind(&ids)
+        .bind(&bytes)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    /// The `(id, bytes)` rows of `repo` in `table` among `ids`, in one query.
+    async fn select_objects(
+        &self,
+        table: &str,
+        repo: &str,
+        ids: &[Vec<u8>],
+    ) -> Result<Vec<(Vec<u8>, Vec<u8>)>> {
+        Ok(sqlx::query_as(&format!(
+            "SELECT t.id, t.bytes FROM {table} t JOIN repos r ON r.id = t.repo \
+             WHERE r.name = $1 AND t.id = ANY($2)"
+        ))
+        .bind(repo)
+        .bind(ids)
+        .fetch_all(&self.pool)
+        .await?)
+    }
+}
+
 #[async_trait]
 impl MetadataStore for PostgresStore {
+    async fn put_trees(&self, repo: &str, trees: &[Tree]) -> Result<()> {
+        let mut fresh = Vec::new();
+        for tree in trees {
+            let id = tree.id();
+            if self.trees.get(&(repo.to_owned(), id)).await.is_none() {
+                fresh.push((id, tree, tree.encode_to_vec()));
+            }
+        }
+        self.insert_objects(
+            "trees",
+            repo,
+            fresh
+                .iter()
+                .map(|(id, _, _)| id.as_bytes().to_vec())
+                .collect(),
+            fresh.iter().map(|(_, _, bytes)| bytes.as_slice()).collect(),
+        )
+        .await?;
+        for (id, tree, bytes) in fresh {
+            self.trees
+                .insert((repo.to_owned(), id), tree.clone(), bytes.len());
+        }
+        Ok(())
+    }
+
+    async fn get_trees(&self, repo: &str, ids: &[TreeId]) -> Result<Vec<Option<Tree>>> {
+        let mut out = Vec::with_capacity(ids.len());
+        let mut missing = Vec::new();
+        for id in ids {
+            let tree = self.trees.get(&(repo.to_owned(), *id)).await;
+            if tree.is_none() {
+                missing.push(id.as_bytes().to_vec());
+            }
+            out.push(tree);
+        }
+        if missing.is_empty() {
+            return Ok(out);
+        }
+        let mut found = HashMap::new();
+        for (id, bytes) in self.select_objects("trees", repo, &missing).await? {
+            let id = TreeId::try_from_slice(&id)
+                .map_err(|e| StoreError::Corrupt(format!("tree id: {e}")))?;
+            let tree = decode_tree(id, &bytes)?;
+            self.trees
+                .insert((repo.to_owned(), id), tree.clone(), bytes.len());
+            found.insert(id, tree);
+        }
+        for (slot, id) in out.iter_mut().zip(ids) {
+            if slot.is_none() {
+                *slot = found.get(id).cloned();
+            }
+        }
+        Ok(out)
+    }
+
+    async fn put_pages(&self, repo: &str, pages: &[Bytes]) -> Result<()> {
+        let mut fresh = Vec::new();
+        for page in pages {
+            let id = BlobId::hash(page);
+            if self.pages.get(&(repo.to_owned(), id)).await.is_none() {
+                fresh.push((id, page));
+            }
+        }
+        self.insert_objects(
+            "pages",
+            repo,
+            fresh.iter().map(|(id, _)| id.as_bytes().to_vec()).collect(),
+            fresh.iter().map(|(_, page)| page.as_ref()).collect(),
+        )
+        .await?;
+        for (id, page) in fresh {
+            self.pages
+                .insert((repo.to_owned(), id), page.clone(), page.len());
+        }
+        Ok(())
+    }
+
+    async fn get_pages(&self, repo: &str, ids: &[BlobId]) -> Result<Vec<Option<Bytes>>> {
+        let mut out = Vec::with_capacity(ids.len());
+        let mut missing = Vec::new();
+        for id in ids {
+            let page = self.pages.get(&(repo.to_owned(), *id)).await;
+            if page.is_none() {
+                missing.push(id.as_bytes().to_vec());
+            }
+            out.push(page);
+        }
+        if missing.is_empty() {
+            return Ok(out);
+        }
+        let mut found = HashMap::new();
+        for (id, bytes) in self.select_objects("pages", repo, &missing).await? {
+            let id = BlobId::try_from_slice(&id)
+                .map_err(|e| StoreError::Corrupt(format!("page id: {e}")))?;
+            if BlobId::hash(&bytes) != id {
+                return Err(StoreError::Corrupt(format!(
+                    "page {id} does not match its content"
+                )));
+            }
+            let page = Bytes::from(bytes);
+            self.pages
+                .insert((repo.to_owned(), id), page.clone(), page.len());
+            found.insert(id, page);
+        }
+        for (slot, id) in out.iter_mut().zip(ids) {
+            if slot.is_none() {
+                *slot = found.get(id).cloned();
+            }
+        }
+        Ok(out)
+    }
+
     async fn create_repo(&self, name: &str) -> Result<()> {
         if name == SERVER_GRANTS {
             return Err(StoreError::ReservedRepoName(name.to_owned()));

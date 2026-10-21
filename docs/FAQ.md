@@ -25,11 +25,11 @@ sharing an id or submitting a change request for it (`scn land`). See
 
 ## Where do trees live?
 
-Today in the object store, like blobs. The real-repository benchmark showed what that costs
+In the metadata database, where the reference design keeps them, since Phase 10.3. They first
+lived in the object store, like blobs, and the real-repository benchmark showed what that cost
 (one object-store round trip per tree on import and per pointer hop on a cold `log` or
-`blame`), so trees and history pages are moving to the metadata database, where the reference
-design keeps them. They stay immutable and content-addressed; blobs stay in the object store.
-See [Deviation: trees in the object store](DATA_MODEL.md#deviation-trees-in-the-object-store).
+`blame`). They stay immutable and content-addressed; blobs stay in the object store.
+See [Trees in the metadata database](DATA_MODEL.md#trees-in-the-metadata-database).
 
 ## Why is a changeset so minimal?
 

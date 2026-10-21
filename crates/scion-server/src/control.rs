@@ -601,11 +601,11 @@ pub async fn revert(
     let entries: Vec<_> = stream::iter(cs.file_changes.into_keys())
         .map(|path| async move {
             let (now, then) = futures_util::try_join!(
-                at_head.lookup(objects, &path),
-                at_target.lookup(objects, &path)
+                at_head.lookup(&ctx, &path),
+                at_target.lookup(&ctx, &path)
             )?;
             let old = match before {
-                Some(tree) => tree.lookup(objects, &path).await?,
+                Some(tree) => tree.lookup(&ctx, &path).await?,
                 None => None,
             };
             Ok::<_, DeriveError>((path, now, then, old))

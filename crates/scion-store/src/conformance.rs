@@ -768,7 +768,7 @@ pub async fn concurrent_claims<S: MetadataStore>(s: &S) {
     assert_eq!(claimed, submitted);
 }
 
-/// Blobs and trees are content-addressed and idempotent.
+/// Blobs are content-addressed and idempotent.
 pub async fn objects<S: ObjectStore>(s: &S) {
     let data = Bytes::from_static(b"hello, scion");
     let id = s.put_blob(data.clone()).await.unwrap();
@@ -782,22 +782,87 @@ pub async fn objects<S: ObjectStore>(s: &S) {
         s.has_blobs(&[id, missing, id]).await.unwrap(),
         [true, false, true]
     );
+}
 
-    let mut entries = BTreeMap::new();
-    entries.insert(
-        PathComponent::new("f").unwrap(),
-        TreeEntry::Blob {
-            id,
-            kind: FileType::Regular,
-            size: 12,
-        },
+/// Trees and path-history pages are content-addressed, idempotent, read in
+/// the order asked and scoped by repository.
+pub async fn trees_and_pages<S: MetadataStore>(s: &S) {
+    let missing = |r: Result<(), StoreError>| matches!(r, Err(StoreError::RepoNotFound(_)));
+    let file = |name: &str, size: u64| Tree {
+        entries: BTreeMap::from([(
+            PathComponent::new(name).unwrap(),
+            TreeEntry::Blob {
+                id: BlobId::hash(name.as_bytes()),
+                kind: FileType::Regular,
+                size,
+            },
+        )]),
+    };
+    let (a, b) = (file("a", 1), file("b", 2));
+    let page = Bytes::from_static(b"a page of history nodes");
+    let other_page = Bytes::from_static(b"another page");
+    assert!(missing(s.put_trees(REPO, std::slice::from_ref(&a)).await));
+    assert!(missing(
+        s.put_pages(REPO, std::slice::from_ref(&page)).await
+    ));
+
+    s.create_repo(REPO).await.unwrap();
+    s.put_trees(REPO, &[a.clone(), b.clone(), a.clone()])
+        .await
+        .unwrap();
+    s.put_trees(REPO, std::slice::from_ref(&a)).await.unwrap();
+    let unknown = Tree::empty().id();
+    assert_eq!(
+        s.get_trees(REPO, &[b.id(), unknown, a.id()]).await.unwrap(),
+        [Some(b.clone()), None, Some(a.clone())],
+        "in order"
     );
-    let tree = Tree { entries };
-    let tid = s.put_tree(&tree).await.unwrap();
-    assert_eq!(tid, tree.id());
-    assert_eq!(s.put_tree(&tree).await.unwrap(), tid);
-    assert_eq!(s.get_tree(tid).await.unwrap(), Some(tree));
-    assert!(s.get_tree(Tree::empty().id()).await.unwrap().is_none());
+    assert_eq!(s.get_tree(REPO, a.id()).await.unwrap(), Some(a.clone()));
+    assert!(s.get_tree(REPO, unknown).await.unwrap().is_none());
+    assert_eq!(s.get_trees(REPO, &[]).await.unwrap(), []);
+
+    s.put_pages(REPO, &[page.clone(), page.clone()])
+        .await
+        .unwrap();
+    s.put_pages(REPO, std::slice::from_ref(&page))
+        .await
+        .unwrap();
+    let (pid, other) = (BlobId::hash(&page), BlobId::hash(&other_page));
+    assert_eq!(
+        s.get_pages(REPO, &[other, pid]).await.unwrap(),
+        [None, Some(page.clone())]
+    );
+
+    s.create_repo("other-repo").await.unwrap();
+    assert_eq!(
+        s.get_trees("other-repo", &[a.id()]).await.unwrap(),
+        [None],
+        "repo-scoped"
+    );
+    assert_eq!(
+        s.get_pages("other-repo", &[pid]).await.unwrap(),
+        [None],
+        "repo-scoped"
+    );
+    s.put_trees("other-repo", std::slice::from_ref(&a))
+        .await
+        .unwrap();
+    s.put_pages("other-repo", std::slice::from_ref(&other_page))
+        .await
+        .unwrap();
+    assert_eq!(
+        s.get_trees("other-repo", &[a.id(), b.id()]).await.unwrap(),
+        [Some(a), None]
+    );
+    assert_eq!(
+        s.get_pages(REPO, &[other]).await.unwrap(),
+        [None],
+        "repo-scoped"
+    );
+    assert_eq!(
+        s.get_trees("never-created", &[b.id()]).await.unwrap(),
+        [None]
+    );
 }
 
 /// Instantiate the conformance suite as `#[tokio::test]`s in a module named
@@ -868,6 +933,10 @@ macro_rules! conformance_tests {
                 $crate::conformance::concurrent_claims(&$ctor.await).await;
             }
             #[tokio::test]
+            async fn trees_and_pages() {
+                $crate::conformance::trees_and_pages(&$ctor.await).await;
+            }
+            #[tokio::test]
             async fn objects() {
                 $crate::conformance::objects(&$ctor.await).await;
             }
@@ -935,6 +1004,10 @@ macro_rules! metadata_conformance_tests {
             #[tokio::test]
             async fn concurrent_claims() {
                 $crate::conformance::concurrent_claims(&$ctor.await).await;
+            }
+            #[tokio::test]
+            async fn trees_and_pages() {
+                $crate::conformance::trees_and_pages(&$ctor.await).await;
             }
         }
     };

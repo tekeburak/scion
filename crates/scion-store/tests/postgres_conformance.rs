@@ -60,3 +60,55 @@ async fn fresh() -> PostgresStore {
 }
 
 scion_store::metadata_conformance_tests!(postgres, fresh());
+
+/// Trees and pages read back through a fresh memo come from the tables,
+/// checked against their ids.
+#[tokio::test]
+async fn trees_and_pages_are_read_from_the_database() {
+    use std::collections::BTreeMap;
+
+    use bytes::Bytes;
+    use scion_store::{MetadataStore, StoreError};
+    use scion_types::{BlobId, FileType, PathComponent, Tree, TreeEntry};
+
+    let writer = fresh().await;
+    writer.create_repo("r").await.unwrap();
+    let tree = Tree {
+        entries: BTreeMap::from([(
+            PathComponent::new("f").unwrap(),
+            TreeEntry::Blob {
+                id: BlobId::hash(b"f"),
+                kind: FileType::Regular,
+                size: 1,
+            },
+        )]),
+    };
+    let page = Bytes::from_static(b"history nodes");
+    writer
+        .put_trees("r", std::slice::from_ref(&tree))
+        .await
+        .unwrap();
+    writer
+        .put_pages("r", std::slice::from_ref(&page))
+        .await
+        .unwrap();
+
+    let reader = PostgresStore::from_pool(writer.pool().clone());
+    let empty = Tree::empty().id();
+    assert_eq!(
+        reader.get_trees("r", &[empty, tree.id()]).await.unwrap(),
+        [None, Some(tree.clone())]
+    );
+    let pid = BlobId::hash(&page);
+    assert_eq!(reader.get_pages("r", &[pid]).await.unwrap(), [Some(page)]);
+
+    sqlx::query("UPDATE pages SET bytes = 'tampered'")
+        .execute(writer.pool())
+        .await
+        .unwrap();
+    let fresh_reader = PostgresStore::from_pool(writer.pool().clone());
+    assert!(matches!(
+        fresh_reader.get_pages("r", &[pid]).await,
+        Err(StoreError::Corrupt(_))
+    ));
+}

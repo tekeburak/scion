@@ -636,11 +636,7 @@ async fn home(State(web): State<Web>, Path(repo): Path<String>, headers: HeaderM
     };
     let deriver = Deriver::new(&repo, &*web.meta, &*web.objects);
     let root = deriver.derive::<RootTree>(main.target).await?;
-    let tree = web
-        .objects
-        .get_tree(root.0)
-        .await?
-        .ok_or(DeriveError::MissingTree(root.0))?;
+    let tree = deriver.tree(root.0).await?;
     let readme = tree.entries.iter().find_map(|(name, entry)| match entry {
         TreeEntry::Blob { id, size, .. } if html::is_readme(name.as_str()) => {
             Some((name.as_str().to_owned(), *id, *size))
@@ -670,17 +666,13 @@ async fn tree(
     let entry = match &path {
         None => TreeEntry::Tree { id: root.0 },
         Some(p) => root
-            .lookup(&*web.objects, p)
+            .lookup(&deriver, p)
             .await?
             .ok_or_else(|| not_found(format!("no {p} at {}", loc.at())))?,
     };
     match entry {
         TreeEntry::Tree { id } => {
-            let tree = web
-                .objects
-                .get_tree(id)
-                .await?
-                .ok_or(DeriveError::MissingTree(id))?;
+            let tree = deriver.tree(id).await?;
             Ok(html::directory(&repo, loc.at(), path.as_ref(), &tree))
         }
         TreeEntry::Blob { id, size, .. } => {
@@ -738,7 +730,7 @@ async fn blame(
         deriver.derive::<RootTree>(cs),
     )?;
     let runs = runs.ok_or_else(|| not_found(format!("no file {path} at {}", loc.at())))?;
-    let Some(TreeEntry::Blob { id, size, .. }) = root.lookup(&*web.objects, &path).await? else {
+    let Some(TreeEntry::Blob { id, size, .. }) = root.lookup(&deriver, &path).await? else {
         return Err(not_found(format!("no file {path} at {}", loc.at())));
     };
     let content = Content::read(&web, id, size).await?;

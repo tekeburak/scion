@@ -19,6 +19,8 @@ struct Metadata {
     changesets: HashMap<(String, ChangesetId), (Changeset, u64)>,
     refs: HashMap<String, BTreeMap<String, RefState>>,
     derived: HashMap<(String, String, u32, ChangesetId), Vec<u8>>,
+    trees: HashMap<(String, TreeId), Tree>,
+    pages: HashMap<(String, BlobId), Bytes>,
     checkpoints: HashMap<String, BTreeMap<Vec<u8>, ChangesetId>>,
     /// Per repository, by id; ids are shared by all repositories, like a
     /// `BIGSERIAL`.
@@ -31,7 +33,6 @@ struct Metadata {
 #[derive(Debug, Default)]
 struct Objects {
     blobs: HashMap<BlobId, Bytes>,
-    trees: HashMap<TreeId, Tree>,
 }
 
 /// An in-memory [`MetadataStore`] + [`ObjectStore`].
@@ -82,6 +83,44 @@ impl Metadata {
 
 #[async_trait]
 impl MetadataStore for MemoryStore {
+    async fn put_trees(&self, repo: &str, trees: &[Tree]) -> Result<()> {
+        let mut m = self.meta.write().expect("poisoned");
+        m.check_repo(repo)?;
+        for tree in trees {
+            m.trees
+                .entry((repo.to_owned(), tree.id()))
+                .or_insert_with(|| tree.clone());
+        }
+        Ok(())
+    }
+
+    async fn get_trees(&self, repo: &str, ids: &[TreeId]) -> Result<Vec<Option<Tree>>> {
+        let m = self.meta.read().expect("poisoned");
+        Ok(ids
+            .iter()
+            .map(|id| m.trees.get(&(repo.to_owned(), *id)).cloned())
+            .collect())
+    }
+
+    async fn put_pages(&self, repo: &str, pages: &[Bytes]) -> Result<()> {
+        let mut m = self.meta.write().expect("poisoned");
+        m.check_repo(repo)?;
+        for page in pages {
+            m.pages
+                .entry((repo.to_owned(), BlobId::hash(page)))
+                .or_insert_with(|| page.clone());
+        }
+        Ok(())
+    }
+
+    async fn get_pages(&self, repo: &str, ids: &[BlobId]) -> Result<Vec<Option<Bytes>>> {
+        let m = self.meta.read().expect("poisoned");
+        Ok(ids
+            .iter()
+            .map(|id| m.pages.get(&(repo.to_owned(), *id)).cloned())
+            .collect())
+    }
+
     async fn create_repo(&self, name: &str) -> Result<()> {
         if name == SERVER_GRANTS {
             return Err(StoreError::ReservedRepoName(name.to_owned()));
@@ -480,27 +519,6 @@ impl ObjectStore for MemoryStore {
     async fn has_blobs(&self, ids: &[BlobId]) -> Result<Vec<bool>> {
         let o = self.objects.read().expect("poisoned");
         Ok(ids.iter().map(|id| o.blobs.contains_key(id)).collect())
-    }
-
-    async fn put_tree(&self, tree: &Tree) -> Result<TreeId> {
-        let id = tree.id();
-        self.objects
-            .write()
-            .expect("poisoned")
-            .trees
-            .entry(id)
-            .or_insert_with(|| tree.clone());
-        Ok(id)
-    }
-
-    async fn get_tree(&self, id: TreeId) -> Result<Option<Tree>> {
-        Ok(self
-            .objects
-            .read()
-            .expect("poisoned")
-            .trees
-            .get(&id)
-            .cloned())
     }
 }
 

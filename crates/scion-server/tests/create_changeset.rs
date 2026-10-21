@@ -9,7 +9,7 @@ use std::sync::Arc;
 use scion_derived::test_util::{REPO, changeset, tracked};
 use scion_derived::{Blame, Deriver, PathHistory, RootTree, SkipList};
 use scion_proto::v1::{CreateChangesetRequest, InitRepoRequest, LogRequest, PutBlobRequest};
-use scion_store::{MemoryStore, MetadataStore, ObjectStore, Role};
+use scion_store::{MemoryStore, MetadataStore, Role};
 use scion_types::{Changeset, ChangesetId, Decode, Encode, FileChange, RepoPath, TreeId};
 use tonic::Code;
 
@@ -75,7 +75,7 @@ async fn creates_changesets_and_derives_eagerly() {
     let child = changeset(vec![root_id], files(&[("dir/b.txt", b"two\n")]), "child");
     let (child_id, child_tree) = s.create(&child).await.unwrap();
     assert_ne!(child_tree, root_tree);
-    let tree = s.store.get_tree(child_tree).await.unwrap().unwrap();
+    let tree = s.store.get_tree(REPO, child_tree).await.unwrap().unwrap();
     assert_eq!(tree.entries.len(), 2);
 
     // Idempotent: the same changeset again is the same id.
@@ -159,7 +159,14 @@ async fn deletions_need_no_blob() {
         "delete",
     );
     let (_, tree) = s.create(&delete).await.unwrap();
-    assert!(s.store.get_tree(tree).await.unwrap().unwrap().is_empty());
+    assert!(
+        s.store
+            .get_tree(REPO, tree)
+            .await
+            .unwrap()
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]

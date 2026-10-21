@@ -208,7 +208,7 @@ async fn version_before(
         (None, None) => return Ok(None),
     };
     let history = ctx.derive::<PathHistory>(at).await?;
-    Ok(file_entry(history.lookup(ctx.objects, from).await?).map(|e| (e, from.clone())))
+    Ok(file_entry(history.lookup(ctx, from).await?).map(|e| (e, from.clone())))
 }
 
 fn file_entry(entry: Option<HistoryEntry>) -> Option<HistoryEntry> {
@@ -232,7 +232,7 @@ fn versions<'a>(
     name: &'a PathComponent,
 ) -> impl Stream<Item = Result<(Changeset, Option<Blame>)>> + 'a {
     history
-        .chain(ctx.objects, name, 0)
+        .chain(ctx, name, 0)
         .try_take_while(|entry| future::ready(Ok(matches!(entry, HistoryEntry::File(_)))))
         .try_ready_chunks(READ_AHEAD)
         .map_err(|e| e.1)
@@ -443,7 +443,7 @@ impl Blame {
     ) -> Result<Option<FileBlame>> {
         let history = ctx.derive::<PathHistory>(cs).await?;
         let Some(HistoryEntry::File(Change { last_changed, .. })) =
-            history.lookup(ctx.objects, path).await?
+            history.lookup(ctx, path).await?
         else {
             return Ok(None);
         };
@@ -698,14 +698,16 @@ mod tests {
             .await
             .unwrap();
         let counting = Counting::new(&store);
-        let d = Deriver::new(REPO, &store, &counting);
+        let meta = CountingMeta::new(&store);
+        let d = Deriver::new(REPO, &meta, &counting);
         let Blame(node) = d.derive::<Blame>(c1).await.unwrap();
         let node = BlameNode::load(&store, node).await.unwrap();
         assert_eq!(node.files.len(), 1);
         // The previous version is read through c0's data; the only write is
         // c1's blame node.
         assert_eq!(counting.blob_puts(), 1);
-        assert_eq!(counting.tree_puts(), 0);
+        assert_eq!(meta.tree_puts(), 0);
+        assert_eq!(meta.page_puts(), 0);
     }
 
     #[tokio::test]

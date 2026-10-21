@@ -32,8 +32,8 @@ centralized design with thin clients and tiered object caches is a better fit.
 
 Scion is that design, built on boring infrastructure:
 
-- **Postgres and S3, nothing else.** Metadata (changesets, refs, derived-data pointers) lives in
-  Postgres; blobs and trees live in any S3-compatible object store. No packfiles, no repository
+- **Postgres and S3, nothing else.** Metadata (changesets, refs, derived data, trees) lives in
+  Postgres; blobs live in any S3-compatible object store. No packfiles, no repository
   maintenance, no materialized copy of the repository on any server.
 - **A commit costs what it changes.** A changeset records only the files it changed against its
   first parent. Directory trees, path history, blame and the ancestry index are *derived data*,
@@ -297,11 +297,11 @@ request is a cacheable GET and no tier needs repository maintenance.
   <img src="docs/assets/commit-cost.svg" width="800" alt="Editing one file in the 2,500-file test tree rewrites the 5 directories on its path; the other 7,546 tree nodes keep their ids">
 </p>
 
-Where Scion deliberately departs from the design it was inspired by: trees live in the object
-store rather than the metadata database
-([why](docs/DATA_MODEL.md#deviation-trees-in-the-object-store)); hashing uses Scion's own
+Where Scion deliberately departs from the design it was inspired by: hashing uses Scion's own
 canonical BLAKE3 encoding, never a protobuf encoding; and the server refuses any ref other than
-`main` and `release/*`.
+`main` and `release/*`. Trees, which first lived in the object store, sit in the metadata
+database like the reference design's since Phase 10.3
+([why](docs/DATA_MODEL.md#trees-in-the-metadata-database)).
 
 Full details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (components, planes, tiering,
 ingestion), [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) (the changeset, the canonical encoding,

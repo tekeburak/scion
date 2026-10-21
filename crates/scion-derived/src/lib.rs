@@ -29,7 +29,7 @@ pub use path_history::{ANCHOR_STEP, Change, HistoryEntry, HistoryNode, NodeAt, P
 pub use root_tree::RootTree;
 pub use skip_list::SkipList;
 
-/// The decoders of derived objects read back from the object store, for
+/// The decoders of derived objects read back from the stores, for
 /// the fuzz targets in `scion-sim`.
 #[doc(hidden)]
 pub mod decode {
@@ -55,9 +55,9 @@ pub mod decode {
 pub enum DeriveError {
     #[error("changeset {0} not found")]
     MissingChangeset(ChangesetId),
-    #[error("tree {0} not found in the object store")]
+    #[error("tree {0} not found in the metadata store")]
     MissingTree(TreeId),
-    #[error("derived object {0} not found in the object store")]
+    #[error("derived object {0} not found")]
     MissingObject(BlobId),
     #[error("derived object {0} is corrupt")]
     CorruptObject(BlobId),

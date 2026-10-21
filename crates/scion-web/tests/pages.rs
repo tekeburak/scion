@@ -26,8 +26,9 @@ use tokio::net::TcpListener;
 
 const REPO: &str = "demo";
 
-/// Counts every metadata call; batched reads count once, as they are one
-/// round trip on Postgres.
+/// Counts every metadata call but tree and history-page reads, which were
+/// object reads before Phase 10.3 and are batched by 10.5 and 10.7; batched
+/// reads count once, as they are one round trip on Postgres.
 #[derive(Debug, Default)]
 struct Counting {
     inner: MemoryStore,
@@ -53,6 +54,28 @@ impl MetadataStore for Counting {
     async fn put_changesets(&self, batch: &[Changeset]) -> scion_store::Result<()> {
         self.meta();
         self.inner.put_changesets(batch).await
+    }
+    async fn put_trees(&self, repo: &str, trees: &[Tree]) -> scion_store::Result<()> {
+        self.meta();
+        self.inner.put_trees(repo, trees).await
+    }
+    async fn get_trees(
+        &self,
+        repo: &str,
+        ids: &[TreeId],
+    ) -> scion_store::Result<Vec<Option<Tree>>> {
+        self.inner.get_trees(repo, ids).await
+    }
+    async fn put_pages(&self, repo: &str, pages: &[Bytes]) -> scion_store::Result<()> {
+        self.meta();
+        self.inner.put_pages(repo, pages).await
+    }
+    async fn get_pages(
+        &self,
+        repo: &str,
+        ids: &[BlobId],
+    ) -> scion_store::Result<Vec<Option<Bytes>>> {
+        self.inner.get_pages(repo, ids).await
     }
     async fn get_changeset(
         &self,
@@ -268,12 +291,6 @@ impl ObjectStore for Counting {
     }
     async fn has_blobs(&self, ids: &[BlobId]) -> scion_store::Result<Vec<bool>> {
         self.inner.has_blobs(ids).await
-    }
-    async fn put_tree(&self, tree: &Tree) -> scion_store::Result<TreeId> {
-        self.inner.put_tree(tree).await
-    }
-    async fn get_tree(&self, id: TreeId) -> scion_store::Result<Option<Tree>> {
-        self.inner.get_tree(id).await
     }
 }
 

@@ -144,28 +144,31 @@ not a patch.
 |---|---|---|
 | Changeset metadata + `file_changes` | metadata DB (`changesets`, `file_changes`) | `(repo, id)` |
 | Blob bytes | object store | `blobs/{id}` |
-| Trees | metadata DB (`trees`) from Phase 10.3; object store `trees/{id}` until then | `(repo, id)` |
+| Trees (canonical encoding) | metadata DB (`trees`) | `(repo, id)` |
 | Root tree of a changeset | metadata DB (`derived`, type `root_tree`) | `(repo, "root_tree", v, changeset)` → `TreeId` |
-| Path-history pages and other derived data | metadata DB (`pages`) from Phase 10.3, pointer in `derived`; object store until then | per type |
+| Path-history pages | metadata DB (`pages`), pointer in `derived` | `(repo, id)` |
+| Other derived objects (blame nodes) | object store, pointer in `derived` | `blobs/{id}` |
 | Refs | metadata DB (`refs`) | `(repo, name)` |
 | Grants | metadata DB (`grants`) | `(repo, principal, path_prefix)` → role |
 | Snapshot manifests (Phase 4, planned) | object store | `snapshots/{repo}/{changeset}.manifest` |
 
 Everything in the object store and in the `trees` and `pages` tables is immutable, addressed
-by hash and append-only; objects in the store are zstd-compressed. Garbage collection is a
-non-goal for now.
+by hash and append-only: a row is inserted once (`ON CONFLICT DO NOTHING`) and never updated
+or deleted. Objects in the store are zstd-compressed; the object store holds blobs only.
+Garbage collection is a non-goal for now.
 
-### Deviation: trees in the object store
+### Trees in the metadata database
 
 The reference design keeps trees in the metadata database (Spanner) next to changesets and
 refs. Scion first kept them in the object store, so that a tree could ride the same
 daemon → cache → server path as a blob and the metadata database stayed small. The real
 benchmark (Phase 6.9–6.13) showed the cost: a commit writes one object per rewritten tree and
 history page, an import pays one object-store round trip per tree, and a cold `log` or `blame`
-pays one per pointer hop. Phase 10.3 therefore moves trees and history pages to the metadata
-database, as the reference design has them: they are still immutable and content-addressed
-(the canonical encoding and the golden fixtures do not change), the tiers still cache them by
-id, and blobs stay one immutable object each in the object store.
+pays one per pointer hop. Since Phase 10.3 trees and history pages live in the metadata
+database, as the reference design has them, each batch of them written in one statement: they
+are still immutable and content-addressed (the canonical encoding and the golden fixtures do
+not change), the tiers still cache them by id, and blobs stay one immutable object each in the
+object store.
 
 ## Repositories
 

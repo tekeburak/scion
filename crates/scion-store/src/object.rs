@@ -1,9 +1,10 @@
 //! [`ObjectStore`] over the `object_store` crate.
 //!
 //! One implementation serves S3/MinIO, GCS, Azure, the local filesystem and an
-//! in-memory backend. Keys are `blobs/{id}` and `trees/{id}`; values are
-//! zstd-compressed. Every read is verified against its id, so a corrupt or
-//! tampered object is reported rather than returned.
+//! in-memory backend. It holds blobs only, under `blobs/{id}`, zstd-compressed;
+//! trees and path-history pages live in the metadata store. Every read is
+//! verified against its id, so a corrupt or tampered object is reported
+//! rather than returned.
 
 use std::sync::Arc;
 
@@ -12,7 +13,7 @@ use bytes::Bytes;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use object_store::path::Path;
 use object_store::{ObjectStore as Backend, ObjectStoreExt as _, PutMode, PutPayload};
-use scion_types::{BlobId, Decode, Encode, Tree, TreeId};
+use scion_types::BlobId;
 
 use crate::recent::Recent;
 use crate::{ObjectStore, Result, StoreError};
@@ -23,8 +24,6 @@ pub const ZSTD_LEVEL: i32 = 3;
 /// How many `HEAD` requests `has_blobs` issues concurrently.
 const HAS_CONCURRENCY: usize = 32;
 
-/// Bytes of recently read or written trees kept in memory.
-const TREE_MEMO_BYTES: usize = 64 << 20;
 /// Bytes of recently read or written small blobs kept in memory.
 const BLOB_MEMO_BYTES: usize = 64 << 20;
 /// Blobs at most this large are memoised: derived nodes and source files,
@@ -39,15 +38,13 @@ const PRESENT_MEMO_BYTES: usize = 8 << 20;
 
 /// An [`ObjectStore`] backed by any `object_store` backend.
 ///
-/// Objects are immutable, so recently read or written trees and small blobs,
-/// and the ids of blobs known to be stored, are memoised in a bounded amount
-/// of memory: deriving a changeset reads back the directories its parent
-/// just wrote, and `CreateChangeset` checks blobs its caller just uploaded.
-/// Clones share the memo.
+/// Blobs are immutable, so recently read or written small blobs, and the ids
+/// of blobs known to be stored, are memoised in a bounded amount of memory:
+/// `CreateChangeset` checks blobs its caller just uploaded. Clones share the
+/// memo.
 #[derive(Debug, Clone)]
 pub struct ObjectStorage {
     backend: Arc<dyn Backend>,
-    trees: Arc<Recent<TreeId, Tree>>,
     blobs: Arc<Recent<BlobId, Bytes>>,
     present: Arc<Recent<BlobId, ()>>,
 }
@@ -60,10 +57,6 @@ impl From<object_store::Error> for StoreError {
 
 fn blob_key(id: BlobId) -> Path {
     Path::from(format!("blobs/{id}"))
-}
-
-fn tree_key(id: TreeId) -> Path {
-    Path::from(format!("trees/{id}"))
 }
 
 fn compress(data: &[u8]) -> Result<Vec<u8>> {
@@ -91,7 +84,6 @@ impl ObjectStorage {
     pub fn new(backend: Arc<dyn Backend>) -> Self {
         Self {
             backend,
-            trees: Arc::new(Recent::new(TREE_MEMO_BYTES)),
             blobs: Arc::new(Recent::new(BLOB_MEMO_BYTES)),
             present: Arc::new(Recent::new(PRESENT_MEMO_BYTES)),
         }
@@ -144,14 +136,6 @@ impl ObjectStorage {
             Err(e) => Err(e.into()),
         }
     }
-
-    async fn get_raw(&self, key: &Path) -> Result<Option<Vec<u8>>> {
-        match self.backend.get(key).await {
-            Ok(res) => Ok(Some(decompress(&res.bytes().await?)?)),
-            Err(object_store::Error::NotFound { .. }) => Ok(None),
-            Err(e) => Err(e.into()),
-        }
-    }
 }
 
 #[async_trait]
@@ -201,35 +185,6 @@ impl ObjectStore for ObjectStorage {
             .try_collect()
             .await
     }
-
-    async fn put_tree(&self, tree: &Tree) -> Result<TreeId> {
-        let id = tree.id();
-        if self.trees.get(&id).await.is_none() {
-            let encoded = tree.encode_to_vec();
-            self.put_if_absent(tree_key(id), &encoded).await?;
-            self.trees.insert(id, tree.clone(), encoded.len());
-        }
-        Ok(id)
-    }
-
-    async fn get_tree(&self, id: TreeId) -> Result<Option<Tree>> {
-        if let Some(tree) = self.trees.get(&id).await {
-            return Ok(Some(tree));
-        }
-        let Some(data) = self.get_raw(&tree_key(id)).await? else {
-            return Ok(None);
-        };
-        let tree =
-            Tree::decode(&data).map_err(|e| StoreError::Corrupt(format!("tree {id}: {e}")))?;
-        if tree.id() != id {
-            return Err(StoreError::Corrupt(format!(
-                "tree {id} hashes to {}",
-                tree.id()
-            )));
-        }
-        self.trees.insert(id, tree.clone(), data.len());
-        Ok(Some(tree))
-    }
 }
 
 #[cfg(test)]
@@ -260,24 +215,6 @@ mod tests {
         let reader = ObjectStorage::new(store.backend().clone());
         assert!(matches!(
             reader.get_blob(id).await,
-            Err(StoreError::Corrupt(_))
-        ));
-    }
-
-    #[tokio::test]
-    async fn undecodable_tree_is_detected() {
-        let store = ObjectStorage::in_memory();
-        let id = Tree::empty().id();
-        store
-            .backend
-            .put(
-                &tree_key(id),
-                PutPayload::from(compress(b"not a tree").unwrap()),
-            )
-            .await
-            .unwrap();
-        assert!(matches!(
-            store.get_tree(id).await,
             Err(StoreError::Corrupt(_))
         ));
     }

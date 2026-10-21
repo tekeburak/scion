@@ -33,7 +33,8 @@ pub(crate) enum Fault {
 pub(crate) struct Written {
     pub(crate) changesets: BTreeMap<ChangesetId, Changeset>,
     pub(crate) blobs: BTreeMap<BlobId, Bytes>,
-    pub(crate) trees: BTreeMap<TreeId, Tree>,
+    pub(crate) trees: BTreeMap<(String, TreeId), Tree>,
+    pub(crate) pages: BTreeMap<(String, BlobId), Bytes>,
     pub(crate) derived: BTreeMap<(String, String, u32, ChangesetId), Vec<u8>>,
     /// Writes that differed from the first one under their key.
     pub(crate) overwrites: Vec<String>,
@@ -116,6 +117,40 @@ impl MetadataStore for SimStore {
             Self::record(&mut w.overwrites, &mut w.changesets, cs.id(), cs.clone());
         }
         Ok(())
+    }
+
+    async fn put_trees(&self, repo: &str, trees: &[Tree]) -> Result<()> {
+        self.step().await;
+        self.inner.put_trees(repo, trees).await?;
+        let mut w = self.written.lock().expect("poisoned");
+        let w = &mut *w;
+        for tree in trees {
+            let key = (repo.to_owned(), tree.id());
+            Self::record(&mut w.overwrites, &mut w.trees, key, tree.clone());
+        }
+        Ok(())
+    }
+
+    async fn get_trees(&self, repo: &str, ids: &[TreeId]) -> Result<Vec<Option<Tree>>> {
+        self.step().await;
+        self.inner.get_trees(repo, ids).await
+    }
+
+    async fn put_pages(&self, repo: &str, pages: &[Bytes]) -> Result<()> {
+        self.step().await;
+        self.inner.put_pages(repo, pages).await?;
+        let mut w = self.written.lock().expect("poisoned");
+        let w = &mut *w;
+        for page in pages {
+            let key = (repo.to_owned(), BlobId::hash(page));
+            Self::record(&mut w.overwrites, &mut w.pages, key, page.clone());
+        }
+        Ok(())
+    }
+
+    async fn get_pages(&self, repo: &str, ids: &[BlobId]) -> Result<Vec<Option<Bytes>>> {
+        self.step().await;
+        self.inner.get_pages(repo, ids).await
     }
 
     async fn get_changeset(&self, repo: &str, id: ChangesetId) -> Result<Option<Changeset>> {
@@ -309,19 +344,5 @@ impl ObjectStore for SimStore {
     async fn has_blobs(&self, ids: &[BlobId]) -> Result<Vec<bool>> {
         self.step().await;
         self.inner.has_blobs(ids).await
-    }
-
-    async fn put_tree(&self, tree: &Tree) -> Result<TreeId> {
-        self.step().await;
-        let id = self.inner.put_tree(tree).await?;
-        let mut w = self.written.lock().expect("poisoned");
-        let w = &mut *w;
-        Self::record(&mut w.overwrites, &mut w.trees, id, tree.clone());
-        Ok(id)
-    }
-
-    async fn get_tree(&self, id: TreeId) -> Result<Option<Tree>> {
-        self.step().await;
-        self.inner.get_tree(id).await
     }
 }

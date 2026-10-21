@@ -655,9 +655,15 @@ async fn written(store: &SimStore) -> Result<(), String> {
             return Err(format!("blob {id} changed"));
         }
     }
-    for (id, tree) in &written.trees {
-        if meta.get_tree(*id).await.map_err(err)?.as_ref() != Some(tree) {
+    for ((repo, id), tree) in &written.trees {
+        if meta.get_tree(repo, *id).await.map_err(err)?.as_ref() != Some(tree) {
             return Err(format!("tree {id} changed"));
+        }
+    }
+    for ((repo, id), page) in &written.pages {
+        let now = meta.get_pages(repo, &[*id]).await.map_err(err)?;
+        if now[0].as_ref() != Some(page) {
+            return Err(format!("page {id} changed"));
         }
     }
     for ((repo, ty, version, cs), pointer) in &written.derived {

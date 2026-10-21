@@ -1,6 +1,7 @@
 //! Store round trips per imported commit are bounded by the change, not by
 //! the history: what one commit costs on Postgres and S3 stays the same from
-//! the first commits to the last.
+//! the first commits to the last. The object store sees blobs only: one
+//! upload per new file content, and nothing else.
 
 mod common;
 
@@ -26,17 +27,16 @@ use scion_store::{
     ChangeRequest, ChangeRequestStatus, DerivedPointer, Grant, LandOutcome, MemoryStore,
     MetadataStore, ObjectStorage, RefState,
 };
-use scion_types::{Changeset, ChangesetId};
+use scion_types::{BlobId, Changeset, ChangesetId, Tree, TreeId};
 
 const REPO: &str = "trips";
 const COMMITS: usize = 600;
 /// Commits per measured window.
 const WINDOW: usize = 100;
-/// Object-store requests one single-file commit at depth 2 costs: one
-/// presence check and one upload for its blob, a tree for each of the two
-/// directories on its path, and one page of path-history nodes. Re-reading
-/// what the parent wrote, and checking the blob again on create, are free.
-const MAX_OBJECT_REQUESTS: usize = 5;
+/// Object-store requests one single-file commit costs: one presence check
+/// and one upload for its blob. Its trees and path-history page go to the
+/// metadata store; checking the blob again on create is free.
+const MAX_OBJECT_REQUESTS: usize = 2;
 /// Metadata-store calls one commit may cost, the batch's shared calls
 /// (changesets, derived pointers, checkpoints) included: the reads that find
 /// its derived values absent, its changeset, the parent's values and the skip
@@ -72,11 +72,13 @@ fn generate(dir: &Path) {
     assert!(child.wait().unwrap().success());
 }
 
-/// Counts every request that reaches the object-store backend.
+/// Counts every request that reaches the object-store backend, and the
+/// uploads among them.
 #[derive(Debug)]
 struct CountingBackend {
     inner: InMemory,
     requests: Arc<AtomicUsize>,
+    puts: Arc<AtomicUsize>,
 }
 
 impl std::fmt::Display for CountingBackend {
@@ -94,6 +96,7 @@ impl Backend for CountingBackend {
         opts: PutOptions,
     ) -> object_store::Result<PutResult> {
         self.requests.fetch_add(1, Ordering::Relaxed);
+        self.puts.fetch_add(1, Ordering::Relaxed);
         self.inner.put_opts(location, payload, opts).await
     }
     async fn put_multipart_opts(
@@ -163,6 +166,30 @@ impl MetadataStore for CountingMeta {
     async fn put_changesets(&self, batch: &[Changeset]) -> scion_store::Result<()> {
         self.tick();
         self.inner.put_changesets(batch).await
+    }
+    async fn put_trees(&self, repo: &str, trees: &[Tree]) -> scion_store::Result<()> {
+        self.tick();
+        self.inner.put_trees(repo, trees).await
+    }
+    async fn get_trees(
+        &self,
+        repo: &str,
+        ids: &[TreeId],
+    ) -> scion_store::Result<Vec<Option<Tree>>> {
+        self.tick();
+        self.inner.get_trees(repo, ids).await
+    }
+    async fn put_pages(&self, repo: &str, pages: &[Bytes]) -> scion_store::Result<()> {
+        self.tick();
+        self.inner.put_pages(repo, pages).await
+    }
+    async fn get_pages(
+        &self,
+        repo: &str,
+        ids: &[BlobId],
+    ) -> scion_store::Result<Vec<Option<Bytes>>> {
+        self.tick();
+        self.inner.get_pages(repo, ids).await
     }
     async fn get_changeset(
         &self,
@@ -356,15 +383,18 @@ async fn round_trips_per_commit_do_not_grow_with_history() {
     generate(tmp.path());
     let git = GitRepo::open(tmp.path()).unwrap();
     let requests = Arc::new(AtomicUsize::new(0));
+    let puts = Arc::new(AtomicUsize::new(0));
     let objects = ObjectStorage::new(Arc::new(CountingBackend {
         inner: InMemory::new(),
         requests: requests.clone(),
+        puts: puts.clone(),
     }));
     let meta = CountingMeta {
         inner: MemoryStore::new(),
         calls: AtomicUsize::new(0),
     };
     common::init(&meta, &objects, REPO).await;
+    let puts_before = puts.load(Ordering::Relaxed);
 
     // Per-commit cost of importing up to `rev`, from where the last call
     // stopped. The fixed per-import calls (checkpoints, `main`) are a few,
@@ -402,4 +432,7 @@ async fn round_trips_per_commit_do_not_grow_with_history() {
         late.0 <= early.0,
         "object requests grew: {early:?} → {late:?}"
     );
+    // Every commit's content is new ("version {i}"): one upload each, and
+    // not one for a tree or a page.
+    assert_eq!(puts.load(Ordering::Relaxed) - puts_before, COMMITS);
 }

@@ -3,8 +3,9 @@
 use std::collections::{HashMap, HashSet};
 
 use async_trait::async_trait;
+use bytes::Bytes;
 use scion_store::{MetadataStore, ObjectStore};
-use scion_types::{Changeset, ChangesetId};
+use scion_types::{BlobId, Changeset, ChangesetId, Tree, TreeId};
 
 use crate::{DeriveError, Result};
 
@@ -64,6 +65,24 @@ impl<'a> Deriver<'a> {
             meta,
             objects,
         }
+    }
+
+    /// The tree `id` of this repository, which must exist.
+    pub async fn tree(&self, id: TreeId) -> Result<Tree> {
+        self.meta
+            .get_tree(self.repo, id)
+            .await?
+            .ok_or(DeriveError::MissingTree(id))
+    }
+
+    /// The path-history page `id` of this repository, which must exist.
+    pub(crate) async fn page(&self, id: BlobId) -> Result<Bytes> {
+        self.meta
+            .get_pages(self.repo, &[id])
+            .await?
+            .pop()
+            .flatten()
+            .ok_or(DeriveError::MissingObject(id))
     }
 
     /// Read a previously derived value without deriving.

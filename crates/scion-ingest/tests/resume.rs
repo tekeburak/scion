@@ -7,7 +7,7 @@ use bytes::Bytes;
 use common::fixture;
 use scion_ingest::{GitRepo, MAIN_REF, import};
 use scion_store::{MemoryStore, MetadataStore, ObjectStore, StoreError};
-use scion_types::{BlobId, Changeset, Tree, TreeId};
+use scion_types::{BlobId, Changeset};
 
 const REPO: &str = "mono";
 
@@ -31,12 +31,6 @@ impl ObjectStore for DiesOn<'_> {
     }
     async fn has_blobs(&self, ids: &[BlobId]) -> scion_store::Result<Vec<bool>> {
         self.inner.has_blobs(ids).await
-    }
-    async fn put_tree(&self, tree: &Tree) -> scion_store::Result<TreeId> {
-        self.inner.put_tree(tree).await
-    }
-    async fn get_tree(&self, id: TreeId) -> scion_store::Result<Option<Tree>> {
-        self.inner.get_tree(id).await
     }
 }
 

@@ -4,9 +4,9 @@
 //! (metadata) and Cloud Storage (objects):
 //!
 //! * [`MetadataStore`]: changesets (the write-ahead log), refs (a single-row
-//!   compare-and-swap each), derived-data pointers, change requests and
-//!   access grants.
-//! * [`ObjectStore`]: immutable, content-addressed blobs and trees.
+//!   compare-and-swap each), derived-data pointers, trees, path-history
+//!   pages, change requests and access grants.
+//! * [`ObjectStore`]: immutable, content-addressed blobs.
 //!
 //! Implementations:
 //!
@@ -245,6 +245,27 @@ pub trait MetadataStore: Send + Sync {
         Ok(cs.id())
     }
 
+    /// Store trees of `repo`. Idempotent: a tree already stored is kept as it
+    /// is.
+    async fn put_trees(&self, repo: &str, trees: &[Tree]) -> Result<()>;
+
+    /// Fetch trees of `repo` by id, in the order of `ids`; one round trip
+    /// where the backend allows.
+    async fn get_trees(&self, repo: &str, ids: &[TreeId]) -> Result<Vec<Option<Tree>>>;
+
+    /// Fetch one tree; see [`get_trees`](Self::get_trees).
+    async fn get_tree(&self, repo: &str, id: TreeId) -> Result<Option<Tree>> {
+        Ok(self.get_trees(repo, &[id]).await?.pop().flatten())
+    }
+
+    /// Store path-history pages of `repo`, each under `blake3(page)`.
+    /// Idempotent.
+    async fn put_pages(&self, repo: &str, pages: &[Bytes]) -> Result<()>;
+
+    /// Fetch pages of `repo` by id, in the order of `ids`; one round trip
+    /// where the backend allows.
+    async fn get_pages(&self, repo: &str, ids: &[BlobId]) -> Result<Vec<Option<Bytes>>>;
+
     /// Fetch a changeset by id.
     async fn get_changeset(&self, repo: &str, id: ChangesetId) -> Result<Option<Changeset>>;
 
@@ -421,7 +442,8 @@ pub trait MetadataStore: Send + Sync {
     async fn repos_of(&self, principal: &str) -> Result<Vec<String>>;
 }
 
-/// Immutable content-addressed objects.
+/// Immutable content-addressed blobs: file contents and the derived objects
+/// that are not trees or path-history pages.
 #[async_trait]
 pub trait ObjectStore: Send + Sync {
     /// Store a blob; returns `blake3(bytes)`. Idempotent.
@@ -432,10 +454,4 @@ pub trait ObjectStore: Send + Sync {
 
     /// For each id, whether the blob is present. Same order as `ids`.
     async fn has_blobs(&self, ids: &[BlobId]) -> Result<Vec<bool>>;
-
-    /// Store a tree; returns its id. Idempotent.
-    async fn put_tree(&self, tree: &Tree) -> Result<TreeId>;
-
-    /// Fetch a tree.
-    async fn get_tree(&self, id: TreeId) -> Result<Option<Tree>>;
 }

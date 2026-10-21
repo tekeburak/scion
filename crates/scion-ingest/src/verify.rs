@@ -11,15 +11,16 @@ use crate::{GitRepo, IngestError, ObjectId};
 
 /// Every file of a Scion tree: path → kind and content.
 async fn flatten(
-    objects: &dyn ObjectStore,
+    meta: &dyn MetadataStore,
+    repo: &str,
     commit: ObjectId,
     root: TreeId,
 ) -> Result<BTreeMap<String, (FileType, BlobId)>, IngestError> {
     let mut out = BTreeMap::new();
     let mut stack = vec![(String::new(), root)];
     while let Some((prefix, id)) = stack.pop() {
-        let tree = objects
-            .get_tree(id)
+        let tree = meta
+            .get_tree(repo, id)
             .await
             .map_err(|e| IngestError::Store(commit, e.to_string()))?
             .ok_or_else(|| IngestError::Store(commit, format!("tree {id} is missing")))?;
@@ -69,7 +70,7 @@ async fn check(
         .await
         .map_err(|e| IngestError::Store(commit, e.to_string()))?
         .0;
-    let scion = flatten(objects, commit, root).await?;
+    let scion = flatten(meta, repo, commit, root).await?;
 
     let mut want = BTreeMap::new();
     for (raw, file) in git.files(commit)? {

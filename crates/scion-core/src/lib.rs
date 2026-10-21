@@ -23,7 +23,6 @@ pub use merge::{Conflict, Side, ThreeWay, merge, rebase};
 
 use futures_util::TryStreamExt;
 use scion_derived::{Deriver, PathHistory, RootTree, SkipList};
-use scion_store::ObjectStore;
 use scion_types::{
     BlobId, ChangesetId, FileType, PathComponent, RepoPath, Tree, TreeEntry, TreeId,
 };
@@ -80,8 +79,11 @@ fn file_entry(entry: &TreeEntry) -> Option<FileEntry> {
     }
 }
 
-async fn load_tree(objects: &dyn ObjectStore, id: TreeId) -> Result<Tree> {
-    objects.get_tree(id).await?.ok_or(Error::MissingTree(id))
+async fn load_tree(ctx: &Deriver<'_>, id: TreeId) -> Result<Tree> {
+    ctx.meta
+        .get_tree(ctx.repo, id)
+        .await?
+        .ok_or(Error::MissingTree(id))
 }
 
 fn join(prefix: Option<&RepoPath>, name: &PathComponent) -> RepoPath {
@@ -93,7 +95,7 @@ fn join(prefix: Option<&RepoPath>, name: &PathComponent) -> RepoPath {
 
 /// Every file under `tree`, as `Added` (`added == true`) or `Deleted` entries.
 async fn all_files(
-    objects: &dyn ObjectStore,
+    ctx: &Deriver<'_>,
     prefix: Option<&RepoPath>,
     tree: TreeId,
     added: bool,
@@ -101,7 +103,7 @@ async fn all_files(
 ) -> Result<()> {
     let mut stack = vec![(prefix.cloned(), tree)];
     while let Some((prefix, id)) = stack.pop() {
-        for (name, entry) in load_tree(objects, id).await?.entries {
+        for (name, entry) in load_tree(ctx, id).await?.entries {
             let path = join(prefix.as_ref(), &name);
             match entry {
                 TreeEntry::Tree { id } => stack.push((Some(path), id)),
@@ -120,7 +122,7 @@ async fn all_files(
 }
 
 async fn diff_trees(
-    objects: &dyn ObjectStore,
+    ctx: &Deriver<'_>,
     prefix: Option<&RepoPath>,
     old: TreeId,
     new: TreeId,
@@ -129,8 +131,8 @@ async fn diff_trees(
     if old == new {
         return Ok(());
     }
-    let old_tree = load_tree(objects, old).await?;
-    let new_tree = load_tree(objects, new).await?;
+    let old_tree = load_tree(ctx, old).await?;
+    let new_tree = load_tree(ctx, new).await?;
     let names: std::collections::BTreeSet<&PathComponent> = old_tree
         .entries
         .keys()
@@ -140,7 +142,7 @@ async fn diff_trees(
         let path = join(prefix, name);
         match (old_tree.entries.get(name), new_tree.entries.get(name)) {
             (Some(TreeEntry::Tree { id: o }), Some(TreeEntry::Tree { id: n })) => {
-                Box::pin(diff_trees(objects, Some(&path), *o, *n, out)).await?;
+                Box::pin(diff_trees(ctx, Some(&path), *o, *n, out)).await?;
             }
             (Some(o @ TreeEntry::Blob { .. }), Some(n @ TreeEntry::Blob { .. })) => {
                 if o != n {
@@ -155,7 +157,7 @@ async fn diff_trees(
                 // Absent, or a file on one side and a directory on the other.
                 match o {
                     Some(TreeEntry::Tree { id }) => {
-                        all_files(objects, Some(&path), *id, false, out).await?;
+                        all_files(ctx, Some(&path), *id, false, out).await?;
                     }
                     Some(blob @ TreeEntry::Blob { .. }) => out.push(DiffEntry::Deleted {
                         path: path.clone(),
@@ -165,7 +167,7 @@ async fn diff_trees(
                 }
                 match n {
                     Some(TreeEntry::Tree { id }) => {
-                        all_files(objects, Some(&path), *id, true, out).await?;
+                        all_files(ctx, Some(&path), *id, true, out).await?;
                     }
                     Some(blob @ TreeEntry::Blob { .. }) => out.push(DiffEntry::Added {
                         path,
@@ -183,16 +185,16 @@ async fn diff_trees(
 /// path. Subtrees with equal ids are skipped, so the cost is proportional to
 /// the differing part of the trees.
 pub async fn tree_diff(
-    objects: &dyn ObjectStore,
+    ctx: &Deriver<'_>,
     old: Option<TreeId>,
     new: Option<TreeId>,
 ) -> Result<Vec<DiffEntry>> {
     let mut out = Vec::new();
     match (old, new) {
         (None, None) => {}
-        (Some(o), None) => all_files(objects, None, o, false, &mut out).await?,
-        (None, Some(n)) => all_files(objects, None, n, true, &mut out).await?,
-        (Some(o), Some(n)) => diff_trees(objects, None, o, n, &mut out).await?,
+        (Some(o), None) => all_files(ctx, None, o, false, &mut out).await?,
+        (None, Some(n)) => all_files(ctx, None, n, true, &mut out).await?,
+        (Some(o), Some(n)) => diff_trees(ctx, None, o, n, &mut out).await?,
     }
     // Tree order is per directory; callers expect byte order of full paths.
     out.sort_by(|a, b| a.path().cmp(b.path()));
@@ -211,7 +213,7 @@ pub async fn diff(
         None => None,
     };
     let new_tree = ctx.derive::<RootTree>(new).await?.0;
-    tree_diff(ctx.objects, old_tree, Some(new_tree)).await
+    tree_diff(ctx, old_tree, Some(new_tree)).await
 }
 
 /// Up to `limit` changesets along the first-parent chain, `head` first.
@@ -251,12 +253,12 @@ pub async fn path_log(
     }
     let name = path.file_name();
     let history = ctx.derive::<PathHistory>(head).await?;
-    let Some(entry) = history.lookup(ctx.objects, path).await? else {
+    let Some(entry) = history.lookup(ctx, path).await? else {
         return Ok(Vec::new());
     };
     let lowest = (entry.change().height + 1).saturating_sub(limit as u64);
     entry
-        .chain(ctx.objects, &name, lowest)
+        .chain(ctx, &name, lowest)
         .map_ok(|e| e.last_changed())
         .try_collect()
         .await
@@ -269,7 +271,7 @@ mod tests {
     use proptest::prelude::*;
     use scion_derived::ANCHOR_STEP;
     use scion_derived::test_util::{
-        Counting, CountingMeta, Flat, REPO, arb_changes, changeset, materialize, tracked,
+        CountingMeta, Flat, REPO, arb_changes, changeset, materialize, tracked,
     };
     use scion_store::{MemoryStore, MetadataStore};
 
@@ -435,8 +437,8 @@ mod tests {
         let d = Deriver::new(REPO, &store, &store);
         d.derive::<RootTree>(c1).await.unwrap();
 
-        let counting = Counting::new(&store);
-        let d = Deriver::new(REPO, &store, &counting);
+        let counting = CountingMeta::new(&store);
+        let d = Deriver::new(REPO, &counting, &store);
         let entries = diff(&d, Some(c0), c1).await.unwrap();
         assert_eq!(entries.len(), 1);
         // Only the root and d7 were loaded on each side.
@@ -513,15 +515,14 @@ mod tests {
         d0.derive::<SkipList>(head).await.unwrap();
 
         let counting = CountingMeta::new(&store);
-        let objects = Counting::new(&store);
-        let d = Deriver::new(REPO, &counting, &objects);
+        let d = Deriver::new(REPO, &counting, &store);
         touched.reverse();
         assert_eq!(path_log(&d, head, &p, 100).await.unwrap(), touched);
         assert_eq!(counting.changeset_reads(), 0);
         // One pointer read at the head; a scan would read 200 entries.
         assert_eq!(counting.derived_reads(), 1);
         // A lookup at depth 2, then one node read per further change.
-        assert_eq!(objects.blob_gets(), 2 + touched.len() - 1);
+        assert_eq!(counting.page_gets(), 2 + touched.len() - 1);
         assert_eq!(path_log(&d, head, &p, 2).await.unwrap(), touched[..2]);
         assert_eq!(
             path_log(&d, head, &RepoPath::new("nope").unwrap(), 10)
@@ -563,12 +564,12 @@ mod tests {
         touched.reverse();
         let dir: Vec<_> = ids.iter().rev().copied().collect();
 
-        let objects = Counting::new(&store);
-        let d = Deriver::new(REPO, &store, &objects);
+        let counting = CountingMeta::new(&store);
+        let d = Deriver::new(REPO, &counting, &store);
         assert_eq!(path_log(&d, head, &p, 1000).await.unwrap(), touched);
         // The lookup, one read per change, and one per anchor.
         let n = touched.len();
-        assert!(objects.blob_gets() <= 2 + n + n / usize::try_from(ANCHOR_STEP).unwrap());
+        assert!(counting.page_gets() <= 2 + n + n / usize::try_from(ANCHOR_STEP).unwrap());
         for limit in [1, 15, 16, 17, 33, 199, 200, 201] {
             assert_eq!(
                 path_log(&d, head, &p, limit).await.unwrap(),
