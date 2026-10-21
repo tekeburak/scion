@@ -5,7 +5,7 @@ ones. The README describes what Scion does today and what comes next in product 
 names no phase; this file is where the numbering lives.
 
 <p align="center">
-  <img src="assets/roadmap.svg" width="800" alt="Phases 0 to 3, 6 and 5 done; phases 7 and 10 in progress; then phases 11, 9, 4 and 8 planned in that order">
+  <img src="assets/roadmap.svg" width="800" alt="Phases 0 to 3, 6, 5 and 7 done; phase 10 in progress; then phases 11, 9, 4 and 8 planned in that order">
 </p>
 
 | Phase | Scope | Status |
@@ -17,7 +17,7 @@ names no phase; this file is where the numbering lives.
 | 3 | `scion-server` (gRPC) + `scn` CLI | done |
 | 6 | git → Scion ingestion, benchmarks on a real repository, `scn init` / `update` / `checkout`, bounded cold derivation | done |
 | 5 | Server-side rebase/merge UX, change requests, serial land worker | done |
-| 7 | IAM (GitHub device-flow login, service principals, repo + directory ACLs), fuzzing, hermetic simulation | in progress |
+| 7 | IAM (GitHub device-flow login, service principals, repo + directory ACLs), fuzzing, hermetic simulation | done |
 | 10 | Performance: trees and history pages in Postgres, streaming object plane, one-round-trip land, memos; every benchmark row a multiple faster than git | in progress |
 | 11 | Web interface and agent API: server-rendered pages, GitHub login, HTTP/JSON API, MCP server, `scn --json` | planned |
 | 9 | Release and hosting: versioned binaries, server image, production compose profile, a hosted instance, five-minute quickstart | planned |
@@ -258,7 +258,7 @@ take. Directory scope applies where a path is known: writes (every file change o
 changeset, merge or revert) and control-plane reads by path (`path_log`, `blame`, `diff`);
 objects are fetched by id and checked per repository only. Tokens are not revocable; revoking a
 grant takes effect on the next request. Simulation and fuzzing live in the
-planned `scion-sim` crate and run on the memory stores, with no network. Authentication must
+`scion-sim` crate and run on the memory stores, with no network. Authentication must
 not move any `scripts/bench-real` row beyond its run-to-run noise.
 
 - **7.1 Tokens.** `scion-server` issues and verifies tokens: principal, expiry, MAC with the

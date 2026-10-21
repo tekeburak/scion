@@ -40,10 +40,10 @@ changing any id or any client.
 
 ## Can I use it today?
 
-Not for real work: Phase 7 is still in progress (access control works: every request needs a
-valid token and a role in its repository, optionally limited to a directory, people sign in
-with GitHub through `scn login` and admins manage roles with `scn access`; the hermetic
-simulation and fuzzing are in place; only Phase 7's documentation step remains), there are no released binaries yet (Phase 9) and there
+Not for real work yet. Access control is done (Phase 7): every request needs a valid token and
+a role in its repository, optionally limited to a directory, people sign in with GitHub
+through `scn login`, admins manage roles with `scn access`, and a hermetic simulation and
+fuzz targets check the server. But there are no released binaries yet (Phase 9) and there
 is no cache tier yet (Phase 4).
 The MVP (Phase 3) is done: `scion-server` serves the object and control gRPC services over
 Postgres + S3. `scn` can `init` a repository, `clone --sparse`, `status`, `log`, `diff`,

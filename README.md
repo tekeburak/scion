@@ -174,6 +174,38 @@ outcome later; `scn requests --status needs-rebase` lists only the conflicted re
 `scn log --landed` finds the request behind a changeset even when the server rebased it to a
 new id.
 
+### Sign in and share a repository
+
+Every request carries a token, and every repository has readers, writers and admins. The
+`demo` repository above belongs to `sp:dev`, the principal of `SCN_TOKEN`; here it lets a
+second person write under `docs/` only. That person signs in with GitHub (the stack needs
+`SCION_GITHUB_CLIENT_ID`, see above); a CI job or an agent uses a service-principal token
+from `scion-server token sp:<name> --ttl <duration>` in `SCN_TOKEN` instead.
+
+```sh
+cd demo                                    # the working copy from above; you are its admin
+scn access grant github:<login> writer --path docs
+scn access list                            # sp:dev admin on demo, github:<login> writer on demo:docs/
+cd ..
+
+# the second person, in a shell without SCN_TOKEN
+unset SCN_TOKEN
+export SCN_AUTHOR="Grace <grace@example.com>"
+scn login http://127.0.0.1:7420            # prints a URL and a code to enter on GitHub
+scn whoami http://127.0.0.1:7420          # github:<login> and its expiry
+scn clone http://127.0.0.1:7420 demo shared && cd shared
+mkdir docs && echo notes >docs/notes.md
+scn add docs/notes.md && scn commit -m "add notes"
+scn land                                   # lands: every path is under docs/
+echo nope >top.txt && scn add top.txt
+scn commit -m "add top.txt"                # refused, naming top.txt: outside docs/
+```
+
+The admin's `scn access revoke github:<login> --path docs` takes effect on that person's next
+request. A token itself cannot be revoked; it expires (30 days for `scn login`). The rules,
+the roles and what each request needs are in
+[Identity and access](docs/ARCHITECTURE.md#identity-and-access).
+
 ### Import a git repository
 
 `scion-ingest` copies a git history into Scion: one changeset per commit, file changes

@@ -148,6 +148,7 @@ not a patch.
 | Root tree of a changeset | metadata DB (`derived`, type `root_tree`) | `(repo, "root_tree", v, changeset)` → `TreeId` |
 | Path-history pages and other derived data | metadata DB (`pages`) from Phase 10.3, pointer in `derived`; object store until then | per type |
 | Refs | metadata DB (`refs`) | `(repo, name)` |
+| Grants | metadata DB (`grants`) | `(repo, principal, path_prefix)` → role |
 | Snapshot manifests (Phase 4, planned) | object store | `snapshots/{repo}/{changeset}.manifest` |
 
 Everything in the object store and in the `trees` and `pages` tables is immutable, addressed
@@ -180,11 +181,32 @@ repository that does not exist fails, from a client with `PERMISSION_DENIED` (no
 role there) and from `scion-ingest` with `NOT_FOUND`, so a misspelled name never starts a new
 repository.
 
+## Grants
+
+Who may do what is one table, `grants (repo, principal, path_prefix, role)`, primary key
+`(repo, principal, path_prefix)`, so a principal holds at most one role per directory of a
+repository and granting again replaces it.
+
+- `principal` is `github:<login>` (signed in with `scn login`) or `sp:<name>` (a service
+  principal with a token from `scion-server token`); the name is ASCII letters, digits, `-`,
+  `_` and `.`, at most 100 bytes.
+- `role` is `reader`, `writer` or `admin`; each includes the ones before it.
+- `path_prefix` is empty for the whole repository, or a directory from the repository root
+  (stored without a trailing `/`), under which alone the role holds.
+- `repo` is the repository the grant is for (invariant 7). Server-wide grants, which today
+  only let a principal create repositories (`InitRepo`), live under the reserved repository
+  `*`, which no repository can take.
+
+Tokens are not stored: a token is the principal and its expiry, signed by the server (see
+[Identity and access](ARCHITECTURE.md#identity-and-access)). A change request records its
+submitter's principal (`change_requests.submitter`), so the land worker holds the landed
+stack to that principal's grants at landing time.
+
 ## Refs and anonymous heads
 
-Only two kinds of ref exist on the server: `main` and `release/<name>`. Creating or moving them
-will require admin rights once IAM lands (Phase 7); until then the server has no
-authentication. A ref is a single row `(repo, name, target, version)`; moving it is
+Only two kinds of ref exist on the server: `main` and `release/<name>`. Creating or moving one
+directly (`MoveRef`) needs `admin` on the whole repository; `main` otherwise moves only when the
+land worker lands a change request. A ref is a single row `(repo, name, target, version)`; moving it is
 `UPDATE … WHERE version = $observed`, a compare-and-swap. There is no other global mutable
 state.
 

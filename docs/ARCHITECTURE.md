@@ -242,9 +242,9 @@ changeset's root tree (optionally per sparse profile), written to the object sto
 daemon fetches the manifest and pulls the listed objects from its regional cache in parallel. No
 tier ever holds a materialized copy of the repository.
 
-### Identity and access (phase 7)
+### Identity and access
 
-*In progress.* Every control and object request carries `authorization: Bearer <token>`,
+Every control and object request carries `authorization: Bearer <token>`,
 and one interceptor in `scion-server` refuses a missing, altered, foreign or expired token
 with UNAUTHENTICATED; health checks need none. A token is a principal and an expiry written
 with the canonical primitives and signed with a keyed BLAKE3 MAC under the 32-byte server key
@@ -283,8 +283,11 @@ grant <principal> <role> [--path <dir>]`, `revoke` and `list` call `Grant`, `Rev
 `ListGrants`, which check their input as the operator commands do. `scn whoami` calls
 `WhoAmI`, which needs only a token, and shows the principal, the token's expiry and the
 caller's grants in the working copy's repository.
-Tokens are checked once, at the server boundary; tiers below the server will forward them and
-never decide access themselves. Authorization is repo- and directory-scoped (`repo` is part of
+Tokens are not revocable: one stays valid until its expiry (30 days for `scn login`, the
+`--ttl` of `scion-server token`), and cutting someone off means revoking their grants, which
+takes effect on their next request, since grants are read on every request and not cached in
+the token. Tokens are checked once, at the server boundary; tiers below the server will forward
+them and never decide access themselves. Authorization is repo- and directory-scoped (`repo` is part of
 every rule, invariant 7); moving `main` and `release/*` requires admin.
 
 ### Performance bar
