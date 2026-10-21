@@ -263,18 +263,30 @@ forward them and never decide access themselves. Authorization is repo- and dire
 
 ### Performance bar
 
-Every phase-6+ benchmark runs the same workloads against git and against public
-implementations of the same reference design, on the same machine. Scion is expected to be at
-least as fast on each workload except import and the cold (first-call) `log` and `blame`, and a
-regression against any of them is a bug. Import is held to at most ten times git's time
-(Phase 6.11): git writes local packfiles, Scion writes one immutable object per blob and tree
-to a remote object store. A cold `log` or `blame` pays one object-store read per pointer hop,
-so Phase 6.12 holds a cold path `log` within 20× git and a cold `blame` within 5×. The
-workloads cover import, full and sparse checkout, status, one-file commit, land, 16 writers
-landing at once, log and blame;
-the results are the Benchmarks table and chart in `README.md` (Phase 6.13), rendered from
-`docs/bench-real.csv`, and the measurement script (`scripts/bench-real`) stays in the
-repository.
+Every benchmark runs the same workloads against git and against public implementations of
+the same reference design, on the same machine. The bar, set by Phase 10, is that every
+workload is a multiple faster than git: clone at or below 0.3× git's time, sparse clone 0.1×,
+status 0.03×, warm path log 0.3×, warm blame 0.1×, commit + land 0.5×, 16 writers 0.1×, warm
+import 0.5× and cold import at or below git. The cold, first-call `log` and `blame` of a
+freshly started server are held within 2× git, because each pointer hop is a round trip to a
+store that git reads from a local packfile; production servers are rarely cold, so the table
+also reports "server warm, client cold". A regression of more than 20% on any row is a bug
+and fails the nightly benchmark job. The workloads cover import, full and sparse checkout,
+status, one-file commit, land, 16 writers landing at once, log and blame; the results are the
+Benchmarks table and chart in `README.md`, rendered from `docs/bench-real.csv`, and the
+measurement script (`scripts/bench-real`) stays in the repository. To reach the bar, trees
+and history pages move from the object store to the metadata database (as the reference design
+keeps them), the object plane gains streaming batch RPCs, and landing becomes one round trip
+(`docs/ROADMAP.md`, Phase 10).
+
+### Web interface and agent API
+
+*Planned, Phase 11.* The same binary serves a browser interface (repository, tree, file, log,
+blame, changeset and change-request pages, GitHub login, change-request actions), an HTTP/JSON
+API that mirrors the control plane for clients that do not speak gRPC, and an MCP server so
+coding agents can read, commit and land through tools. Pages and API run in process with the
+control plane and go through the same authorization. A separate code-review product is not a
+goal; change-request pages are.
 
 ### Ingestion
 
@@ -330,6 +342,7 @@ the dependency stays in that crate so no other crate builds it.
 
 ## Non-goals (first 12 months)
 
-git wire compatibility (import only); offline operation; a code-review UI; Windows; garbage
-collection of unreachable objects; large-file chunking (there is a per-blob size limit); ignore
-files (sparse profiles and explicit `add` instead); branch-like server refs.
+git wire compatibility (import only); offline operation; a separate code-review product beyond
+the change-request pages of the web interface; Windows; garbage collection of unreachable
+objects; large-file chunking (there is a per-blob size limit); ignore files (sparse profiles and
+explicit `add` instead); branch-like server refs.

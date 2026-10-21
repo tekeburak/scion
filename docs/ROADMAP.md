@@ -5,7 +5,7 @@ ones. The README describes what Scion does today and what comes next in product 
 names no phase; this file is where the numbering lives.
 
 <p align="center">
-  <img src="assets/roadmap.svg" width="800" alt="Phases 0 to 3, 6 and 5 done; phase 7 in progress; then phases 9, 4 and 8 planned in that order">
+  <img src="assets/roadmap.svg" width="800" alt="Phases 0 to 3, 6 and 5 done; phases 7 and 10 in progress; then phases 11, 9, 4 and 8 planned in that order">
 </p>
 
 | Phase | Scope | Status |
@@ -18,17 +18,32 @@ names no phase; this file is where the numbering lives.
 | 6 | git → Scion ingestion, benchmarks on a real repository, `scn init` / `update` / `checkout`, bounded cold derivation | done |
 | 5 | Server-side rebase/merge UX, change requests, serial land worker | done |
 | 7 | IAM (GitHub device-flow login, service principals, repo + directory ACLs), fuzzing, hermetic simulation | in progress |
-| 9 | Release and onboarding: versioned binaries, server image, production compose profile, five-minute quickstart | planned |
+| 10 | Performance: trees and history pages in Postgres, streaming object plane, one-round-trip land, memos; every benchmark row a multiple faster than git | in progress |
+| 11 | Web interface and agent API: server-rendered pages, GitHub login, HTTP/JSON API, MCP server, `scn --json` | planned |
+| 9 | Release and hosting: versioned binaries, server image, production compose profile, a hosted instance, five-minute quickstart | planned |
 | 4 | `scion-cache` and `scion-daemon` tiers, manifest-based seeding | planned |
 | 8 | Virtualized checkouts (FUSE / NFS) | planned |
 
-Phases run in table order: git import came right after the server and CLI because testing
-and benchmarking against real repositories needs it; the land worker and IAM come before any
-release, so a released server handles concurrent writers and authenticates them; the cache
-and daemon tiers wait until there is more than one machine to serve. When a phase starts, its
+Phases run in table order, with one exception: Phase 10 runs **in parallel** with Phase 7, on
+its own lane, because it touches the storage, derivation and transfer paths and not the
+access-control paths. Git import came right after the server and CLI because testing and
+benchmarking against real repositories needs it; the land worker and IAM come before any
+release, so a released server handles concurrent writers and authenticates them; the web
+interface comes before the release because a hosted instance is the release; the cache and
+daemon tiers wait until there is more than one machine to serve. When a phase starts, its
 single-PR steps are added below as `N.M`, each with one acceptance criterion; PRs are titled
 `Phase N.M: …` and land in order. Non-goals in `docs/ARCHITECTURE.md` stay out of every
 phase.
+
+Lanes and file areas, so the two lanes do not collide:
+
+- **Lane A (Phase 7, then 11, 9, 4, 8):** `crates/scion-server/src/{auth,land,grants}.rs`,
+  `crates/scn/src/` commands, the web crate, docs. It does not touch the Phase 10 area.
+- **Lane B (Phase 10 only; branches `perf/10.N`):** `crates/scion-store`, `crates/scion-derived`,
+  `crates/scion-ingest`, `crates/scion-client/src/{checkout,commit,status}.rs`, `crates/scion-proto`
+  (new RPCs), `crates/scion-server/src/{object,control,staged}.rs` for performance only,
+  `scripts/bench-real`, `docs/bench-real.csv`, `docs/BENCHMARKS.md`. Every Phase 10 PR runs
+  `scripts/bench-real 3` and commits the CSV; no benchmark row may regress by more than 20%.
 
 ## Phase 6: git → Scion ingestion
 
@@ -309,10 +324,119 @@ not move any `scripts/bench-real` row beyond its run-to-run noise.
   following the how-to on the compose stack logs in, grants a second principal and lands as
   it, and `scripts/render-assets.py --check` passes.
 
-## Phase 9: release and onboarding
+## Phase 10: performance
 
-Steps are added when the phase starts (after Phase 7, so a released server has
-authentication). Scope: versioned `scn`, `scion-server` and `scion-ingest` binaries for Linux
-and macOS built by CI on a tag; a `scion-server` container image; a production compose profile
-(Postgres, S3 credentials, TLS termination in front); a five-minute quickstart that installs
-`scn`, logs in, clones and lands; and release notes generated from merged `Phase N.M:` PRs.
+Goal: every row of `scripts/bench-real` a multiple faster than git, on the same machine, with
+cold and warm measured separately. Targets, as ratios of git's median (3 runs):
+
+| Workload | Today (2026-10-19) | Target |
+|---|---|---|
+| import, cold / warm | 21× / 7× | ≤ 1× / ≤ 0.5× |
+| clone / sparse clone | 0.59× / 0.19× | ≤ 0.3× / ≤ 0.1× |
+| status | 0.05× | ≤ 0.03× |
+| path log, cold / warm | 14× / 0.88× | ≤ 2× / ≤ 0.3× |
+| blame, cold / warm | 4.2× / 0.19× | ≤ 2× / ≤ 0.1× |
+| commit + land | 1.4× | ≤ 0.5× |
+| 16 writers, total / p99 | 0.20× / 0.19× | ≤ 0.1× / ≤ 0.1× |
+
+"Cold" means a freshly started server with empty memos, which production rarely is; the table
+also gains "server warm, client cold" rows. Decisions already taken: trees and history pages
+move to the metadata database as in the reference design (blobs stay one immutable object each
+in the object store; no packing; the canonical encoding and the golden fixtures do not change);
+new dependencies approved for this phase: `moka` (in-process LRU, no build script).
+
+- **10.1 Measurement baseline.** `docs/bench-real.csv` is re-taken on `main` with
+  authentication on (Phase 7's rule: auth moves no row beyond run-to-run noise). `bench-real`
+  gains "server warm, client cold" rows for `log` and `blame`, and `SCION_TRACE=1` prints
+  per-stage spans (has_blobs, put, derive, store, create) for every workload. *Accepted when*
+  the README table carries the new CSV and `docs/BENCHMARKS.md` names the most expensive stage
+  of every row slower than git.
+- **10.2 Metadata memos and batch reads.** Grants and refs are memoized with invalidation on
+  write; `Recent` is replaced by an LRU (`moka`); `encoded()` reads changesets with one
+  `get_changesets`. *Accepted when* a counting test shows a 428-result `log` makes at most 3
+  Postgres queries, a request makes at most one grants query and a repeated request none.
+- **10.3 Trees and history pages in the metadata database.** Tables `trees(repo, id, bytes)` and
+  `pages(repo, id, bytes)` written in batches (`UNNEST`, `ON CONFLICT DO NOTHING`);
+  `MetadataStore` gains `put_trees`/`get_trees`/`put_pages`/`get_pages`; `ObjectStorage` holds
+  blobs only; `GetTree` is served from the metadata database; memory store and conformance macro
+  updated; `docs/DATA_MODEL.md` "Where things live" rewritten (invariants 2 and 9 unchanged:
+  immutable, append-only, no materialized copy). *Accepted when* conformance passes on all
+  stores, golden fixtures are untouched, a counting test shows a cold import's object-store
+  PUTs equal its blob count, and warm import is at or below git.
+- **10.4 Import pipeline.** Derivation inside a batch runs concurrently (parent trees come from
+  the `Staged` overlay), zstd on the blocking pool, `has_blobs` once per batch, S3 client pool
+  and keep-alive tuned, two mapper threads. *Accepted when* cold import is at or below git and
+  the peak-RSS bound holds.
+- **10.5 Streaming object plane.** `GetObjects(ids) -> stream`, `HasBlobs(ids)` and
+  `PutBlobs(stream)` RPCs; clone fetches objects in batches of 256 ids instead of one RPC per
+  directory and file; `scn commit` asks `HasBlobs` before uploading. *Accepted when* clone is
+  at or below 0.3× git, sparse clone 0.1×, and a 2,330-file clone makes at most 12 RPCs.
+- **10.6 One round trip to land.** `CommitAndLand` creates the changeset and submits the change
+  request in one RPC; the reply returns once the changeset is stored and the request is landed,
+  while derived data that nothing waits on finishes on a task. *Accepted when* commit + land is
+  at or below 0.5× git and 16 writers' p99 at or below 0.1×.
+- **10.7 Cold log and blame.** Anchor segments walked 64 at a time, page prefetch, blame's
+  version chain read from the metadata database. *Accepted when* cold path log is within 2×
+  git and warm within 0.3×, cold blame within 2× and warm within 0.1×.
+- **10.8 Status.** The index records `ctime_ns` and inode, the walk runs on several threads
+  (std only), unchanged directories short-circuit on directory mtime. *Accepted when* status
+  is at or below 0.03× git and a proptest over random edit sets matches a full re-hash.
+- **10.9 Land worker pipelining.** The next request's rebase is prepared while the previous
+  CAS is in flight; `MAX_WAIT` drops. *Accepted when* 16 writers total is at or below 0.1× git
+  and `main` stays linear (existing test).
+- **10.10 Peers in the benchmark.** The 6.10 decision is implemented as written: peers come from
+  `BENCH_PEERS=<dir>[:<dir>...]`, neutral labels, no URL or name in the repository;
+  `BENCH_IMPL_A_URL`/`B_URL` go. *Accepted when* the CSV has a row per workload per supplied
+  peer (or `unsupported`) and the README table shows them.
+- **10.11 Larger slice and nightly.** A second, 6,000-commit slice; a nightly `bench` CI job
+  (self-hosted, cron + dispatch) uploads the CSV and fails a run whose row regressed more than
+  20% against `main`. *Accepted when* both slices are in the README and a deliberate regression
+  turns the job red.
+- **10.12 Docs.** `docs/ARCHITECTURE.md` "Performance bar" states the targets above and the
+  measured results; FAQ and announcement drafts carry the numbers.
+
+## Phase 11: web interface and agent API
+
+Scion gets a browser interface and an API for agents, served by the same binary as the gRPC
+services. Crate `scion-web`, in process with `scion-server` (no RPC between them). Approved
+dependencies: `axum` (already present through tonic), `pulldown-cmark` (README rendering),
+`maud` (templates, no build script), `rmcp` (MCP). The "no review UI" non-goal is withdrawn:
+change-request pages are part of this interface; a separate review product is still not a goal.
+
+- **11.1 Pages.** `scion-server --web <addr>` serves repository list, repository home (README
+  rendered), tree, file, `log`, changeset diff, `blame`, change-request list and detail, all
+  server-rendered. *Accepted when* an e2e test on the compose stack opens every page with
+  `reqwest` and checks its content, and a counting test bounds store calls per page at 5.
+- **11.2 Login.** GitHub OAuth web flow (the browser sibling of `scn login`), a session cookie
+  bound to a Phase 7 token; public repositories read without a session; roles from 7.6.
+  *Accepted when* e2e reads a public repository without a session and lists change requests
+  with one.
+- **11.3 HTTP/JSON API.** `/api/v1/…` mirrors `ControlService` (repositories, refs, tree, blob,
+  log, blame, diff, changesets, change requests; writes: blob upload, changeset, submit, land)
+  with Phase 7 bearer tokens; `docs/API.md` documents every route. *Accepted when* each route
+  has a test and the init → clone → commit → land loop runs over HTTP alone.
+- **11.4 MCP server.** `scion-mcp` (stdio and streamable HTTP) with tools `list_repos`, `tree`,
+  `read_file`, `log`, `blame`, `diff`, `changeset`, `write_files_and_commit`, `land`,
+  `change_request` and resources `scion://<repo>/<path>@<changeset>`. *Accepted when* the MCP
+  inspector lists the tools and a commit → land loop runs through them in a test.
+- **11.5 Agent ergonomics.** `scn --json` on every command with schemas under `schemas/v1`,
+  structured error codes, `scn explain-conflict`. *Accepted when* every `--json` output is
+  validated against its schema in a test.
+- **11.6 Change-request actions.** Rebase, land and reject from the page, by role; conflicts
+  shown with their paths. *Accepted when* e2e lands a request from the page and `main` moves.
+- **11.7 Repository creation and settings.** `init` from the page, visibility (public /
+  private), members and roles (a grants UI over 7.3). *Accepted when* e2e creates a repository
+  and grants a role from the page.
+- **11.8 Docs and demo.** README "Web interface" section with real screenshots under
+  `docs/assets/web-*.png`, quickstart gains the web step.
+
+## Phase 9: release and hosting
+
+Steps are added when the phase starts (after Phase 11, so what is released is what people see).
+Scope: versioned `scn`, `scion-server`, `scion-ingest` and `scion-mcp` binaries for Linux and
+macOS built by CI on a tag; container images; a production compose profile (Postgres, S3
+credentials, TLS termination in front); a hosted instance on a managed platform (gRPC + HTTP
+behind one address, managed Postgres, an S3-compatible bucket), with its infrastructure script
+under `infra/` and the operator steps that need cloud credentials written down for the owner;
+quotas (no anonymous writes, per-blob size limit); a five-minute quickstart that installs `scn`,
+logs in, clones and lands; and release notes generated from merged `Phase N.M:` PRs.

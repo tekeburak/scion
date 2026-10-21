@@ -55,7 +55,9 @@ ROADMAP = [
     ("6", "git import, init / update / checkout", "done"),
     ("5", "Change requests, land worker", "done"),
     ("7", "IAM, fuzzing, simulation", "active"),
-    ("9", "Release and onboarding", "planned"),
+    ("10", "Performance", "active"),
+    ("11", "Web interface, agent API", "planned"),
+    ("9", "Release and hosting", "planned"),
     ("4", "Cache + daemon tiers", "planned"),
     ("8", "Virtual checkouts (FUSE / NFS)", "planned"),
 ]
