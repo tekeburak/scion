@@ -55,7 +55,7 @@ Scion is that design, built on boring infrastructure:
 Scion is **alpha** software. The server, the CLI, git import and the real-repository benchmark
 work and are exercised end to end in CI on Postgres + S3. Every request needs a token
 signed by the server and a role in the repository it touches, optionally limited to a
-directory; tokens come from the operator until GitHub sign-in arrives. Landing goes through change requests and a serial
+directory; people sign in with GitHub (`scn login`) and services use tokens from the operator. Landing goes through change requests and a serial
 land worker, and every request can be listed and traced to the changeset it landed;
 merges and reverts run on the server. The cache and daemon tiers, sign-in and released
 binaries follow (see [What's next](#whats-next)).
@@ -91,7 +91,9 @@ What works today:
   needs `admin`; `scn init` needs a server-wide admin and makes its caller the new repository's
   admin. A grant can be limited to a directory (`--path lib`): its writer can change, land,
   merge and revert only files under it, and its reader reads only those files' history,
-  blame and diffs; a refusal names the path.
+  blame and diffs; a refusal names the path. People sign in with GitHub (`scn login
+  <server>`, device flow, the token kept per server with mode 0600); CI and agents use
+  service-principal tokens from `scion-server token`.
 - **Benchmarks** against git on a pinned slice of a real repository, from clone and `blame`
   to 16 writers landing at once, with the numbers [below](#benchmarks).
 
@@ -124,7 +126,10 @@ scn log
 After a code change, rebuild
 the server with `docker compose -f deploy/docker-compose.yml up -d --wait --build`.
 `docker compose -f deploy/docker-compose.yml down -v` deletes every repository; the next `up`
-starts a new server with it. A token stays valid until its `--ttl` runs out, also across `down -v`. A `scion-server` run
+starts a new server with it. To sign in with GitHub instead of `SCN_TOKEN`, create a GitHub
+OAuth app with device flow enabled, start the stack with `SCION_GITHUB_CLIENT_ID` set to its
+client id and run `scn login http://127.0.0.1:7420`; the token lands in
+`~/.config/scn/tokens/` (mode 0600) and is valid for 30 days. A token stays valid until its `--ttl` runs out, also across `down -v`. A `scion-server` run
 outside compose needs `SCION_TOKEN_KEY` (`openssl rand -hex 32`) and must be restarted after
 `down -v` too: it keeps an in-memory memo of the objects the bucket holds, and that memo
 outlives the bucket.
@@ -316,7 +321,7 @@ Access control is under way. Every request needs a token signed by the server: a
 issues one with `scion-server token` (for a person or a service principal such as CI) and `scn`
 sends it from `SCN_TOKEN`. Each request also needs a role in its repository (reader, writer,
 admin), granted with `scion-server grant` and removed with `revoke`, optionally limited to a
-directory. Next come GitHub device-flow login (`scn login`) and managing access from `scn`,
+directory; people sign in with GitHub through `scn login`. Next come managing access from `scn`,
 together with fuzzing and a hermetic simulation. In parallel, a performance pass aims at every
 benchmark row being a multiple faster than git: trees and history pages move into the metadata
 database as the reference design keeps them, the object plane gains streaming batch requests, and

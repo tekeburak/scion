@@ -12,10 +12,11 @@ scion-types.workspace = true
 scion-client.workspace = true
 clap = { version = "4.6", features = ["derive", "env"] }
 diffy = { workspace = true, features = ["std"] }
-tokio = { workspace = true, features = ["fs"] }
+tokio = { workspace = true, features = ["fs", "time"] }
 tonic.workspace = true
 
 [dev-dependencies]
+axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "form"] }
 bytes.workspace = true
 object_store = { version = "0.14.2", features = ["aws"] }
 scion-derived = { workspace = true, features = ["test-util"] }

@@ -125,6 +125,7 @@ async fn checkouts_equal_git_trees() {
         store.clone(),
         store.clone(),
         key(),
+        None,
     ));
 
     // `main` clones to the git tree.

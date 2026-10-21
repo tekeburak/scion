@@ -19,6 +19,8 @@ bytes.workspace = true
 hex.workspace = true
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 object_store = { version = "0.14.2", features = ["aws"] }
+reqwest = { version = "0.13", default-features = false, features = ["rustls", "json", "form"] }
+serde.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["net"] }
 tonic.workspace = true

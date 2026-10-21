@@ -31,13 +31,16 @@
 //! * `SCION_LISTEN`: listen address, default `0.0.0.0:7420`.
 //! * `SCION_TOKEN_KEY`: the 32-byte key tokens are signed with, in hex
 //!   (`openssl rand -hex 32`). `serve` and `token` refuse to run without it.
+//! * `SCION_GITHUB_CLIENT_ID`: the client id of a GitHub OAuth app with device
+//!   flow enabled, for `scn login`. Without it the server takes only tokens
+//!   from `scion-server token`.
 
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use object_store::aws::AmazonS3Builder;
-use scion_server::{Command, TokenKey};
+use scion_server::{Command, GitHub, TokenKey};
 use scion_store::{ObjectStorage, PostgresStore};
 use tokio::net::TcpListener;
 
@@ -62,11 +65,16 @@ async fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + S
             let key = token_key()?;
             let listen =
                 std::env::var("SCION_LISTEN").unwrap_or_else(|_| "0.0.0.0:7420".to_owned());
+            let github = std::env::var("SCION_GITHUB_CLIENT_ID")
+                .ok()
+                .filter(|id| !id.is_empty())
+                .map(|id| GitHub::new(&id, "https://github.com", "https://api.github.com"));
             let meta = metadata().await?;
             let objects = ObjectStorage::new(Arc::new(AmazonS3Builder::from_env().build()?));
             let listener = TcpListener::bind(&listen).await?;
             eprintln!("scion-server listening on {}", listener.local_addr()?);
-            scion_server::serve(listener, Arc::new(meta), Arc::new(objects), key).await?;
+            let (meta, objects) = (Arc::new(meta), Arc::new(objects));
+            scion_server::serve(listener, meta, objects, key, github).await?;
         }
         Command::Backfill { repo, ty } => {
             let meta = metadata().await?;

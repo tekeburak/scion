@@ -40,7 +40,7 @@ async fn serve(name: &'static str, seen: Seen) -> String {
         };
         store.put_grant(SERVER_GRANTS, &admin).await.unwrap();
     }
-    let routes = scion_server::routes(store.clone(), store, key(name))
+    let routes = scion_server::routes(store.clone(), store, key(name), None)
         .await
         .unwrap();
     let record = tower::ServiceBuilder::new().map_request(move |req: Request<Body>| {

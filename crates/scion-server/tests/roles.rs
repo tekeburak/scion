@@ -260,7 +260,10 @@ async fn every_rpc_as_each_role() {
 
     let soon = SystemTime::now() + Duration::from_secs(3600);
     let proto = include_str!("../../scion-proto/proto/scion/v1/scion.proto");
-    assert_eq!(proto.matches("  rpc ").count(), RPCS.len(), "a row per RPC");
+    // Login needs no role: it is how a principal gets a token.
+    let login = proto.split("service LoginService").nth(1).unwrap();
+    let rpcs = proto.matches("  rpc ").count() - login.matches("  rpc ").count();
+    assert_eq!(rpcs, RPCS.len(), "a row per RPC");
     let mut n = 0;
     for (rpc, need) in RPCS {
         for (principal, role, server) in callers {

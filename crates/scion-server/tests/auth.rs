@@ -1,4 +1,5 @@
-//! Every control and object RPC needs a valid token; health checks need none.
+//! Every control and object RPC needs a valid token; health checks and login
+//! need none.
 
 mod common;
 
@@ -75,8 +76,16 @@ async fn every_rpc_needs_a_valid_token() {
         ),
     ];
 
-    let rpcs = every_rpc();
+    let (login, rpcs): (Vec<_>, Vec<_>) = every_rpc()
+        .into_iter()
+        .partition(|rpc| rpc.starts_with("/scion.v1.LoginService/"));
     assert_eq!(rpcs.len(), 20, "{rpcs:?}");
+    assert_eq!(login.len(), 2, "{login:?}");
+    // Login is how a token is got; this server has no GitHub login.
+    for rpc in &login {
+        let code = call(&channel, rpc, Bearer(None)).await;
+        assert_eq!(code, Code::FailedPrecondition, "{rpc} without a token");
+    }
     for rpc in &rpcs {
         for (why, bearer) in &refused {
             assert_eq!(

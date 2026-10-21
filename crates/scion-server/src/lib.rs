@@ -10,6 +10,7 @@ mod auth;
 mod backfill;
 mod control;
 mod land;
+mod login;
 mod object;
 mod operator;
 mod staged;
@@ -19,6 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use scion_proto::v1::control_service_server::ControlServiceServer;
+use scion_proto::v1::login_service_server::LoginServiceServer;
 use scion_proto::v1::object_service_server::ObjectServiceServer;
 use scion_store::{MetadataStore, ObjectStore, StoreError};
 use tokio::net::TcpListener;
@@ -30,6 +32,7 @@ use tonic::transport::server::TcpIncoming;
 use auth::Authenticate;
 use control::ControlServer;
 use land::LandWorkers;
+use login::LoginServer;
 use object::ObjectServer;
 
 pub use auth::Scope;
@@ -37,6 +40,7 @@ pub use backfill::{BACKFILL_TYPES, backfill};
 pub use control::{
     MAX_LOG_LIMIT, Merged, Rebased, Reverted, create_changesets, merge, move_ref, rebase, revert,
 };
+pub use login::{GitHub, LOGIN_TTL};
 pub use operator::{Command, USAGE, grant, revoke, token};
 pub use token::{TokenError, TokenKey};
 
@@ -51,16 +55,17 @@ pub const MAX_MESSAGE_BYTES: usize = 64 << 20;
 /// Serve all services on `listener` until the future is dropped or the
 /// transport fails, first starting the land worker of every repository with
 /// requests waiting. Control and object requests need a token signed with
-/// `key`.
+/// `key`; `scn login` gets one through `github`, if given.
 pub async fn serve(
     listener: TcpListener,
     meta: Arc<dyn MetadataStore>,
     objects: Arc<dyn ObjectStore>,
     key: TokenKey,
+    github: Option<GitHub>,
 ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     tonic::transport::Server::builder()
         .timeout(RPC_DEADLINE)
-        .add_routes(routes(meta, objects, key).await?)
+        .add_routes(routes(meta, objects, key, github).await?)
         // Without TCP_NODELAY a small reply waits for the client's delayed
         // ACK, about 40 ms on Linux, whenever two writes go out back to back.
         .serve_with_incoming(TcpIncoming::from(listener).with_nodelay(Some(true)))
@@ -68,14 +73,16 @@ pub async fn serve(
     Ok(())
 }
 
-/// The health, control and object services [`serve`] runs, for a server
-/// built with its own layers. Starts the land worker of every repository
-/// with requests waiting. Control and object requests need a token signed
-/// with `key`; health checks need none.
+/// The health, login, control and object services [`serve`] runs, for a
+/// server built with its own layers. Starts the land worker of every
+/// repository with requests waiting. Control and object requests need a
+/// token signed with `key`; health checks and login need none, and login
+/// answers `FAILED_PRECONDITION` without `github`.
 pub async fn routes(
     meta: Arc<dyn MetadataStore>,
     objects: Arc<dyn ObjectStore>,
     key: TokenKey,
+    github: Option<GitHub>,
 ) -> Result<Routes, StoreError> {
     let workers = Arc::new(LandWorkers::new(meta.clone(), objects.clone()));
     for repo in meta.repos_with_open_change_requests().await? {
@@ -95,8 +102,10 @@ pub async fn routes(
     let object_service = ObjectServiceServer::new(ObjectServer::new(meta.clone(), objects))
         .max_decoding_message_size(MAX_MESSAGE_BYTES)
         .max_encoding_message_size(MAX_MESSAGE_BYTES);
+    let login_service = LoginServiceServer::new(LoginServer::new(github, key.clone()));
     let authenticate = Authenticate(key);
     Ok(Routes::new(health_service)
+        .add_service(login_service)
         .add_service(InterceptedService::new(
             control_service,
             authenticate.clone(),

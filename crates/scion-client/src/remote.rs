@@ -5,13 +5,14 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use scion_proto::v1::control_service_client::ControlServiceClient;
+use scion_proto::v1::login_service_client::LoginServiceClient;
 use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_proto::v1::{
-    BlameRequest, CreateChangesetRequest, DiffRequest, FindLandingRequest, GetBlobRequest,
-    GetChangeRequestRequest, GetRefRequest, GetTreeRequest, InitRepoRequest,
+    BlameRequest, CreateChangesetRequest, DiffRequest, FindLandingRequest, FinishLoginRequest,
+    GetBlobRequest, GetChangeRequestRequest, GetRefRequest, GetTreeRequest, InitRepoRequest,
     ListChangeRequestsRequest, LogRequest, LogResponse, MergeBaseRequest, MergeRequest,
     MoveRefRequest, PathLogRequest, PutBlobRequest, RebaseRequest, RevertRequest,
-    SubmitChangeRequestRequest,
+    StartLoginRequest, SubmitChangeRequestRequest,
 };
 use scion_types::{
     BlobId, Changeset, ChangesetId, Decode, Encode, FileType, Identity, RepoPath, Timestamp, Tree,
@@ -147,6 +148,30 @@ pub struct RemoteChangeRequest {
     pub landed_at: Option<SystemTime>,
 }
 
+/// A started GitHub device-flow login: the user enters `user_code` at
+/// `verification_uri`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoginStart {
+    pub device_code: String,
+    pub user_code: String,
+    pub verification_uri: String,
+    pub expires_in: Duration,
+    pub interval: Duration,
+}
+
+/// Where a login is.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LoginPoll {
+    /// Not authorized yet; ask again after `interval`.
+    Pending { interval: Duration },
+    /// A token for `principal`, valid until `expires_at`.
+    Done {
+        token: String,
+        principal: String,
+        expires_at: SystemTime,
+    },
+}
+
 fn paths(paths: Vec<String>) -> Result<Vec<RepoPath>, RemoteError> {
     paths
         .into_iter()
@@ -226,6 +251,32 @@ pub fn token_path(server: &str) -> Option<PathBuf> {
     Some(config.join("scn").join("tokens").join(name))
 }
 
+/// Write `token` to [`token_path`] for `server`, readable by its owner only;
+/// returns the path.
+pub fn save_token(server: &str, token: &str) -> std::io::Result<PathBuf> {
+    use std::io::Write as _;
+    use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+    let path = token_path(server).ok_or_else(|| {
+        std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "neither XDG_CONFIG_HOME nor HOME is set",
+        )
+    })?;
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(&path)?;
+    // `mode` applies only to a new file.
+    file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
+    writeln!(file, "{token}")?;
+    Ok(path)
+}
+
 /// The token to send to `server`: `SCN_TOKEN` if set, else the contents of
 /// [`token_path`], else none.
 fn token_for(server: &str) -> Result<Option<(String, String)>, RemoteError> {
@@ -261,6 +312,7 @@ impl Interceptor for Bearer {
 pub struct Remote {
     pub control: ControlServiceClient<InterceptedService<Channel, Bearer>>,
     pub objects: ObjectServiceClient<InterceptedService<Channel, Bearer>>,
+    pub login: LoginServiceClient<Channel>,
 }
 
 impl Remote {
@@ -302,9 +354,49 @@ impl Remote {
             control: ControlServiceClient::with_interceptor(channel.clone(), bearer.clone())
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
-            objects: ObjectServiceClient::with_interceptor(channel, bearer)
+            objects: ObjectServiceClient::with_interceptor(channel.clone(), bearer)
                 .max_decoding_message_size(MAX_MESSAGE_BYTES)
                 .max_encoding_message_size(MAX_MESSAGE_BYTES),
+            login: LoginServiceClient::new(channel),
+        })
+    }
+
+    /// Start a GitHub device-flow login on the server.
+    pub async fn start_login(&mut self) -> Result<LoginStart, RemoteError> {
+        let resp = self
+            .login
+            .start_login(StartLoginRequest {})
+            .await?
+            .into_inner();
+        Ok(LoginStart {
+            device_code: resp.device_code,
+            user_code: resp.user_code,
+            verification_uri: resp.verification_uri,
+            expires_in: Duration::from_secs(resp.expires_in_seconds.into()),
+            interval: Duration::from_secs(resp.interval_seconds.into()),
+        })
+    }
+
+    /// Ask whether the login of `device_code` was authorized.
+    pub async fn finish_login(&mut self, device_code: &str) -> Result<LoginPoll, RemoteError> {
+        let resp = self
+            .login
+            .finish_login(FinishLoginRequest {
+                device_code: device_code.to_owned(),
+            })
+            .await?
+            .into_inner();
+        if resp.token.is_empty() {
+            return Ok(LoginPoll::Pending {
+                interval: Duration::from_secs(resp.interval_seconds.into()),
+            });
+        }
+        let expires = u64::try_from(resp.expires_unix_seconds)
+            .map_err(|_| RemoteError::Malformed("token expiry"))?;
+        Ok(LoginPoll::Done {
+            token: resp.token,
+            principal: resp.principal,
+            expires_at: UNIX_EPOCH + Duration::from_secs(expires),
         })
     }
 

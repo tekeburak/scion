@@ -1,7 +1,8 @@
 //! `scn`: the Scion command-line client.
 //!
-//! Setup: `init` creates an empty repository on a server; `clone` makes a
-//! working copy of one.
+//! Setup: `login` signs in to a server with GitHub and keeps its token for
+//! later commands; `init` creates an empty repository on a server; `clone`
+//! makes a working copy of one.
 //!
 //! Reading: `clone`, `status`, `log`, `diff`, `blame`. Every history question
 //! is an RPC to `scion-server`; the working copy is only needed for `status`
@@ -34,9 +35,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, Subcommand};
 use scion_client::{
-    ChangeRequestStatus, Config, FileStatus, MAIN_REF, Marked, Remote, RemoteChangeRequest,
-    RemoteError, RequestStatus, SparseProfile, State, SwitchError, Workspace, read_working_file,
-    status,
+    ChangeRequestStatus, Config, FileStatus, LoginPoll, MAIN_REF, Marked, Remote,
+    RemoteChangeRequest, RemoteError, RequestStatus, SparseProfile, State, SwitchError, Workspace,
+    read_working_file, status,
 };
 use scion_types::{Changeset, ChangesetId, FileChange, FileType, Identity, RepoPath, Timestamp};
 
@@ -54,6 +55,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Sign in to a server with GitHub and keep its token for this user.
+    Login {
+        /// Server address, e.g. `http://127.0.0.1:7070`.
+        server: String,
+    },
     /// Create an empty repository on a server, with `main` at its root.
     Init {
         /// Server address, e.g. `http://127.0.0.1:7070`.
@@ -387,6 +393,63 @@ fn print_file_diff(
         .set_modified_filename(name(new, "b"))
         .create_patch_bytes(old_bytes, new_bytes);
     out.write_all(&unified.to_bytes())
+}
+
+async fn login(out: &mut impl Write, server: &str) -> Result<()> {
+    // The server's own refusals (no GitHub login, denied, expired) are
+    // sentences; show them without the status around them.
+    let plain = |e: RemoteError| -> Box<dyn std::error::Error> {
+        match e {
+            RemoteError::Rpc(st)
+                if matches!(
+                    st.code(),
+                    tonic::Code::FailedPrecondition
+                        | tonic::Code::PermissionDenied
+                        | tonic::Code::DeadlineExceeded
+                ) =>
+            {
+                st.message().into()
+            }
+            e => e.into(),
+        }
+    };
+    let mut remote = Remote::connect(server).await?;
+    let start = remote.start_login().await.map_err(plain)?;
+    writeln!(
+        out,
+        "open {} and enter the code {}",
+        start.verification_uri, start.user_code
+    )?;
+    out.flush()?;
+    let mut interval = start.interval;
+    let (token, principal, expires_at) = loop {
+        tokio::time::sleep(interval).await;
+        match remote
+            .finish_login(&start.device_code)
+            .await
+            .map_err(plain)?
+        {
+            LoginPoll::Pending { interval: next } if !next.is_zero() => interval = next,
+            LoginPoll::Pending { .. } => {}
+            LoginPoll::Done {
+                token,
+                principal,
+                expires_at,
+            } => break (token, principal, expires_at),
+        }
+    };
+    let path = scion_client::save_token(server, &token)
+        .map_err(|e| format!("cannot save the token for {server}: {e}"))?;
+    let expires = expires_at
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| i64::try_from(d.as_secs()).unwrap_or(i64::MAX));
+    writeln!(
+        out,
+        "logged in to {server} as {principal} until {}; token in {}",
+        format_date(Timestamp::new(expires, 0)),
+        path.display()
+    )?;
+    Ok(())
 }
 
 async fn init(out: &mut impl Write, server: &str, repo: &str) -> Result<()> {
@@ -848,6 +911,7 @@ async fn checkout(out: &mut impl Write, rev: &str, force: bool) -> Result<()> {
 async fn run(cli: Cli) -> Result<()> {
     let mut out = io::BufWriter::new(io::stdout().lock());
     match cli.command {
+        Command::Login { server } => login(&mut out, &server).await?,
         Command::Init { server, repo } => init(&mut out, &server, &repo).await?,
         Command::Clone {
             server,

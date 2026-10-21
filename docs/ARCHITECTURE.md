@@ -247,19 +247,22 @@ when it lands and holds the rebased stack to them, so a grant revoked since the 
 and a stack someone else created cannot widen what the submitter may change; such a request
 ends `rejected` with the paths outside.
 
-Until `scn login` exists, the operator bootstraps access with `scion-server` subcommands that
-work on the stores directly, with no server running: `grant <repo|*> <principal> <role>
-[--path <dir>]`, `revoke <repo|*> <principal> [--path <dir>]` and `token <principal> --ttl
-<duration>`, which prints a token (principals are `github:<login>` or `sp:<name>`). `scn`
-sends `SCN_TOKEN` if it is set, else the per-server file `$XDG_CONFIG_HOME/scn/tokens/<server>`
-that `scn login` will write. The rest of this section is the plan.
+People sign in with **GitHub device-flow login** (`scn login <server>`). `LoginService`, the
+one service that takes no token, runs the flow for the client: `StartLogin` asks GitHub for a
+device code with the server's OAuth app (`SCION_GITHUB_CLIENT_ID`), `scn` shows the
+verification URL and user code, and polls `FinishLogin`, which exchanges the code for a GitHub
+access token, reads the user once and returns a 30-day token for `github:<login>`. The server
+keeps no login state, and the GitHub access token is used once and dropped. `scn` stores the
+token in `$XDG_CONFIG_HOME/scn/tokens/<server>` with mode 0600 and sends it, unless
+`SCN_TOKEN` is set. A denied or expired code ends the login with a message that says which.
 
-Clients authenticate with **GitHub device-flow login** (`scn login`): the CLI shows a device
-code, the server exchanges the resulting GitHub identity for a short-lived Scion token, and
-every RPC carries that token. CI jobs and agents use **service principals** with tokens
-issued by an admin. Tokens are checked once, at the server boundary; tiers below the server
-forward them and never decide access themselves. Authorization is repo- and directory-scoped
-(`repo` is part of every rule, invariant 7); moving `main` and `release/*` requires admin.
+CI jobs and agents use **service principals** (`sp:<name>`) whose tokens the operator issues
+with `scion-server` subcommands that work on the stores directly, with no server running:
+`grant <repo|*> <principal> <role> [--path <dir>]`, `revoke <repo|*> <principal> [--path
+<dir>]` and `token <principal> --ttl <duration>`; the same commands bootstrap the first admin.
+Tokens are checked once, at the server boundary; tiers below the server will forward them and
+never decide access themselves. Authorization is repo- and directory-scoped (`repo` is part of
+every rule, invariant 7); moving `main` and `release/*` requires admin.
 
 ### Performance bar
 

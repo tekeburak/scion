@@ -391,3 +391,45 @@ message ChangeRequest {
   // When `main` moved to `landed`; present once LANDED.
   optional uint64 landed_unix_micros = 8;
 }
+
+// ---------------------------------------------------------------------------
+// Login: served only by scion-server, and the one service that needs no
+// token. It runs GitHub's device flow for `scn login`: StartLogin asks GitHub
+// for a device code, and the client calls FinishLogin with it every
+// `interval_seconds` until the user has authorized it on GitHub. The server
+// keeps no state between the two. A server without GitHub login answers
+// FAILED_PRECONDITION; a denied code PERMISSION_DENIED; an expired one
+// DEADLINE_EXCEEDED.
+// ---------------------------------------------------------------------------
+
+service LoginService {
+  rpc StartLogin(StartLoginRequest) returns (StartLoginResponse);
+  rpc FinishLogin(FinishLoginRequest) returns (FinishLoginResponse);
+}
+
+message StartLoginRequest {}
+
+message StartLoginResponse {
+  // Passed back to FinishLogin; never shown to the user.
+  string device_code = 1;
+  // What the user enters at `verification_uri`.
+  string user_code = 2;
+  string verification_uri = 3;
+  uint32 expires_in_seconds = 4;
+  uint32 interval_seconds = 5;
+}
+
+message FinishLoginRequest {
+  string device_code = 1;
+}
+
+message FinishLoginResponse {
+  // Empty while the user has not authorized the code yet.
+  string token = 1;
+  // `github:<login>`, with the token.
+  string principal = 2;
+  // Unix seconds, with the token.
+  int64 expires_unix_seconds = 3;
+  // While pending: how long to wait before the next FinishLogin.
+  uint32 interval_seconds = 4;
+}

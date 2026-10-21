@@ -75,7 +75,13 @@ async fn serve() -> (String, ChangesetId) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     admit(&*store, REPO).await;
-    tokio::spawn(scion_server::serve(listener, store.clone(), store, key()));
+    tokio::spawn(scion_server::serve(
+        listener,
+        store.clone(),
+        store,
+        key(),
+        None,
+    ));
     (format!("http://{addr}"), id)
 }
 

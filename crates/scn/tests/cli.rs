@@ -80,7 +80,13 @@ async fn serve() -> (String, ChangesetId, ChangesetId) {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     admit(&*store, REPO).await;
-    tokio::spawn(scion_server::serve(listener, store.clone(), store, key()));
+    tokio::spawn(scion_server::serve(
+        listener,
+        store.clone(),
+        store,
+        key(),
+        None,
+    ));
     (format!("http://{addr}"), c0, c1)
 }
 
@@ -364,7 +370,13 @@ async fn init_clone_commit_land_without_git() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let server = format!("http://{}", listener.local_addr().unwrap());
     admit(&*store, REPO).await;
-    tokio::spawn(scion_server::serve(listener, store.clone(), store, key()));
+    tokio::spawn(scion_server::serve(
+        listener,
+        store.clone(),
+        store,
+        key(),
+        None,
+    ));
     let dir = tempfile::tempdir().unwrap();
 
     let out = scn(dir.path(), &["init", &server, "fresh"]);
@@ -533,7 +545,13 @@ async fn merge_a_release_fix_and_land_it() {
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let server = format!("http://{}", listener.local_addr().unwrap());
     admit(&*store, REPO).await;
-    tokio::spawn(scion_server::serve(listener, store.clone(), store, key()));
+    tokio::spawn(scion_server::serve(
+        listener,
+        store.clone(),
+        store,
+        key(),
+        None,
+    ));
 
     let dir = tempfile::tempdir().unwrap();
     scn(dir.path(), &["clone", &server, REPO, "a"]);

@@ -90,6 +90,9 @@ services:
       # Signs and checks tokens. This default is for the loopback-only local
       # stack; set SCION_TOKEN_KEY (`openssl rand -hex 32`) anywhere else.
       SCION_TOKEN_KEY: ${SCION_TOKEN_KEY:-6c6f63616c2d6f6e6c792d73636e2d6465762d6b65792d6e6f742d7365637265}
+      # Client id of a GitHub OAuth app with device flow enabled, for `scn login`;
+      # unset, only `scion-server token` tokens work.
+      SCION_GITHUB_CLIENT_ID: ${SCION_GITHUB_CLIENT_ID:-}
     ports:
       - "127.0.0.1:7420:7420"
     healthcheck:

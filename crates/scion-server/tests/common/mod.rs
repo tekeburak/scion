@@ -70,7 +70,7 @@ pub async fn serve(meta: Arc<dyn MetadataStore>, objects: Arc<dyn ObjectStore>) 
     let _ = meta.put_grant(REPO, &admin).await;
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(scion_server::serve(listener, meta, objects, key()));
+    tokio::spawn(scion_server::serve(listener, meta, objects, key(), None));
     Channel::from_shared(format!("http://{addr}"))
         .unwrap()
         .connect()

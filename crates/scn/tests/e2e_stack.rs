@@ -74,6 +74,7 @@ async fn serve() -> String {
         Arc::new(meta),
         Arc::new(objects),
         key(),
+        None,
     ));
     format!("http://{addr}")
 }
