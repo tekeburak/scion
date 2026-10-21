@@ -10,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use futures_util::{StreamExt, TryStreamExt, stream};
 
 use scion_derived::{Blame, DeriveError, Deriver, PathHistory, RootTree, SkipList};
+use scion_proto::trace::{span, timed};
 use scion_proto::v1::control_service_server::ControlService;
 use scion_proto::v1::{
     BlameRequest, BlameResponse, BlameRun, ChangeRequest, ChangeRequestStatus,
@@ -203,6 +204,7 @@ pub async fn create_changesets(
     objects: &dyn ObjectStore,
     batch: &[Changeset],
 ) -> Result<Vec<(ChangesetId, TreeId)>, Status> {
+    let _create = span("create");
     let Some(repo) = batch.first().map(|cs| cs.repo.as_str()) else {
         return Ok(Vec::new());
     };
@@ -232,7 +234,9 @@ pub async fn create_changesets(
             FileChange::Deleted => None,
         })
         .collect();
-    let present = objects.has_blobs(&blobs).await.map_err(store_status)?;
+    let present = timed("has_blobs", objects.has_blobs(&blobs))
+        .await
+        .map_err(store_status)?;
     let missing: Vec<String> = blobs
         .iter()
         .zip(present)
@@ -256,6 +260,7 @@ pub async fn create_changesets(
     let staged = Staged::new(repo, meta, objects, batch);
     let ctx = Deriver::new(repo, &staged, &staged);
     let trees = async {
+        let derive = span("derive");
         let mut created = Vec::with_capacity(batch.len());
         for cs in batch {
             let id = cs.id();
@@ -263,16 +268,23 @@ pub async fn create_changesets(
             ctx.derive::<PathHistory>(id).await.map_err(derive_status)?;
             created.push((id, root.0));
         }
-        staged.store_objects().await.map_err(store_status)?;
+        drop(derive);
+        timed("store", staged.store_objects())
+            .await
+            .map_err(store_status)?;
         Ok::<_, Status>(created)
     };
-    let skip_lists = async {
+    let skip_lists = timed("skip_list", async {
         for cs in batch {
             ctx.derive::<SkipList>(cs.id()).await?;
         }
         Ok(())
-    };
-    let (inserted, created, skipped) = tokio::join!(meta.put_changesets(batch), trees, skip_lists);
+    });
+    let (inserted, created, skipped) = tokio::join!(
+        timed("insert", meta.put_changesets(batch)),
+        trees,
+        skip_lists
+    );
     // An unknown parent also fails the derivation; the insert names it.
     inserted.map_err(|e| match e {
         StoreError::UnknownParent(_, parent) => {
@@ -282,7 +294,9 @@ pub async fn create_changesets(
     })?;
     let created = created?;
     skipped.map_err(derive_status)?;
-    staged.store_pointers().await.map_err(store_status)?;
+    timed("pointers", staged.store_pointers())
+        .await
+        .map_err(store_status)?;
     Ok(created)
 }
 
@@ -297,6 +311,7 @@ pub async fn move_ref(
     target: ChangesetId,
     expected: Option<u64>,
 ) -> Result<u64, Status> {
+    let _move_ref = span("move_ref");
     if !is_allowed_ref_name(name) {
         return Err(Status::invalid_argument(format!(
             "ref name {name:?} is not allowed (only `main` and `release/*`)"
@@ -377,6 +392,7 @@ pub async fn rebase(
     onto: ChangesetId,
     scope: &Scope,
 ) -> Result<Rebased, Status> {
+    let _rebase = span("rebase");
     let ctx = Deriver::new(repo, meta, objects);
     let clean = async |head: ChangesetId, created| {
         let root = ctx.derive::<RootTree>(head).await.map_err(derive_status)?.0;
@@ -666,7 +682,12 @@ impl ControlService for ControlServer {
         &self,
         request: Request<InitRepoRequest>,
     ) -> Result<Response<InitRepoResponse>, Status> {
-        authorize(&*self.meta, &request, SERVER_GRANTS, Role::Admin).await?;
+        let _rpc = span("InitRepo");
+        timed(
+            "auth",
+            authorize(&*self.meta, &request, SERVER_GRANTS, Role::Admin),
+        )
+        .await?;
         let admin = principal(&request)?.to_owned();
         let repo = request.into_inner().repo;
         let [(root, _)] = create_changesets(
@@ -706,7 +727,12 @@ impl ControlService for ControlServer {
         &self,
         request: Request<GetRefRequest>,
     ) -> Result<Response<GetRefResponse>, Status> {
-        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
+        let _rpc = span("GetRef");
+        timed(
+            "auth",
+            authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader),
+        )
+        .await?;
         let req = request.into_inner();
         let state = self
             .meta
@@ -730,11 +756,15 @@ impl ControlService for ControlServer {
         &self,
         request: Request<CreateChangesetRequest>,
     ) -> Result<Response<CreateChangesetResponse>, Status> {
+        let _rpc = span("CreateChangeset");
         let cs = Changeset::decode(&request.get_ref().changeset)
             .map_err(|e| Status::invalid_argument(format!("changeset: {e}")))?;
-        authorize(&*self.meta, &request, &cs.repo, Role::Writer)
-            .await?
-            .check("change", cs.file_changes.keys())?;
+        timed(
+            "auth",
+            authorize(&*self.meta, &request, &cs.repo, Role::Writer),
+        )
+        .await?
+        .check("change", cs.file_changes.keys())?;
         if cs == Changeset::repository_root(&cs.repo) {
             return Err(Status::invalid_argument(
                 "a repository's root changeset is created by InitRepo (`scn init`)",
@@ -754,7 +784,12 @@ impl ControlService for ControlServer {
         &self,
         request: Request<MoveRefRequest>,
     ) -> Result<Response<MoveRefResponse>, Status> {
-        let scope = authorize(&*self.meta, &request, &request.get_ref().repo, Role::Admin).await?;
+        let _rpc = span("MoveRef");
+        let scope = timed(
+            "auth",
+            authorize(&*self.meta, &request, &request.get_ref().repo, Role::Admin),
+        )
+        .await?;
         if !scope.is_whole() {
             return Err(Status::permission_denied(format!(
                 "{} is an admin of directories of {:?} only; moving a ref needs the whole repository",
@@ -777,7 +812,12 @@ impl ControlService for ControlServer {
     }
 
     async fn diff(&self, request: Request<DiffRequest>) -> Result<Response<DiffResponse>, Status> {
-        let scope = authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
+        let _rpc = span("Diff");
+        let scope = timed(
+            "auth",
+            authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader),
+        )
+        .await?;
         let req = request.into_inner();
         let old = req
             .old
@@ -799,14 +839,22 @@ impl ControlService for ControlServer {
     }
 
     async fn log(&self, request: Request<LogRequest>) -> Result<Response<LogResponse>, Status> {
-        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
+        let _rpc = span("Log");
+        timed(
+            "auth",
+            authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader),
+        )
+        .await?;
         let req = request.into_inner();
         let head = changeset_id(&req.head, "head")?;
-        let ids = scion_core::log(&self.deriver(&req.repo), head, limit(req.limit))
-            .await
-            .map_err(derive_status)?;
+        let ids = timed(
+            "walk",
+            scion_core::log(&self.deriver(&req.repo), head, limit(req.limit)),
+        )
+        .await
+        .map_err(derive_status)?;
         Ok(Response::new(LogResponse {
-            changesets: self.encoded(&req.repo, ids).await?,
+            changesets: timed("read", self.encoded(&req.repo, ids)).await?,
         }))
     }
 
@@ -814,16 +862,24 @@ impl ControlService for ControlServer {
         &self,
         request: Request<PathLogRequest>,
     ) -> Result<Response<LogResponse>, Status> {
-        let scope = authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
+        let _rpc = span("PathLog");
+        let scope = timed(
+            "auth",
+            authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader),
+        )
+        .await?;
         let req = request.into_inner();
         let head = changeset_id(&req.head, "head")?;
         let path = repo_path(&req.path)?;
         scope.check("read", [&path])?;
-        let ids = scion_core::path_log(&self.deriver(&req.repo), head, &path, limit(req.limit))
-            .await
-            .map_err(derive_status)?;
+        let ids = timed(
+            "walk",
+            scion_core::path_log(&self.deriver(&req.repo), head, &path, limit(req.limit)),
+        )
+        .await
+        .map_err(derive_status)?;
         Ok(Response::new(LogResponse {
-            changesets: self.encoded(&req.repo, ids).await?,
+            changesets: timed("read", self.encoded(&req.repo, ids)).await?,
         }))
     }
 
@@ -831,7 +887,12 @@ impl ControlService for ControlServer {
         &self,
         request: Request<MergeBaseRequest>,
     ) -> Result<Response<MergeBaseResponse>, Status> {
-        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
+        let _rpc = span("MergeBase");
+        timed(
+            "auth",
+            authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader),
+        )
+        .await?;
         let req = request.into_inner();
         let a = changeset_id(&req.a, "a")?;
         let b = changeset_id(&req.b, "b")?;
@@ -847,7 +908,12 @@ impl ControlService for ControlServer {
         &self,
         request: Request<RebaseRequest>,
     ) -> Result<Response<RebaseResponse>, Status> {
-        let scope = authorize(&*self.meta, &request, &request.get_ref().repo, Role::Writer).await?;
+        let _rpc = span("Rebase");
+        let scope = timed(
+            "auth",
+            authorize(&*self.meta, &request, &request.get_ref().repo, Role::Writer),
+        )
+        .await?;
         let req = request.into_inner();
         let head = changeset_id(&req.head, "head")?;
         let onto = changeset_id(&req.onto, "onto")?;
@@ -876,7 +942,12 @@ impl ControlService for ControlServer {
         &self,
         request: Request<MergeRequest>,
     ) -> Result<Response<MergeResponse>, Status> {
-        let scope = authorize(&*self.meta, &request, &request.get_ref().repo, Role::Writer).await?;
+        let _rpc = span("Merge");
+        let scope = timed(
+            "auth",
+            authorize(&*self.meta, &request, &request.get_ref().repo, Role::Writer),
+        )
+        .await?;
         let req = request.into_inner();
         let ours = changeset_id(&req.ours, "ours")?;
         let theirs = changeset_id(&req.theirs, "theirs")?;
@@ -917,7 +988,12 @@ impl ControlService for ControlServer {
         &self,
         request: Request<RevertRequest>,
     ) -> Result<Response<RevertResponse>, Status> {
-        let scope = authorize(&*self.meta, &request, &request.get_ref().repo, Role::Writer).await?;
+        let _rpc = span("Revert");
+        let scope = timed(
+            "auth",
+            authorize(&*self.meta, &request, &request.get_ref().repo, Role::Writer),
+        )
+        .await?;
         let req = request.into_inner();
         let head = changeset_id(&req.head, "head")?;
         let target = changeset_id(&req.changeset, "changeset")?;
@@ -953,7 +1029,12 @@ impl ControlService for ControlServer {
         &self,
         request: Request<BlameRequest>,
     ) -> Result<Response<BlameResponse>, Status> {
-        let scope = authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
+        let _rpc = span("Blame");
+        let scope = timed(
+            "auth",
+            authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader),
+        )
+        .await?;
         let req = request.into_inner();
         let cs = changeset_id(&req.changeset, "changeset")?;
         let path = repo_path(&req.path)?;
@@ -978,7 +1059,12 @@ impl ControlService for ControlServer {
         &self,
         request: Request<SubmitChangeRequestRequest>,
     ) -> Result<Response<ChangeRequest>, Status> {
-        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Writer).await?;
+        let _rpc = span("SubmitChangeRequest");
+        timed(
+            "auth",
+            authorize(&*self.meta, &request, &request.get_ref().repo, Role::Writer),
+        )
+        .await?;
         let submitter = principal(&request)?.to_owned();
         let req = request.into_inner();
         let head = changeset_id(&req.head, "head")?;
@@ -1023,7 +1109,12 @@ impl ControlService for ControlServer {
         &self,
         request: Request<GetChangeRequestRequest>,
     ) -> Result<Response<ChangeRequest>, Status> {
-        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
+        let _rpc = span("GetChangeRequest");
+        timed(
+            "auth",
+            authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader),
+        )
+        .await?;
         let req = request.into_inner();
         let cr = if req.wait {
             self.workers.wait(&req.repo, req.id).await
@@ -1040,7 +1131,12 @@ impl ControlService for ControlServer {
         request: Request<ListChangeRequestsRequest>,
     ) -> Result<Response<ListChangeRequestsResponse>, Status> {
         use scion_store::ChangeRequestStatus as S;
-        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
+        let _rpc = span("ListChangeRequests");
+        timed(
+            "auth",
+            authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader),
+        )
+        .await?;
         let req = request.into_inner();
         let status = match ChangeRequestStatus::try_from(req.status) {
             Ok(ChangeRequestStatus::Unspecified) => None,
@@ -1070,7 +1166,12 @@ impl ControlService for ControlServer {
         &self,
         request: Request<FindLandingRequest>,
     ) -> Result<Response<FindLandingResponse>, Status> {
-        authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader).await?;
+        let _rpc = span("FindLanding");
+        timed(
+            "auth",
+            authorize(&*self.meta, &request, &request.get_ref().repo, Role::Reader),
+        )
+        .await?;
         let req = request.into_inner();
         if req.changesets.len() > MAX_LOG_LIMIT as usize {
             return Err(Status::invalid_argument(format!(

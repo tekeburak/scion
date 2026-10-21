@@ -432,6 +432,8 @@ BENCH_WORKLOADS = [
     ("log warm", "path log, warm"),
     ("blame cold", "blame, cold"),
     ("blame warm", "blame, warm"),
+    ("log warm client cold", "path log, server warm, client cold"),
+    ("blame warm client cold", "blame, server warm, client cold"),
     ("land", "commit + land"),
     ("land 16 writers", "land, 16 writers at once"),
     ("land 16 writers p50", "land, 16 writers: p50 per land"),

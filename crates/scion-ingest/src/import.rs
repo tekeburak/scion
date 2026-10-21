@@ -5,6 +5,7 @@ use std::path::Path;
 
 use bytes::Bytes;
 use futures_util::{StreamExt, TryStreamExt, stream};
+use scion_proto::trace::{span, timed};
 use scion_store::{MetadataStore, ObjectStore};
 use scion_types::{BlobId, Changeset, ChangesetId};
 use tokio::sync::mpsc;
@@ -177,7 +178,7 @@ async fn create(
             .zip(&ids)
             .map(|(commit, (id, _))| (commit.as_bytes().to_vec(), *id))
             .collect();
-        meta.put_ingest_checkpoints(repo, &done)
+        timed("checkpoint", meta.put_ingest_checkpoints(repo, &done))
             .await
             .map_err(|e| IngestError::Store(last, e.to_string()))?;
         for (commit, (id, _)) in commits.into_iter().zip(ids) {
@@ -197,7 +198,10 @@ async fn upload(
 ) -> Result<(), IngestError> {
     let store_err = |e: scion_store::StoreError| IngestError::Store(commit, e.to_string());
     let ids: Vec<_> = blobs.keys().copied().collect();
-    let present = objects.has_blobs(&ids).await.map_err(store_err)?;
+    let present = timed("has_blobs", objects.has_blobs(&ids))
+        .await
+        .map_err(store_err)?;
+    let _put = span("put");
     stream::iter(
         blobs
             .into_values()
@@ -236,10 +240,12 @@ fn spawn_mapper(
             }
         };
         for commit in pending {
+            let map = span("map");
             let mapped = git.changeset(commit, &repo, &ids).map(|mapped| {
                 ids.insert(commit, mapped.changeset.id());
                 (commit, mapped)
             });
+            drop(map);
             let failed = mapped.is_err();
             if tx.blocking_send(mapped).is_err() || failed {
                 return;

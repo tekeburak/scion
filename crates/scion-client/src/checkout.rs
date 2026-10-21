@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 use futures_util::{StreamExt, TryStreamExt, stream};
+use scion_proto::trace::{span, timed};
 use scion_types::{BlobId, FileType, RepoPath, TreeEntry, TreeId};
 
 use crate::index::{Index, IndexEntry};
@@ -143,7 +144,8 @@ pub async fn checkout(
     tree: TreeId,
     sparse: &SparseProfile,
 ) -> Result<Index, CheckoutError> {
-    let files = list_files(remote, repo, tree, sparse).await?;
+    let files = timed("trees", list_files(remote, repo, tree, sparse)).await?;
+    let _blobs = span("blobs");
     let entries: BTreeMap<RepoPath, IndexEntry> = stream::iter(files.into_iter().map(|file| {
         let mut remote = remote.clone();
         async move {

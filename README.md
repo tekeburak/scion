@@ -255,7 +255,8 @@ tools. Import is timed twice: cold, into the run's empty bucket, and warm, into 
 repository on the same bucket. git runs its history workloads in a full clone, its best case.
 `scn` runs them in a sparse clone of `core/`, its normal case. Every checkout is compared byte
 for byte outside the timers. `log` and `blame` are timed twice: cold (the first call after
-import, with nothing cached on the server) and warm. For many writers landing at once, 16
+import, with nothing cached on the server) and warm, and once more from a second sparse clone
+(server warm, client cold). For many writers landing at once, 16
 clones each edit a different file and then all commit and publish together: git pushes, and
 on a rejected push pulls with rebase and pushes again; `scn` lands. The table gives the total
 from the first start to the last finish, and the p50 and p99 of the writers' own times.
@@ -268,23 +269,25 @@ from the first start to the last finish, and the p50 and p99 of the writers' own
 <!-- bench-real:start (scripts/render-assets.py writes this table) -->
 | Workload | git, ms | scion, ms | scion / git |
 | --- | ---: | ---: | ---: |
-| import, cold | 1,870 | 39,879 | 21.3× |
-| import, warm | 1,782 | 12,420 | 7.0× |
-| clone | 2,806 | 1,644 | 0.59× |
-| sparse clone | 694 | 134 | 0.19× |
-| status | 263 | 13 | 0.05× |
-| path log, cold | 29 | 419 | 14.4× |
-| path log, warm | 51 | 45 | 0.88× |
-| blame, cold | 88 | 366 | 4.2× |
-| blame, warm | 101 | 19 | 0.19× |
-| commit + land | 68 | 94 | 1.4× |
-| land, 16 writers at once | 5,086 | 1,034 | 0.20× |
-| land, 16 writers: p50 per land | 3,427 | 700 | 0.20× |
-| land, 16 writers: p99 per land | 5,060 | 981 | 0.19× |
+| import, cold | 1,237 | 20,961 | 16.9× |
+| import, warm | 1,335 | 7,257 | 5.4× |
+| clone | 1,649 | 1,277 | 0.77× |
+| sparse clone | 502 | 97 | 0.19× |
+| status | 172 | 8 | 0.05× |
+| path log, cold | 23 | 170 | 7.4× |
+| path log, warm | 21 | 21 | 1.0× |
+| blame, cold | 49 | 187 | 3.8× |
+| blame, warm | 45 | 11 | 0.24× |
+| path log, server warm, client cold | 21 | 19 | 0.90× |
+| blame, server warm, client cold | 48 | 11 | 0.23× |
+| commit + land | 34 | 54 | 1.6× |
+| land, 16 writers at once | 3,165 | 594 | 0.19× |
+| land, 16 writers: p50 per land | 2,240 | 410 | 0.18× |
+| land, 16 writers: p99 per land | 3,138 | 571 | 0.18× |
 
 Repository: library/ of the public repository pinned in scripts/bench-real, first-parent commits since 2026-01-01 up to 91e9c2688eb23af9a5b77f056156e756550c7c99 (600 commits, 2330 files at the tip).  
-Machine: Linux 6.18.44-fc-v139 x86_64; Intel(R) Xeon(R) Processor @ 2.80GHz; 4 cpus; 15 GiB.  
-Run: git version 2.43.0; scion 2c1a06b; 3 runs; 2026-10-19T02:16:45Z.  
+Machine: Linux 6.18.44-fc-v140 x86_64; Intel(R) Xeon(R) Processor @ 2.10GHz; 4 cpus; 15 GiB.  
+Run: git version 2.43.0; scion d3ebd05; 3 runs; 2026-10-21T04:23:20Z.  
 Other implementations of the design: not measured in this run.
 <!-- bench-real:end -->
 
@@ -292,13 +295,13 @@ Read these numbers with their limits:
 
 - **Import** writes one immutable object per blob, tree and history page to a remote object
   store, where git writes a local packfile; parity with git's push is not a goal. The figure to
-  quote is the cold row, 21× git: into an empty bucket the object store's write rate is the
-  bound. Warm, with the objects already stored, it is 7× git.
+  quote is the cold row, 17× git: into an empty bucket the object store's write rate is the
+  bound. Warm, with the objects already stored, it is 5.4× git.
 - **Cold `log` and `blame`** pay one object-store round trip per pointer hop, which git's
   local packfile never does. Warm, both are at or below git.
 - **A single commit + land** goes through a change request and the serial land worker, so on
-  its own it takes 1.4× git's local commit and push. The worker pays off under contention: 16
-  writers landing at once finish in 0.20× git's time, because no writer repeats another's
+  its own it takes 1.6× git's local commit and push. The worker pays off under contention: 16
+  writers landing at once finish in 0.19× git's time, because no writer repeats another's
   fetch, rebase and push.
 - One machine, three runs, shared cloud VM: medians move by several milliseconds between
   runs. The CSV with every sample is [docs/bench-real.csv](docs/bench-real.csv); render it with

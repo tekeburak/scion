@@ -10,6 +10,7 @@ use std::io;
 use std::path::PathBuf;
 
 use futures_util::{StreamExt, TryStreamExt, stream};
+use scion_proto::trace::{span, timed};
 use scion_types::{Changeset, ChangesetId, FileChange, Identity, RepoPath, Timestamp};
 
 use crate::checkout::{FETCH_CONCURRENCY, mtime_ns};
@@ -107,6 +108,7 @@ pub async fn commit(
         return Err(CommitError::Unresolved(unresolved));
     }
     let changes = status(ws.root(), &index, &ws.read_added()?)?;
+    let put = span("put");
 
     let mut deleted = Vec::new();
     let mut upload_paths = Vec::new();
@@ -130,6 +132,7 @@ pub async fn commit(
         .buffer_unordered(FETCH_CONCURRENCY)
         .try_collect()
         .await?;
+    drop(put);
 
     let mut file_changes = BTreeMap::new();
     for path in &deleted {
@@ -157,7 +160,7 @@ pub async fn commit(
         file_changes,
         extra: BTreeMap::new(),
     };
-    let id = remote.clone().create_changeset(&cs).await?;
+    let id = timed("create", remote.clone().create_changeset(&cs)).await?;
 
     // Index before state: if we stop in between, status still compares the
     // files with what was committed.
