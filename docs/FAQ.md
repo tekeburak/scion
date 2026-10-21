@@ -111,21 +111,21 @@ store while git writes local packfiles. The comparison favours git where it can:
 sparse clone, its normal case.
 
 The measurements, medians of three runs on the 600-commit slice `scripts/bench-real` imports
-(4 vCPU, the compose Postgres + RustFS stack, one fresh bucket per run): a cold import, into an
-empty bucket, takes 25,258 ms against git's 1,668 ms (15×), where the object store's write rate
-is the bound and the 10× criterion is not met yet; a warm import, with the objects already
-stored, takes 8,682 ms against 1,523 ms (5.7×). The README quotes the cold row. `log` and
-`blame` are measured twice, cold (the first call for a new repository) and warm. Warm `blame`
-of one file at the tip takes 13 ms against git's 56 ms, and warm path `log` 25 ms against 29 ms.
-Cold, the path `log` takes 168 ms against git's 24 ms (7.0×; the criterion is 20×), because
-its anchors let the object reads overlap, and the `blame` 239 ms against 53 ms (4.5×; the
-criterion is 5×), because its metadata reads are batched and its diffs run in parallel. A cold
-blame is still a few hundred object reads, one history node and one file version per version
-of every file the last change touched. A single commit + `land` takes 63 ms against git's
-46 ms (1.4×), above the at-or-below-git target, because it goes through a change request and
-the land worker. Sixteen writers landing at once, each editing a different file, all land in
-643 ms against 3,536 ms for git's fetch-rebase-push retry loop (p50 per land 432 ms against
-2,487 ms, p99 626 ms against 3,522 ms): the server rebases each request in turn, so no writer
+(4 vCPU, the compose Postgres + RustFS stack, one fresh bucket per run, taken after trees and
+history pages moved into the metadata database): a cold import, into an empty bucket, takes
+14,138 ms against git's 1,354 ms (10.4×), where the object store's write rate is the bound and
+the 10× criterion is just missed; a warm import, with the objects already stored, takes
+5,722 ms against 1,345 ms (4.3×). The README quotes the cold row. `log` and `blame` are
+measured twice, cold (the first call for a new repository) and warm. Warm `blame` of one file
+at the tip takes 12 ms against git's 58 ms (0.21×), and warm path `log` 27 ms against 23 ms
+(1.2×, just above the at-or-below-git target). Cold, the path `log` takes 145 ms against git's
+25 ms (5.8×; the criterion is 20×) and the `blame` 227 ms against 58 ms (3.9×; the criterion
+is 5×). A sparse clone takes 121 ms against git's 591 ms (0.20×)
+and `status` 8 ms against 179 ms. A single commit + `land` takes 54 ms against git's 42 ms
+(1.3×), above the at-or-below-git target, because it goes through a change request and the
+land worker. Sixteen writers landing at once, each editing a different file, all land in
+432 ms against 3,416 ms for git's fetch-rebase-push retry loop (p50 per land 317 ms against
+2,259 ms, p99 415 ms against 3,406 ms): the server rebases each request in turn, so no writer
 pays another's round trips.
 
 ## What are the known limits today?
