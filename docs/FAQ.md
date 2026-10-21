@@ -90,38 +90,38 @@ rewrites only the directories on the changed paths: one changed file at depth fo
 
 ## Is it faster than git?
 
-Partly, once warm. The README's Benchmarks section has two parts. The real-repository
-comparison (`scripts/bench-real`, rendered from `docs/bench-real.csv`) is where the figures
-below come from. The synthetic table uses generated files, an in-memory store and no cache
-tier. The targets are
-set in `docs/ROADMAP.md`: import within ten times git's time (6.11); warm `log` and `blame` and
-commit + `land` at or below git's time, cold `blame` within 5× git and cold path `log` within
-20× (6.12). Import is not expected to match git, because Scion
-writes every blob and tree as its own object to a remote store while git writes local packfiles.
-The comparison favours git where it can: git runs `status`, `log`, `blame` and `land` in a full
-clone, its best case, while `scn` runs them in a sparse clone, its normal case.
+Partly, once warm, and well ahead under concurrent landing. The figures below come from the
+README's Benchmarks table (`scripts/bench-real`, rendered from `docs/bench-real.csv`); older
+synthetic workloads against an in-process server are in [`BENCHMARKS.md`](BENCHMARKS.md). The
+targets are set in `docs/ROADMAP.md`: import within ten times git's time (6.11); warm `log` and
+`blame` and commit + `land` at or below git's time, cold `blame` within 5× git and cold path
+`log` within 20× (6.12); and, in Phase 10, every row a multiple faster than git. Import is not
+expected to match git, because Scion writes every blob and tree as its own object to a remote
+store while git writes local packfiles. The comparison favours git where it can: git runs
+`status`, `log`, `blame` and `land` in a full clone, its best case, while `scn` runs them in a
+sparse clone, its normal case.
 
-The measurements so far, on the 600-commit slice `scripts/bench-real` imports (4 vCPU, the
-compose Postgres + RustFS stack, one fresh bucket per run): a cold import, into an empty
-bucket, takes 39,879 ms against git's 1,870 ms (21×), where the object store's write rate is
-the bound and the 10× criterion is not met yet; a warm import, with the objects already
-stored, takes 12,420 ms against 1,782 ms (7.0×). The README quotes the cold row.
-`log` and `blame` are measured twice, cold (the first call for a new repository) and warm.
-Medians of three runs (the README table): warm `blame` of a 4,738-line file with 44 versions
-takes 19 ms against git's 101 ms, and warm path `log` 45 ms against 51 ms. Cold, a path `log`
-of 428 changes takes 419 ms against git's 29 ms (14×; the criterion is 20×), because its
-anchors let the object reads overlap, and that `blame` 366 ms against 88 ms (4.2×; the
+The measurements, medians of three runs on the 600-commit slice `scripts/bench-real` imports
+(4 vCPU, the compose Postgres + RustFS stack, one fresh bucket per run): a cold import, into an
+empty bucket, takes 20,961 ms against git's 1,237 ms (17×), where the object store's write rate
+is the bound and the 10× criterion is not met yet; a warm import, with the objects already
+stored, takes 7,257 ms against 1,335 ms (5.4×). The README quotes the cold row. `log` and
+`blame` are measured twice, cold (the first call for a new repository) and warm. Warm `blame`
+of one file at the tip takes 11 ms against git's 45 ms, and warm path `log` 21 ms against 21 ms.
+Cold, the path `log` takes 170 ms against git's 23 ms (7.4×; the criterion is 20×), because
+its anchors let the object reads overlap, and the `blame` 187 ms against 49 ms (3.8×; the
 criterion is 5×), because its metadata reads are batched and its diffs run in parallel. A cold
 blame is still a few hundred object reads, one history node and one file version per version
-of every file the last change touched. A single commit + `land` takes 94 ms against git's
-68 ms on this run, above the at-or-below-git target. Sixteen writers landing at once, each
-editing a different file, all land in 1,034 ms against 5,086 ms for git's fetch-rebase-push
-retry loop (p50 per land 700 ms against 3,427 ms, p99 981 ms against 5,060 ms): the server
-rebases each request in turn, so no writer pays another's round trips.
+of every file the last change touched. A single commit + `land` takes 54 ms against git's
+34 ms (1.6×), above the at-or-below-git target, because it goes through a change request and
+the land worker. Sixteen writers landing at once, each editing a different file, all land in
+594 ms against 3,165 ms for git's fetch-rebase-push retry loop (p50 per land 410 ms against
+2,240 ms, p99 571 ms against 3,138 ms): the server rebases each request in turn, so no writer
+pays another's round trips.
 
 ## What are the known limits today?
 
-Beyond missing authentication and cache tiers, these are the gaps a first user hits, each with
+Beyond the missing cache tiers and released binaries, these are the gaps a first user hits, each with
 the roadmap step that closes it:
 
 - **Incremental import is for mirror repositories.** A re-run of `scion-ingest import` refuses
@@ -154,5 +154,6 @@ CockroachDB stays a drop-in target, though CI does not test it yet; any S3-compa
 - Large binary files: there is a per-blob size limit and no chunking (non-goal).
 - Workflows built on many long-lived branches or forks: there are no server branches.
 - Reclaiming storage: objects are append-only and garbage collection is a non-goal.
-- Code review beyond change requests: the planned web interface shows and lands change
-  requests; a separate review product is a non-goal.
+- Code review beyond change requests: the web interface shows change requests with their
+  status, heads and conflicts, and acting on them from the page is planned; a separate review
+  product is a non-goal.
