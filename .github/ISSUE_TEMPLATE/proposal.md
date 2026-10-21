@@ -13,4 +13,4 @@ labels: proposal
 <!-- Which numbered invariants in CLAUDE.md this affects, and how. "None" is a fine answer. -->
 
 **Roadmap phase**
-<!-- Which phase in README.md / docs/ROADMAP.md this belongs to, or why it needs a new step. -->
+<!-- Which phase in docs/ROADMAP.md this belongs to, or why it needs a new step. -->
