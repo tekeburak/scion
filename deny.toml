@@ -2,7 +2,13 @@
 all-features = true
 
 [advisories]
-ignore = []
+ignore = [
+    # webpki-roots 0.26 (distrusted emSign intermediates) reaches us only through sqlx 0.8's
+    # TLS feature, and there is no fixed 0.26 release. Postgres connections are plaintext on the
+    # compose stack today; Phase 9 (hosted Postgres over TLS) moves to sqlx 0.9, which carries
+    # webpki-roots 1.x, and drops this entry.
+    { id = "RUSTSEC-2026-0381", reason = "sqlx 0.8 pins webpki-roots 0.26; resolved by the sqlx 0.9 move in Phase 9" },
+]
 
 [licenses]
 # The allow list is a policy, not an inventory; don't warn about unused entries.
