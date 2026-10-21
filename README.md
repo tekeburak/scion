@@ -336,8 +336,8 @@ request is a cacheable GET and no tier needs repository maintenance.
 
 Where Scion deliberately departs from the design it was inspired by: hashing uses Scion's own
 canonical BLAKE3 encoding, never a protobuf encoding; and the server refuses any ref other than
-`main` and `release/*`. Trees, which first lived in the object store, sit in the metadata
-database like the reference design's since Phase 10.3
+`main` and `release/*`. Trees and history pages, which first lived in the object store, now
+sit in the metadata database next to the changesets, as in the reference design
 ([why](docs/DATA_MODEL.md#trees-in-the-metadata-database)).
 
 Full details: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) (components, planes, tiering,
@@ -396,13 +396,13 @@ Read these numbers with their limits:
 
 - **Import** writes one immutable object per blob, tree and history page to a remote object
   store, where git writes a local packfile; parity with git's push is not a goal. The figure to
-  quote is the cold row, 15× git: into an empty bucket the object store's write rate is the
-  bound. Warm, with the objects already stored, it is 5.7× git.
-- **Cold `log` and `blame`** pay one object-store round trip per pointer hop, which git's
-  local packfile never does. Warm, both are at or below git.
+  quote is the cold row, 10.4× git: into an empty bucket the object store's write rate is the
+  bound. Warm, with the objects already stored, it is 4.3× git.
+- **Cold `log` and `blame`**, the first call after import with nothing cached on the server,
+  take 5.8× and 3.9× git. Warm, `blame` is 0.21× git and a path log 1.2×.
 - **A single commit + land** goes through a change request and the serial land worker, so on
-  its own it takes 1.4× git's local commit and push. The worker pays off under contention: 16
-  writers landing at once finish in 0.18× git's time, because no writer repeats another's
+  its own it takes 1.3× git's local commit and push. The worker pays off under contention: 16
+  writers landing at once finish in 0.13× git's time, because no writer repeats another's
   fetch, rebase and push.
 - One machine, three runs, shared cloud VM: medians move by several milliseconds between
   runs. The CSV with every sample is [docs/bench-real.csv](docs/bench-real.csv); render it with
@@ -422,9 +422,9 @@ Read these numbers with their limits:
 ## What's next
 
 A performance pass is under way, aimed at every benchmark row being a multiple faster than git:
-a path log already reads all of its changesets in one batch and the server's memos keep their
-hot entries; next, trees and history pages move into the metadata database as the reference
-design keeps them, the object plane gains streaming batch requests, and landing becomes one
+a path log already reads all of its changesets in one batch, the server's memos keep their
+hot entries, and trees and history pages live in the metadata database; next, import derives
+trees concurrently, the object plane gains streaming batch requests, and landing becomes one
 round trip. The web interface's pages, browser sign-in, change-request actions, repository settings,
 HTTP/JSON API, MCP server and `scn --json` are in; next come released binaries, a server image,
 a production compose profile and a hosted instance; the regional cache and per-node daemon tiers with
