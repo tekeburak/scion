@@ -96,6 +96,11 @@ What works today:
   service-principal tokens from `scion-server token`. A repository's admins grant, revoke and
   list its roles from a working copy (`scn access grant|revoke|list`), and `scn whoami` shows
   who a token names, until when, and its roles in the repository.
+- **Robustness checks**: a seeded, hermetic simulation runs many clients committing, landing,
+  merging and reverting while land workers stop and the server restarts, and checks that
+  `main` stays linear and nothing landed is lost or written twice; fuzz targets cover every
+  boundary that reads untrusted bytes (changeset, tree and derived-object decoding, tokens,
+  the three-way merge and the write requests), and their corpus is replayed on every test run.
 - **Benchmarks** against git on a pinned slice of a real repository, from clone and `blame`
   to 16 writers landing at once, with the numbers [below](#benchmarks).
 
@@ -324,8 +329,8 @@ Read these numbers with their limits:
 
 Access control is in place: server-signed tokens, repository roles, directory-scoped grants,
 GitHub sign-in and `scn access` for repository admins, and a seeded, hermetic simulation runs
-many clients landing, merging and reverting while the server fails and restarts. Next comes
-fuzzing of every boundary that reads untrusted bytes. In parallel, a performance pass aims at every benchmark row being a multiple faster than git: trees and history pages move into the metadata
+many clients landing, merging and reverting while the server fails and restarts, and every
+boundary that reads untrusted bytes is fuzzed. In parallel, a performance pass aims at every benchmark row being a multiple faster than git: trees and history pages move into the metadata
 database as the reference design keeps them, the object plane gains streaming batch requests, and
 landing becomes one round trip. After that, in order: a web interface (repository, history, blame
 and change-request pages with GitHub login), an HTTP/JSON API and an MCP server so coding agents
@@ -354,6 +359,11 @@ acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
 # scripts/bench-real also needs openssl and curl (apt-get install openssl curl / brew install openssl curl)
 cargo test --workspace                     # includes 200 seeds of scion-sim
 SCION_SIM_SEED=42 cargo test -p scion-sim --test seeds   # replay one simulation seed
+cargo test -p scion-sim --test corpus      # replay the fuzz corpus on stable
+
+# fuzzing needs a nightly toolchain and cargo-fuzz:
+#   rustup toolchain install nightly && cargo +nightly install cargo-fuzz --locked
+cd crates/scion-sim/fuzz && cargo +nightly fuzz run request -- -max_total_time=300
 cargo clippy --workspace --all-targets -- -D warnings
 
 # local storage backends (Postgres + an S3-compatible server) for integration tests; the

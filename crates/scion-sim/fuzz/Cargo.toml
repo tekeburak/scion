@@ -1,0 +1,67 @@
+# The fuzz targets, built by `cargo +nightly fuzz` on their own lockfile,
+# outside the workspace. Each calls one check of `scion_sim::fuzz`, which a
+# stable `cargo test -p scion-sim --test corpus` replays on `corpus/`.
+[package]
+name = "scion-sim-fuzz"
+version = "0.0.0"
+edition = "2024"
+license = "Apache-2.0"
+publish = false
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+scion-sim = { path = ".." }
+
+[workspace]
+
+[[bin]]
+name = "changeset"
+path = "fuzz_targets/changeset.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "tree"
+path = "fuzz_targets/tree.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "history_page"
+path = "fuzz_targets/history_page.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "blame_node"
+path = "fuzz_targets/blame_node.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "token"
+path = "fuzz_targets/token.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "diff3"
+path = "fuzz_targets/diff3.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "request"
+path = "fuzz_targets/request.rs"
+test = false
+doc = false
+bench = false

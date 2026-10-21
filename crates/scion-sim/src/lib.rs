@@ -18,6 +18,7 @@
 
 #![forbid(unsafe_code)]
 
+pub mod fuzz;
 mod store;
 
 use std::collections::{BTreeMap, BTreeSet};

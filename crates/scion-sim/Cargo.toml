@@ -12,6 +12,11 @@ scion-types.workspace = true
 scion-store.workspace = true
 scion-proto.workspace = true
 scion-server.workspace = true
+scion-derived.workspace = true
+scion-diff3.workspace = true
+blake3.workspace = true
+hex.workspace = true
+prost.workspace = true
 async-trait.workspace = true
 bytes.workspace = true
 futures-util = { version = "0.3", default-features = false, features = ["std"] }

@@ -29,6 +29,27 @@ pub use path_history::{ANCHOR_STEP, Change, HistoryEntry, HistoryNode, NodeAt, P
 pub use root_tree::RootTree;
 pub use skip_list::SkipList;
 
+/// The decoders of derived objects read back from the object store, for
+/// the fuzz targets in `scion-sim`.
+#[doc(hidden)]
+pub mod decode {
+    use scion_types::BlobId;
+
+    /// Node `index` of the history page `bytes`, if it decodes.
+    #[must_use]
+    pub fn history_node(bytes: &[u8], index: u32) -> Option<crate::HistoryNode> {
+        crate::path_history::decode_node(bytes, BlobId::hash(bytes), index)
+    }
+
+    /// The blame node `bytes`, if it decodes, and its re-encoding.
+    #[must_use]
+    pub fn blame_node(bytes: &[u8]) -> Option<(crate::BlameNode, Vec<u8>)> {
+        let node = crate::BlameNode::decode(bytes)?;
+        let again = node.encode();
+        Some((node, again))
+    }
+}
+
 /// Error produced while deriving.
 #[derive(Debug, thiserror::Error)]
 pub enum DeriveError {

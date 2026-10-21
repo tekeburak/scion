@@ -80,7 +80,7 @@ pub struct BlameNode {
 }
 
 impl BlameNode {
-    fn encode(&self) -> Vec<u8> {
+    pub(crate) fn encode(&self) -> Vec<u8> {
         let mut w = Writer::new();
         w.seq(self.files.iter(), |w, (path, file)| {
             w.str(path.as_str());
@@ -92,7 +92,7 @@ impl BlameNode {
         w.into_vec()
     }
 
-    fn decode(bytes: &[u8]) -> Option<Self> {
+    pub(crate) fn decode(bytes: &[u8]) -> Option<Self> {
         let mut r = Reader::new(bytes);
         let n_files = r.seq_len().ok()?;
         let mut files = BTreeMap::new();

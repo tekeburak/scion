@@ -3293,8 +3293,13 @@ name = "scion-sim"
 version = "0.0.1"
 dependencies = [
  "async-trait",
+ "blake3",
  "bytes",
  "futures-util",
+ "hex",
+ "prost",
+ "scion-derived",
+ "scion-diff3",
  "scion-proto",
  "scion-server",
  "scion-store",

@@ -360,7 +360,7 @@ fn walk_node(
 
 /// Node `index` of the page `page` whose bytes are `bytes`; `None` if the
 /// page is malformed up to that node or has no such node.
-fn decode_node(bytes: &[u8], page: BlobId, index: u32) -> Option<HistoryNode> {
+pub(crate) fn decode_node(bytes: &[u8], page: BlobId, index: u32) -> Option<HistoryNode> {
     let mut node = HistoryNode::default();
     let mut valid = true;
     walk_node(bytes, page, index, |name, entry| {
