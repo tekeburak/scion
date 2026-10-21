@@ -236,6 +236,7 @@ async fn init_clone_commit_land_over_http_alone() {
     assert_eq!(cs["author_date"]["tz_offset_minutes"], 180);
     assert_eq!(cs["file_changes"]["src/lib.rs"]["change"], "tracked");
     assert_eq!(cs["file_changes"]["src/lib.rs"]["kind"], "regular");
+    assert_eq!(cs["root_tree"], tree);
 }
 
 /// `demo` with `c1` (README.md, landed), `c2` on it (a.txt, landed) and

@@ -13,6 +13,7 @@ members = [
     "crates/scion-ingest",
     "crates/scion-sim",
     "crates/scion-web",
+    "crates/scion-mcp",
 ]
 
 [workspace.package]
