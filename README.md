@@ -323,9 +323,9 @@ Read these numbers with their limits:
 ## What's next
 
 Access control is in place: server-signed tokens, repository roles, directory-scoped grants,
-GitHub sign-in and `scn access` for repository admins. Next come fuzzing of every boundary that
-reads untrusted bytes and a seeded, hermetic simulation of many clients landing, merging and
-reverting while the server restarts. In parallel, a performance pass aims at every benchmark row being a multiple faster than git: trees and history pages move into the metadata
+GitHub sign-in and `scn access` for repository admins, and a seeded, hermetic simulation runs
+many clients landing, merging and reverting while the server fails and restarts. Next comes
+fuzzing of every boundary that reads untrusted bytes. In parallel, a performance pass aims at every benchmark row being a multiple faster than git: trees and history pages move into the metadata
 database as the reference design keeps them, the object plane gains streaming batch requests, and
 landing becomes one round trip. After that, in order: a web interface (repository, history, blame
 and change-request pages with GitHub login), an HTTP/JSON API and an MCP server so coding agents
