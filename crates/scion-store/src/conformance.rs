@@ -363,6 +363,17 @@ pub async fn grants<S: MetadataStore>(s: &S) {
         "scoped by repo"
     );
     assert_eq!(s.grants_for("missing", alice).await.unwrap(), vec![]);
+    assert_eq!(
+        s.grants(REPO).await.unwrap(),
+        vec![
+            grant(alice, "", Role::Reader),
+            grant(alice, "lib", Role::Writer),
+            grant("sp:ci", "", Role::Admin),
+        ],
+        "every principal's grants, by principal then prefix"
+    );
+    assert_eq!(s.grants("other").await.unwrap(), vec![]);
+    assert_eq!(s.grants("missing").await.unwrap(), vec![]);
 
     assert!(s.delete_grant(REPO, alice, "lib").await.unwrap());
     assert!(!s.delete_grant(REPO, alice, "lib").await.unwrap());

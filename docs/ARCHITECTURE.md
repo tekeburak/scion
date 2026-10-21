@@ -260,6 +260,11 @@ CI jobs and agents use **service principals** (`sp:<name>`) whose tokens the ope
 with `scion-server` subcommands that work on the stores directly, with no server running:
 `grant <repo|*> <principal> <role> [--path <dir>]`, `revoke <repo|*> <principal> [--path
 <dir>]` and `token <principal> --ttl <duration>`; the same commands bootstrap the first admin.
+After that, an admin of a whole repository manages its roles from a working copy: `scn access
+grant <principal> <role> [--path <dir>]`, `revoke` and `list` call `Grant`, `Revoke` and
+`ListGrants`, which check their input as the operator commands do. `scn whoami` calls
+`WhoAmI`, which needs only a token, and shows the principal, the token's expiry and the
+caller's grants in the working copy's repository.
 Tokens are checked once, at the server boundary; tiers below the server will forward them and
 never decide access themselves. Authorization is repo- and directory-scoped (`repo` is part of
 every rule, invariant 7); moving `main` and `release/*` requires admin.

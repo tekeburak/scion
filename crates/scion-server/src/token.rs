@@ -47,10 +47,10 @@ impl TokenKey {
         Ok(hex::encode(bytes))
     }
 
-    /// Check `token` and return the principal it names. Refuses a token that
-    /// is not well formed, was signed with another key or was altered, and
-    /// one whose expiry is at or before `now`.
-    pub fn verify(&self, token: &str, now: SystemTime) -> Result<String, TokenError> {
+    /// Check `token` and return the principal it names and its expiry.
+    /// Refuses a token that is not well formed, was signed with another key
+    /// or was altered, and one whose expiry is at or before `now`.
+    pub fn verify(&self, token: &str, now: SystemTime) -> Result<(String, SystemTime), TokenError> {
         let bytes = hex::decode(token).map_err(|_| TokenError::Malformed)?;
         let signed_len = bytes.len().checked_sub(32).ok_or(TokenError::Malformed)?;
         let mut r = Reader::new(&bytes);
@@ -69,7 +69,9 @@ impl TokenKey {
             return Err(TokenError::Expired);
         }
         check_principal(principal)?;
-        Ok(principal.to_owned())
+        // After `now`, so positive.
+        let expiry = UNIX_EPOCH + Duration::from_secs(expiry.unsigned_abs());
+        Ok((principal.to_owned(), expiry))
     }
 }
 
@@ -131,7 +133,10 @@ mod tests {
         let key = TokenKey::from_hex(KEY).unwrap();
         for p in ["github:octo-cat", "sp:ci.bot_1"] {
             let t = key.issue(p, at(2_000)).unwrap();
-            assert_eq!(key.verify(&t, at(1_999)).unwrap(), p);
+            assert_eq!(
+                key.verify(&t, at(1_999)).unwrap(),
+                (p.to_owned(), at(2_000))
+            );
         }
     }
 

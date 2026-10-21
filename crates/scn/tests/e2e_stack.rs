@@ -7,6 +7,8 @@
 //! The repository is created with `scn init` and seeded through a working
 //! copy, with no git repository involved; two clones then land alternately
 //! with `scn update` between, and a `release/1` fix is merged and landed.
+//! Last, the admin grants a second principal a directory with `scn access`,
+//! that principal lands under it, and a revoke makes its next land fail.
 //! Each run uses its own repository name, so runs never see each other's
 //! refs or changesets even though they share the database and bucket.
 
@@ -29,8 +31,13 @@ fn key() -> scion_server::TokenKey {
 
 /// A token of [`key`], valid for an hour.
 fn token() -> String {
+    token_of("sp:test")
+}
+
+/// A token of [`key`] for `principal`, valid for an hour.
+fn token_of(principal: &str) -> String {
     let hour = std::time::Duration::from_secs(3600);
-    scion_server::token(&key(), "sp:test", hour, std::time::SystemTime::now()).unwrap()
+    scion_server::token(&key(), principal, hour, std::time::SystemTime::now()).unwrap()
 }
 
 fn env_or(key: &str, default: &str) -> String {
@@ -81,8 +88,13 @@ async fn serve() -> String {
 
 /// Run `scn args` in `dir`; panics unless it succeeds. Returns stdout.
 fn scn(dir: &Path, args: &[&str]) -> String {
+    scn_as("sp:test", dir, args)
+}
+
+/// [`scn`] as `principal`.
+fn scn_as(principal: &str, dir: &Path, args: &[&str]) -> String {
     let out = Command::new(env!("CARGO_BIN_EXE_scn"))
-        .env("SCN_TOKEN", token())
+        .env("SCN_TOKEN", token_of(principal))
         .current_dir(dir)
         .env("SCN_AUTHOR", "E2E <e2e@example.com>")
         .args(args)
@@ -206,6 +218,48 @@ async fn init_clone_commit_land_on_postgres_and_s3() {
 
     two_clones_land_at_once(&a, &b);
     merge_a_release_fix(&server, &repo, &a, &b).await;
+    share_a_directory(&server, &repo, dir.path(), &b);
+}
+
+/// The admin working in `b` grants `sp:e2e-dev` `writer` on `srv/web`; that
+/// principal clones, lands a change there, and after a revoke cannot land
+/// the change it committed before it.
+fn share_a_directory(server: &str, repo: &str, dir: &Path, b: &Path) {
+    let dev = "sp:e2e-dev";
+    let out = scn(b, &["access", "grant", dev, "writer", "--path", "srv/web"]);
+    assert_eq!(out, format!("granted {dev} writer on {repo}:srv/web/\n"));
+    scn(b, &["access", "grant", dev, "reader"]);
+    let list = scn(b, &["access", "list"]);
+    assert!(
+        list.contains(&format!("{dev} writer on {repo}:srv/web/\n")),
+        "{list}"
+    );
+
+    scn_as(dev, dir, &["clone", server, repo, "dev"]);
+    let wc = dir.join("dev");
+    let me = scn_as(dev, &wc, &["whoami"]);
+    assert!(
+        me.ends_with(&format!("\nreader on {repo}\nwriter on {repo}:srv/web/\n")),
+        "{me}"
+    );
+    std::fs::write(wc.join("srv/web/about.html"), b"<p>about</p>\n").unwrap();
+    scn_as(dev, &wc, &["add", "srv/web"]);
+    scn_as(dev, &wc, &["commit", "-m", "about page"]);
+    assert!(scn_as(dev, &wc, &["land"]).starts_with("landed "));
+
+    std::fs::write(wc.join("srv/web/contact.html"), b"<p>contact</p>\n").unwrap();
+    scn_as(dev, &wc, &["add", "srv/web"]);
+    scn_as(dev, &wc, &["commit", "-m", "contact page"]);
+    scn(b, &["access", "revoke", dev, "--path", "srv/web"]);
+    let out = Command::new(env!("CARGO_BIN_EXE_scn"))
+        .env("SCN_TOKEN", token_of(dev))
+        .current_dir(&wc)
+        .arg("land")
+        .output()
+        .unwrap();
+    assert!(!out.status.success(), "land after revoke succeeded");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains(&format!("{dev} is not a writer of")), "{err}");
 }
 
 /// `b` commits a fix that becomes `release/1`; `a` merges it into its own

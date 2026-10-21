@@ -307,4 +307,8 @@ impl MetadataStore for Staged<'_> {
     async fn grants_for(&self, repo: &str, principal: &str) -> Result<Vec<Grant>> {
         self.meta.grants_for(repo, principal).await
     }
+
+    async fn grants(&self, repo: &str) -> Result<Vec<Grant>> {
+        self.meta.grants(repo).await
+    }
 }

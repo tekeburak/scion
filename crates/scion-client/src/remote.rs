@@ -9,10 +9,10 @@ use scion_proto::v1::login_service_client::LoginServiceClient;
 use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_proto::v1::{
     BlameRequest, CreateChangesetRequest, DiffRequest, FindLandingRequest, FinishLoginRequest,
-    GetBlobRequest, GetChangeRequestRequest, GetRefRequest, GetTreeRequest, InitRepoRequest,
-    ListChangeRequestsRequest, LogRequest, LogResponse, MergeBaseRequest, MergeRequest,
-    MoveRefRequest, PathLogRequest, PutBlobRequest, RebaseRequest, RevertRequest,
-    StartLoginRequest, SubmitChangeRequestRequest,
+    GetBlobRequest, GetChangeRequestRequest, GetRefRequest, GetTreeRequest, GrantRequest,
+    InitRepoRequest, ListChangeRequestsRequest, ListGrantsRequest, LogRequest, LogResponse,
+    MergeBaseRequest, MergeRequest, MoveRefRequest, PathLogRequest, PutBlobRequest, RebaseRequest,
+    RevertRequest, RevokeRequest, StartLoginRequest, SubmitChangeRequestRequest, WhoAmIRequest,
 };
 use scion_types::{
     BlobId, Changeset, ChangesetId, Decode, Encode, FileType, Identity, RepoPath, Timestamp, Tree,
@@ -25,6 +25,10 @@ use tonic::transport::{Channel, Endpoint};
 
 /// The status filter of [`Remote::list_change_requests`].
 pub use scion_proto::v1::ChangeRequestStatus;
+
+/// A principal's role on a directory of a repository (an empty
+/// `path_prefix` for all of it), as [`Remote::list_grants`] reports it.
+pub use scion_proto::v1::AccessGrant;
 
 /// Deadline the client attaches to every RPC.
 pub const RPC_DEADLINE: Duration = Duration::from_secs(30);
@@ -146,6 +150,15 @@ pub struct RemoteChangeRequest {
     pub submitted_at: SystemTime,
     /// When `main` moved to the landed changeset; set once landed.
     pub landed_at: Option<SystemTime>,
+}
+
+/// Who a token names, as [`Remote::who_am_i`] reports it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhoAmI {
+    pub principal: String,
+    pub expires_at: SystemTime,
+    /// The principal's grants in the repository asked about, by path prefix.
+    pub grants: Vec<AccessGrant>,
 }
 
 /// A started GitHub device-flow login: the user enters `user_code` at
@@ -837,5 +850,75 @@ impl Remote {
                 ))
             })
             .collect()
+    }
+
+    /// Give `principal` `role` on `path_prefix` (empty for the whole
+    /// repository) in `repo`.
+    pub async fn grant(
+        &mut self,
+        repo: &str,
+        principal: &str,
+        role: &str,
+        path_prefix: &str,
+    ) -> Result<(), RemoteError> {
+        self.control
+            .grant(GrantRequest {
+                repo: repo.to_owned(),
+                grant: Some(AccessGrant {
+                    principal: principal.to_owned(),
+                    path_prefix: path_prefix.to_owned(),
+                    role: role.to_owned(),
+                }),
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Remove `principal`'s grant on `path_prefix` in `repo`.
+    pub async fn revoke(
+        &mut self,
+        repo: &str,
+        principal: &str,
+        path_prefix: &str,
+    ) -> Result<(), RemoteError> {
+        self.control
+            .revoke(RevokeRequest {
+                repo: repo.to_owned(),
+                principal: principal.to_owned(),
+                path_prefix: path_prefix.to_owned(),
+            })
+            .await?;
+        Ok(())
+    }
+
+    /// Every grant in `repo`, by principal then path prefix.
+    pub async fn list_grants(&mut self, repo: &str) -> Result<Vec<AccessGrant>, RemoteError> {
+        let resp = self
+            .control
+            .list_grants(ListGrantsRequest {
+                repo: repo.to_owned(),
+            })
+            .await?
+            .into_inner();
+        Ok(resp.grants)
+    }
+
+    /// Who this connection's token names, and its grants in `repo` unless
+    /// `repo` is empty.
+    pub async fn who_am_i(&mut self, repo: &str) -> Result<WhoAmI, RemoteError> {
+        let resp = self
+            .control
+            .who_am_i(WhoAmIRequest {
+                repo: repo.to_owned(),
+            })
+            .await?
+            .into_inner();
+        let expires = u64::try_from(resp.expires_unix_seconds)
+            .map_err(|_| RemoteError::Malformed("token expiry"))?;
+        Ok(WhoAmI {
+            principal: resp.principal,
+            expires_at: UNIX_EPOCH + Duration::from_secs(expires),
+            grants: resp.grants,
+        })
     }
 }

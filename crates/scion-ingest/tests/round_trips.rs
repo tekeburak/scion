@@ -330,6 +330,11 @@ impl MetadataStore for CountingMeta {
         self.tick();
         self.inner.grants_for(repo, principal).await
     }
+
+    async fn grants(&self, repo: &str) -> scion_store::Result<Vec<Grant>> {
+        self.tick();
+        self.inner.grants(repo).await
+    }
 }
 
 #[tokio::test]

@@ -9,6 +9,7 @@
 mod auth;
 mod backfill;
 mod control;
+mod grants;
 mod land;
 mod login;
 mod object;

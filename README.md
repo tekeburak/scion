@@ -93,7 +93,9 @@ What works today:
   merge and revert only files under it, and its reader reads only those files' history,
   blame and diffs; a refusal names the path. People sign in with GitHub (`scn login
   <server>`, device flow, the token kept per server with mode 0600); CI and agents use
-  service-principal tokens from `scion-server token`.
+  service-principal tokens from `scion-server token`. A repository's admins grant, revoke and
+  list its roles from a working copy (`scn access grant|revoke|list`), and `scn whoami` shows
+  who a token names, until when, and its roles in the repository.
 - **Benchmarks** against git on a pinned slice of a real repository, from clone and `blame`
   to 16 writers landing at once, with the numbers [below](#benchmarks).
 
@@ -321,8 +323,8 @@ Access control is under way. Every request needs a token signed by the server: a
 issues one with `scion-server token` (for a person or a service principal such as CI) and `scn`
 sends it from `SCN_TOKEN`. Each request also needs a role in its repository (reader, writer,
 admin), granted with `scion-server grant` and removed with `revoke`, optionally limited to a
-directory; people sign in with GitHub through `scn login`. Next come managing access from `scn`,
-together with fuzzing and a hermetic simulation. In parallel, a performance pass aims at every
+directory; people sign in with GitHub through `scn login`, and a repository's admins manage its
+roles with `scn access`. Next come fuzzing and a hermetic simulation. In parallel, a performance pass aims at every
 benchmark row being a multiple faster than git: trees and history pages move into the metadata
 database as the reference design keeps them, the object plane gains streaming batch requests, and
 landing becomes one round trip. After that, in order: a web interface (repository, history, blame

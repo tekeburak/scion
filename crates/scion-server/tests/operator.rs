@@ -49,7 +49,8 @@ async fn bootstraps_an_admin_and_a_service_principal_from_an_empty_database() {
     let ci_token = run(&meta, "token sp:ci --ttl 30d", now).await.unwrap();
 
     assert_eq!(
-        key.verify(&admin_token, now + Duration::from_secs(3_599)),
+        key.verify(&admin_token, now + Duration::from_secs(3_599))
+            .map(|(p, _)| p),
         Ok("github:octocat".to_owned())
     );
     assert!(
@@ -57,7 +58,8 @@ async fn bootstraps_an_admin_and_a_service_principal_from_an_empty_database() {
             .is_err()
     );
     assert_eq!(
-        key.verify(&ci_token, now + Duration::from_secs(29 * 86_400)),
+        key.verify(&ci_token, now + Duration::from_secs(29 * 86_400))
+            .map(|(p, _)| p),
         Ok("sp:ci".to_owned())
     );
     assert_eq!(

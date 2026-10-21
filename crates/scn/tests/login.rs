@@ -139,7 +139,7 @@ async fn login_stores_a_token_of_the_github_user() {
     let mode = std::fs::metadata(&path).unwrap().permissions().mode();
     assert_eq!(mode & 0o777, 0o600);
     let token = std::fs::read_to_string(&path).unwrap();
-    let principal = key().verify(token.trim(), SystemTime::now()).unwrap();
+    let (principal, _) = key().verify(token.trim(), SystemTime::now()).unwrap();
     assert_eq!(principal, "github:octocat");
 
     // Later commands send it: the server knows who is asking, and that it

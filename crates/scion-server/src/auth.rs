@@ -14,9 +14,10 @@ use tonic::{Request, Status};
 use crate::store_status;
 use crate::token::TokenKey;
 
-/// The principal a request's token names, put there by [`Authenticate`].
+/// The principal a request's token names and the token's expiry, put there
+/// by [`Authenticate`].
 #[derive(Debug, Clone)]
-pub(crate) struct Principal(pub(crate) String);
+pub(crate) struct Principal(pub(crate) String, pub(crate) SystemTime);
 
 /// Refuses a request whose bearer token is missing, malformed, signed with
 /// another key or expired, with UNAUTHENTICATED.
@@ -33,11 +34,11 @@ impl Interceptor for Authenticate {
             .ok()
             .and_then(|v| v.strip_prefix("Bearer "))
             .ok_or_else(|| refused("authorization is not `Bearer <token>`"))?;
-        let principal = self
+        let (principal, expiry) = self
             .0
             .verify(token.trim(), SystemTime::now())
             .map_err(|e| refused(&e.to_string()))?;
-        req.extensions_mut().insert(Principal(principal));
+        req.extensions_mut().insert(Principal(principal, expiry));
         Ok(req)
     }
 }
@@ -51,10 +52,14 @@ fn refused(why: &str) -> Status {
 
 /// The principal of an authenticated request.
 pub(crate) fn principal<T>(request: &Request<T>) -> Result<&str, Status> {
+    Ok(&token_of(request)?.0)
+}
+
+/// The principal and token expiry of an authenticated request.
+pub(crate) fn token_of<T>(request: &Request<T>) -> Result<&Principal, Status> {
     request
         .extensions()
         .get::<Principal>()
-        .map(|p| p.0.as_str())
         .ok_or_else(|| refused("no token"))
 }
 
@@ -168,7 +173,7 @@ impl Scope {
             .unwrap_or_default();
         Status::permission_denied(format!(
             "{principal} may not {doing} {path}: its {role} grants in {repo:?} cover {held}; \
-             an admin can run `scion-server grant {repo} {principal} {role}{at}`"
+             an admin of it can run `scn access grant {principal} {role}{at}`"
         ))
     }
 }
@@ -187,13 +192,16 @@ pub(crate) async fn authorize<T>(
     if !scope.prefixes.is_empty() {
         return Ok(scope);
     }
-    let quoted = if repo == SERVER_GRANTS { "'*'" } else { repo };
-    let what = if repo == SERVER_GRANTS {
-        format!("{principal} is not a server {need}")
+    Err(Status::permission_denied(if repo == SERVER_GRANTS {
+        format!(
+            "{principal} is not a server {need}; an operator can run \
+             `scion-server grant '*' {principal} {need}`"
+        )
     } else {
-        format!("{principal} is not a {need} of {repo:?}")
-    };
-    Err(Status::permission_denied(format!(
-        "{what}; an admin can run `scion-server grant {quoted} {principal} {need}`"
-    )))
+        let a = if need == Role::Admin { "an" } else { "a" };
+        format!(
+            "{principal} is not {a} {need} of {repo:?}; an admin of it can run \
+             `scn access grant {principal} {need}`"
+        )
+    }))
 }

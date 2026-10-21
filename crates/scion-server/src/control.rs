@@ -15,11 +15,12 @@ use scion_proto::v1::{
     BlameRequest, BlameResponse, BlameRun, ChangeRequest, ChangeRequestStatus,
     CreateChangesetRequest, CreateChangesetResponse, DiffEntry, DiffRequest, DiffResponse,
     FileEntry, FileType, FindLandingRequest, FindLandingResponse, GetChangeRequestRequest,
-    GetRefRequest, GetRefResponse, InitRepoRequest, InitRepoResponse, Landing,
-    ListChangeRequestsRequest, ListChangeRequestsResponse, LogRequest, LogResponse,
-    MergeBaseRequest, MergeBaseResponse, MergeRequest, MergeResponse, MoveRefRequest,
-    MoveRefResponse, PathLogRequest, RebaseRequest, RebaseResponse, RevertRequest, RevertResponse,
-    SubmitChangeRequestRequest,
+    GetRefRequest, GetRefResponse, GrantRequest, GrantResponse, InitRepoRequest, InitRepoResponse,
+    Landing, ListChangeRequestsRequest, ListChangeRequestsResponse, ListGrantsRequest,
+    ListGrantsResponse, LogRequest, LogResponse, MergeBaseRequest, MergeBaseResponse, MergeRequest,
+    MergeResponse, MoveRefRequest, MoveRefResponse, PathLogRequest, RebaseRequest, RebaseResponse,
+    RevertRequest, RevertResponse, RevokeRequest, RevokeResponse, SubmitChangeRequestRequest,
+    WhoAmIRequest, WhoAmIResponse,
 };
 use scion_store::{
     Grant, MetadataStore, ObjectStore, Role, SERVER_GRANTS, StoreError, is_allowed_ref_name,
@@ -1097,5 +1098,33 @@ impl ControlService for ControlServer {
                 })
                 .collect(),
         }))
+    }
+
+    async fn grant(
+        &self,
+        request: Request<GrantRequest>,
+    ) -> Result<Response<GrantResponse>, Status> {
+        crate::grants::grant(&*self.meta, request).await
+    }
+
+    async fn revoke(
+        &self,
+        request: Request<RevokeRequest>,
+    ) -> Result<Response<RevokeResponse>, Status> {
+        crate::grants::revoke(&*self.meta, request).await
+    }
+
+    async fn list_grants(
+        &self,
+        request: Request<ListGrantsRequest>,
+    ) -> Result<Response<ListGrantsResponse>, Status> {
+        crate::grants::list_grants(&*self.meta, request).await
+    }
+
+    async fn who_am_i(
+        &self,
+        request: Request<WhoAmIRequest>,
+    ) -> Result<Response<WhoAmIResponse>, Status> {
+        crate::grants::who_am_i(&*self.meta, request).await
     }
 }

@@ -68,8 +68,10 @@ message PutTreeResponse {
 // Control plane: served only by scion-server. Every request names its
 // repository; one server serves many. Each RPC needs a role in it: `reader`
 // for reads, `writer` for CreateChangeset, Rebase, Merge, Revert and
-// SubmitChangeRequest, `admin` for MoveRef; InitRepo needs `admin` on the
-// server (grants of repository `*`). A missing role is PERMISSION_DENIED.
+// SubmitChangeRequest, `admin` of the whole repository for MoveRef, Grant,
+// Revoke and ListGrants; InitRepo needs `admin` on the server (grants of
+// repository `*`); WhoAmI needs only a token. A missing role is
+// PERMISSION_DENIED.
 // ---------------------------------------------------------------------------
 
 service ControlService {
@@ -89,6 +91,10 @@ service ControlService {
   rpc GetChangeRequest(GetChangeRequestRequest) returns (ChangeRequest);
   rpc ListChangeRequests(ListChangeRequestsRequest) returns (ListChangeRequestsResponse);
   rpc FindLanding(FindLandingRequest) returns (FindLandingResponse);
+  rpc Grant(GrantRequest) returns (GrantResponse);
+  rpc Revoke(RevokeRequest) returns (RevokeResponse);
+  rpc ListGrants(ListGrantsRequest) returns (ListGrantsResponse);
+  rpc WhoAmI(WhoAmIRequest) returns (WhoAmIResponse);
 }
 
 // Create a repository with `main` at its root changeset and make the caller
@@ -390,6 +396,57 @@ message ChangeRequest {
   uint64 submitted_unix_micros = 7;
   // When `main` moved to `landed`; present once LANDED.
   optional uint64 landed_unix_micros = 8;
+}
+
+// One principal's role on the paths of a repository under `path_prefix`.
+message AccessGrant {
+  // `github:<login>` or `sp:<name>`.
+  string principal = 1;
+  // A directory of the repository without a trailing `/`; empty for the
+  // whole repository.
+  string path_prefix = 2;
+  // `reader`, `writer` or `admin`; each includes the ones before it.
+  string role = 3;
+}
+
+// Give a principal a role, replacing its role on the same prefix. A bad
+// principal, role or prefix is INVALID_ARGUMENT.
+message GrantRequest {
+  string repo = 1;
+  AccessGrant grant = 2;
+}
+
+message GrantResponse {}
+
+// Remove a principal's grant on a prefix; NOT_FOUND if it has none there.
+message RevokeRequest {
+  string repo = 1;
+  string principal = 2;
+  string path_prefix = 3;
+}
+
+message RevokeResponse {}
+
+message ListGrantsRequest {
+  string repo = 1;
+}
+
+message ListGrantsResponse {
+  // By principal, then path prefix.
+  repeated AccessGrant grants = 1;
+}
+
+// Who the caller's token names. With `repo`, also the caller's grants there.
+message WhoAmIRequest {
+  string repo = 1;
+}
+
+message WhoAmIResponse {
+  string principal = 1;
+  // When the token expires, in Unix seconds.
+  int64 expires_unix_seconds = 2;
+  // The caller's grants in `repo`, by path prefix.
+  repeated AccessGrant grants = 3;
 }
 
 // ---------------------------------------------------------------------------

@@ -410,6 +410,19 @@ impl MetadataStore for MemoryStore {
             })
             .collect())
     }
+
+    async fn grants(&self, repo: &str) -> Result<Vec<Grant>> {
+        let m = self.meta.read().expect("poisoned");
+        Ok(m.grants
+            .iter()
+            .filter(|((r, _, _), _)| r == repo)
+            .map(|((_, p, prefix), role)| Grant {
+                principal: p.clone(),
+                path_prefix: prefix.clone(),
+                role: *role,
+            })
+            .collect())
+    }
 }
 
 #[async_trait]

@@ -46,29 +46,14 @@ impl Command {
                 repo: (*repo).to_owned(),
                 ty: (*ty).to_owned(),
             }),
-            ["grant", repo, principal, role, rest @ ..] => {
-                let role = Role::parse(role).ok_or_else(|| {
-                    format!("unknown role {role:?}; roles are reader, writer, admin")
-                })?;
-                let path_prefix = path_option(repo, rest)?;
-                if *repo == SERVER_GRANTS && role != Role::Admin {
-                    return Err(format!(
-                        "a server-wide grant ({SERVER_GRANTS}) is admin; got {role}"
-                    ));
-                }
-                Ok(Self::Grant {
-                    repo: (*repo).to_owned(),
-                    grant: Grant {
-                        principal: principal_arg(principal)?,
-                        path_prefix,
-                        role,
-                    },
-                })
-            }
+            ["grant", repo, principal, role, rest @ ..] => Ok(Self::Grant {
+                repo: (*repo).to_owned(),
+                grant: parse_grant(repo, principal, role, path_option(rest)?)?,
+            }),
             ["revoke", repo, principal, rest @ ..] => Ok(Self::Revoke {
                 repo: (*repo).to_owned(),
                 principal: principal_arg(principal)?,
-                path_prefix: path_option(repo, rest)?,
+                path_prefix: parse_prefix(repo, path_option(rest)?)?,
             }),
             ["token", principal, "--ttl", ttl] => Ok(Self::Token {
                 principal: principal_arg(principal)?,
@@ -129,26 +114,54 @@ fn scope(repo: &str, path_prefix: &str) -> String {
     }
 }
 
-fn principal_arg(principal: &str) -> Result<String, String> {
+/// A grant of `role` to `principal` on `dir` (the whole repository if
+/// `None`) in `repo`, checked as it comes from a command line or a client.
+pub(crate) fn parse_grant(
+    repo: &str,
+    principal: &str,
+    role: &str,
+    dir: Option<&str>,
+) -> Result<Grant, String> {
+    let role = Role::parse(role)
+        .ok_or_else(|| format!("unknown role {role:?}; roles are reader, writer, admin"))?;
+    if repo == SERVER_GRANTS && role != Role::Admin {
+        return Err(format!(
+            "a server-wide grant ({SERVER_GRANTS}) is admin; got {role}"
+        ));
+    }
+    Ok(Grant {
+        principal: principal_arg(principal)?,
+        path_prefix: parse_prefix(repo, dir)?,
+        role,
+    })
+}
+
+pub(crate) fn principal_arg(principal: &str) -> Result<String, String> {
     check_principal(principal).map_err(|e| e.to_string())?;
     Ok(principal.to_owned())
 }
 
-/// The prefix `[--path <dir>]` names: a repository directory without the
-/// trailing `/`, or empty for the whole repository.
-fn path_option(repo: &str, rest: &[&str]) -> Result<String, String> {
+/// The prefix `dir` names in `repo`: a repository directory without the
+/// trailing `/`, or empty for the whole repository if `None`.
+pub(crate) fn parse_prefix(repo: &str, dir: Option<&str>) -> Result<String, String> {
+    let Some(dir) = dir else {
+        return Ok(String::new());
+    };
+    if repo == SERVER_GRANTS {
+        return Err(format!(
+            "a server-wide grant ({SERVER_GRANTS}) has no --path"
+        ));
+    }
+    let dir = dir.trim_end_matches('/');
+    RepoPath::new(dir).map_err(|e| format!("--path {dir:?}: {e}"))?;
+    Ok(dir.to_owned())
+}
+
+/// The directory of `[--path <dir>]`, if given.
+fn path_option<'a>(rest: &[&'a str]) -> Result<Option<&'a str>, String> {
     match rest {
-        [] => Ok(String::new()),
-        ["--path", dir] => {
-            if repo == SERVER_GRANTS {
-                return Err(format!(
-                    "a server-wide grant ({SERVER_GRANTS}) has no --path"
-                ));
-            }
-            let dir = dir.trim_end_matches('/');
-            RepoPath::new(dir).map_err(|e| format!("--path {dir:?}: {e}"))?;
-            Ok(dir.to_owned())
-        }
+        [] => Ok(None),
+        ["--path", dir] => Ok(Some(dir)),
         _ => Err(USAGE.to_owned()),
     }
 }

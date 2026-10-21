@@ -991,6 +991,27 @@ impl MetadataStore for PostgresStore {
             })
             .collect()
     }
+
+    async fn grants(&self, repo: &str) -> Result<Vec<Grant>> {
+        let rows: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT g.principal, g.path_prefix, g.role FROM grants g JOIN repos r ON r.id = g.repo \
+             WHERE r.name = $1 ORDER BY g.principal COLLATE \"C\", g.path_prefix COLLATE \"C\"",
+        )
+        .bind(repo)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|(principal, path_prefix, role)| {
+                let role = Role::parse(&role)
+                    .ok_or_else(|| StoreError::Corrupt(format!("grant role {role:?}")))?;
+                Ok(Grant {
+                    principal,
+                    path_prefix,
+                    role,
+                })
+            })
+            .collect()
+    }
 }
 
 #[cfg(all(test, feature = "integration"))]

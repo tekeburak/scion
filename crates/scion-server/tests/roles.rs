@@ -1,6 +1,7 @@
 //! Each RPC needs a role: `reader` for reads and the object plane, `writer`
 //! for creating changesets, merges, reverts and change requests, `admin` for
-//! `MoveRef`, and server admin for `InitRepo`. A caller without it gets
+//! `MoveRef` and managing grants, server admin for `InitRepo`, and only a
+//! token for `WhoAmI`. A caller without it gets
 //! `PERMISSION_DENIED` before the request is looked at; a caller with it gets
 //! past the check (the request may still fail on its contents).
 
@@ -16,10 +17,10 @@ use scion_proto::v1::control_service_client::ControlServiceClient;
 use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_proto::v1::{
     BlameRequest, CreateChangesetRequest, DiffRequest, FindLandingRequest, GetBlobRequest,
-    GetChangeRequestRequest, GetRefRequest, GetTreeRequest, InitRepoRequest,
-    ListChangeRequestsRequest, LogRequest, MergeBaseRequest, MergeRequest, MoveRefRequest,
-    PathLogRequest, PutBlobRequest, PutTreeRequest, RebaseRequest, RevertRequest,
-    SubmitChangeRequestRequest,
+    GetChangeRequestRequest, GetRefRequest, GetTreeRequest, GrantRequest, InitRepoRequest,
+    ListChangeRequestsRequest, ListGrantsRequest, LogRequest, MergeBaseRequest, MergeRequest,
+    MoveRefRequest, PathLogRequest, PutBlobRequest, PutTreeRequest, RebaseRequest, RevertRequest,
+    RevokeRequest, SubmitChangeRequestRequest, WhoAmIRequest,
 };
 use scion_store::{MemoryStore, MetadataStore, Role, SERVER_GRANTS};
 use scion_types::{Encode, Tree};
@@ -31,6 +32,7 @@ use tonic::transport::Channel;
 enum Need {
     Repo(Role),
     ServerAdmin,
+    Token,
 }
 
 const RPCS: &[(&str, Need)] = &[
@@ -54,6 +56,10 @@ const RPCS: &[(&str, Need)] = &[
     ("GetChangeRequest", Need::Repo(Role::Reader)),
     ("ListChangeRequests", Need::Repo(Role::Reader)),
     ("FindLanding", Need::Repo(Role::Reader)),
+    ("Grant", Need::Repo(Role::Admin)),
+    ("Revoke", Need::Repo(Role::Admin)),
+    ("ListGrants", Need::Repo(Role::Admin)),
+    ("WhoAmI", Need::Token),
 ];
 
 /// Call `rpc` on `REPO` (a new repository for `InitRepo`) as `bearer`;
@@ -220,6 +226,33 @@ async fn call(channel: &Channel, rpc: &str, bearer: Bearer, n: usize) -> Code {
             })
             .await
             .map(drop),
+        "Grant" => control
+            .grant(GrantRequest {
+                repo: repo(),
+                grant: Some(scion_proto::v1::AccessGrant {
+                    principal: format!("sp:grantee-{n}"),
+                    path_prefix: String::new(),
+                    role: "reader".into(),
+                }),
+            })
+            .await
+            .map(drop),
+        "Revoke" => control
+            .revoke(RevokeRequest {
+                repo: repo(),
+                principal: format!("sp:grantee-{n}"),
+                path_prefix: String::new(),
+            })
+            .await
+            .map(drop),
+        "ListGrants" => control
+            .list_grants(ListGrantsRequest { repo: repo() })
+            .await
+            .map(drop),
+        "WhoAmI" => control
+            .who_am_i(WhoAmIRequest { repo: repo() })
+            .await
+            .map(drop),
         other => panic!("no call for {other}"),
     };
     result.map_or_else(|st| st.code(), |()| Code::Ok)
@@ -272,9 +305,19 @@ async fn every_rpc_as_each_role() {
             let allowed = match need {
                 Need::ServerAdmin => server,
                 Need::Repo(need) => role >= Some(*need),
+                Need::Token => true,
             };
             let code = call(&channel, rpc, bearer, n).await;
-            if allowed && ["InitRepo", "PutBlob", "PutTree", "CreateChangeset"].contains(rpc) {
+            let succeeds = [
+                "InitRepo",
+                "PutBlob",
+                "PutTree",
+                "CreateChangeset",
+                "Grant",
+                "ListGrants",
+                "WhoAmI",
+            ];
+            if allowed && succeeds.contains(rpc) {
                 assert_eq!(code, Code::Ok, "{rpc} as {principal}");
             } else if allowed {
                 assert!(

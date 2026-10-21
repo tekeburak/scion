@@ -1,8 +1,9 @@
 //! `scn`: the Scion command-line client.
 //!
 //! Setup: `login` signs in to a server with GitHub and keeps its token for
-//! later commands; `init` creates an empty repository on a server; `clone`
-//! makes a working copy of one.
+//! later commands, and `whoami` shows who it names; `init` creates an empty
+//! repository on a server; `clone` makes a working copy of one; `access`
+//! lets the repository's admins grant, revoke and list roles in it.
 //!
 //! Reading: `clone`, `status`, `log`, `diff`, `blame`. Every history question
 //! is an RPC to `scion-server`; the working copy is only needed for `status`
@@ -35,7 +36,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use clap::{Parser, Subcommand};
 use scion_client::{
-    ChangeRequestStatus, Config, FileStatus, LoginPoll, MAIN_REF, Marked, Remote,
+    AccessGrant, ChangeRequestStatus, Config, FileStatus, LoginPoll, MAIN_REF, Marked, Remote,
     RemoteChangeRequest, RemoteError, RequestStatus, SparseProfile, State, SwitchError, Workspace,
     read_working_file, status,
 };
@@ -59,6 +60,18 @@ enum Command {
     Login {
         /// Server address, e.g. `http://127.0.0.1:7070`.
         server: String,
+    },
+    /// Show who the token for a server names, until when, and its roles in
+    /// the working copy's repository.
+    Whoami {
+        /// Server address; defaults to the working copy's server.
+        server: Option<String>,
+    },
+    /// Grant, revoke and list roles in the working copy's repository (its
+    /// admins only).
+    Access {
+        #[command(subcommand)]
+        action: AccessAction,
     },
     /// Create an empty repository on a server, with `main` at its root.
     Init {
@@ -189,6 +202,29 @@ enum Command {
         #[arg(long)]
         force: bool,
     },
+}
+
+#[derive(Subcommand)]
+enum AccessAction {
+    /// Give a principal a role, replacing its role on the same directory.
+    Grant {
+        /// `github:<login>` or `sp:<name>`.
+        principal: String,
+        /// `reader`, `writer` or `admin`.
+        role: String,
+        /// Limit the grant to this directory, from the repository root.
+        #[arg(long, value_name = "DIR")]
+        path: Option<String>,
+    },
+    /// Remove a principal's grant on the whole repository or a directory.
+    Revoke {
+        principal: String,
+        /// The directory of the grant, from the repository root.
+        #[arg(long, value_name = "DIR")]
+        path: Option<String>,
+    },
+    /// List every grant in the repository.
+    List,
 }
 
 /// A change-request status, as `scn requests --status` spells it.
@@ -449,6 +485,99 @@ async fn login(out: &mut impl Write, server: &str) -> Result<()> {
         format_date(Timestamp::new(expires, 0)),
         path.display()
     )?;
+    Ok(())
+}
+
+/// `<repo>`, or `<repo>:<dir>/` for a directory of it.
+fn scope(repo: &str, dir: &str) -> String {
+    match dir.trim_end_matches('/') {
+        "" => repo.to_owned(),
+        dir => format!("{repo}:{dir}/"),
+    }
+}
+
+/// `<role> on <scope>`.
+fn grant_line(repo: &str, g: &AccessGrant) -> String {
+    format!("{} on {}", g.role, scope(repo, &g.path_prefix))
+}
+
+async fn whoami(out: &mut impl Write, server: Option<&str>) -> Result<()> {
+    let (server, repo) = if let Some(s) = server {
+        (s.to_owned(), String::new())
+    } else {
+        let config = Workspace::find(&std::env::current_dir()?)?.read_config()?;
+        (config.server, config.repo)
+    };
+    let me = Remote::connect(&server).await?.who_am_i(&repo).await?;
+    writeln!(
+        out,
+        "{} on {server}, token valid until {}",
+        me.principal,
+        format_utc(me.expires_at)
+    )?;
+    if repo.is_empty() {
+        return Ok(());
+    }
+    if me.grants.is_empty() {
+        writeln!(out, "no role in {repo}")?;
+    }
+    for g in &me.grants {
+        writeln!(out, "{}", grant_line(&repo, g))?;
+    }
+    Ok(())
+}
+
+async fn access(out: &mut impl Write, action: AccessAction) -> Result<()> {
+    let mut s = Session::open().await?;
+    let repo = s.config.repo.clone();
+    // The server's refusals are sentences; show them without the status
+    // around them.
+    let plain = |e: RemoteError| -> Box<dyn std::error::Error> {
+        match e {
+            RemoteError::Rpc(st)
+                if matches!(
+                    st.code(),
+                    tonic::Code::InvalidArgument
+                        | tonic::Code::NotFound
+                        | tonic::Code::PermissionDenied
+                ) =>
+            {
+                st.message().into()
+            }
+            e => e.into(),
+        }
+    };
+    match action {
+        AccessAction::Grant {
+            principal,
+            role,
+            path,
+        } => {
+            let prefix = path.unwrap_or_default();
+            s.remote
+                .grant(&repo, &principal, &role, &prefix)
+                .await
+                .map_err(plain)?;
+            writeln!(
+                out,
+                "granted {principal} {role} on {}",
+                scope(&repo, &prefix)
+            )?;
+        }
+        AccessAction::Revoke { principal, path } => {
+            let prefix = path.unwrap_or_default();
+            s.remote
+                .revoke(&repo, &principal, &prefix)
+                .await
+                .map_err(plain)?;
+            writeln!(out, "revoked {principal} on {}", scope(&repo, &prefix))?;
+        }
+        AccessAction::List => {
+            for g in s.remote.list_grants(&repo).await.map_err(plain)? {
+                writeln!(out, "{} {}", g.principal, grant_line(&repo, &g))?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -912,6 +1041,8 @@ async fn run(cli: Cli) -> Result<()> {
     let mut out = io::BufWriter::new(io::stdout().lock());
     match cli.command {
         Command::Login { server } => login(&mut out, &server).await?,
+        Command::Whoami { server } => whoami(&mut out, server.as_deref()).await?,
+        Command::Access { action } => access(&mut out, action).await?,
         Command::Init { server, repo } => init(&mut out, &server, &repo).await?,
         Command::Clone {
             server,
