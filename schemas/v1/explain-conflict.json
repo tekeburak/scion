@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/explain-conflict.json",
+  "title": "scn explain conflict --json",
+  "description": "Why `head` does not rebase onto `onto`: `changeset` is the first of head's changesets that does not replay (null when it rebases cleanly), and per conflicting path the changesets on each side that changed it since the merge base, newest first, at most 10.",
+  "type": "object",
+  "properties": {
+    "head": {
+      "$ref": "defs.json#/$defs/id"
+    },
+    "onto": {
+      "$ref": "defs.json#/$defs/id"
+    },
+    "base": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 64,
+      "maxLength": 64
+    },
+    "changeset": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "minLength": 64,
+      "maxLength": 64
+    },
+    "conflicts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "$ref": "defs.json#/$defs/path"
+          },
+          "ours": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "$ref": "defs.json#/$defs/id"
+                },
+                "subject": {
+                  "type": "string"
+                },
+                "author": {
+                  "$ref": "defs.json#/$defs/person"
+                }
+              },
+              "required": [
+                "id",
+                "subject",
+                "author"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "theirs": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "$ref": "defs.json#/$defs/id"
+                },
+                "subject": {
+                  "type": "string"
+                },
+                "author": {
+                  "$ref": "defs.json#/$defs/person"
+                }
+              },
+              "required": [
+                "id",
+                "subject",
+                "author"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "path",
+          "ours",
+          "theirs"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "head",
+    "onto",
+    "base",
+    "changeset",
+    "conflicts"
+  ],
+  "additionalProperties": false
+}

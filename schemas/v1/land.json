@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/land.json",
+  "title": "scn land --json",
+  "description": "The change request and where the working copy is: the landed changeset, or the head it stays at. `land --status` has no `head`.",
+  "type": "object",
+  "properties": {
+    "request": {
+      "$ref": "defs.json#/$defs/change_request"
+    },
+    "head": {
+      "$ref": "defs.json#/$defs/id"
+    }
+  },
+  "required": [
+    "request"
+  ],
+  "additionalProperties": false
+}

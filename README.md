@@ -109,6 +109,16 @@ What works today:
   a repository and reading trees, blobs, log, diff and blame to uploading blobs, creating
   changesets and landing them, with the same tokens, roles and public reads. A clone, a
   commit and a land need nothing but `curl`.
+- **MCP server for agents** (`scion-mcp`, [`docs/MCP.md`](docs/MCP.md)): coding agents list
+  repositories, browse trees, read files at any revision, read log, blame, diffs and
+  changesets, write files as a new changeset and land it, through Model Context Protocol tools
+  and `scion://<repo>/<path>@<revision>` resources, on stdio or streamable HTTP, with the same
+  tokens and roles.
+- **Output for scripts and agents**: `scn --json <command>` prints one JSON document per
+  command, described by a JSON Schema in [`schemas/v1`](schemas/v1); a failure prints an error
+  with a stable code (`conflict`, `needs_rebase`, `dirty`, `permission_denied`, …) and the paths
+  it is about. `scn explain-conflict` names, for each path that keeps the head from rebasing onto
+  `main`, the changesets on both sides that changed it since the merge base.
 - **Robustness checks**: a seeded, hermetic simulation runs many clients committing, landing,
   merging and reverting while land workers stop and the server restarts, and checks that
   `main` stays linear and nothing landed is lost or written twice; fuzz targets cover every
@@ -376,8 +386,9 @@ A performance pass is under way, aimed at every benchmark row being a multiple f
 a path log already reads all of its changesets in one batch and the server's memos keep their
 hot entries; next, trees and history pages move into the metadata database as the reference
 design keeps them, the object plane gains streaming batch requests, and landing becomes one
-round trip. The web interface's pages, browser sign-in and HTTP/JSON API are in; next come change-request actions and repository settings from the page and an MCP server so coding agents
-can read, commit and land through tools; released binaries, a server image, a production
+round trip. The web interface's pages, browser sign-in, HTTP/JSON API, MCP server and `scn --json`
+are in; next come landing or rejecting change requests and creating repositories and granting
+roles from the web interface; released binaries, a server image, a production
 compose profile and a hosted instance; the regional cache and per-node daemon tiers with
 manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan, with
 acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
@@ -391,6 +402,7 @@ acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
 | Algorithms | `scion-derived` (root tree, path history, blame, skip list), `scion-core` (diff, log, merge-base, merge, rebase), `scion-diff3` |
 | Network | `scion-proto` (gRPC schema), `scion-server` (control plane, object origin, land worker) |
 | Web | `scion-web`: the web interface's server-rendered pages, served in process by `scion-server --web` |
+| Agents | `scion-mcp`: the MCP server agents run, a client of the HTTP/JSON API |
 | Client | `scion-client`: `.scn/` layout, index, sparse profile, clone, checkout, commit and update; `scn`: the CLI |
 | Import | `scion-ingest`: git → Scion importer (`import`, `verify`), checkpoints and incremental sync |
 | Testing | `scion-sim`: seeded, hermetic simulation of the server with faults and restarts |
@@ -409,6 +421,10 @@ cargo test -p scion-sim --test corpus      # replay the fuzz corpus on stable
 #   rustup toolchain install nightly && cargo +nightly install cargo-fuzz --locked
 cd crates/scion-sim/fuzz && cargo +nightly fuzz run request -- -max_total_time=300
 cargo clippy --workspace --all-targets -- -D warnings
+
+# poke the MCP server by hand with the MCP inspector (needs Node.js: apt-get install nodejs npm /
+# brew install node); point it at a server started with --web
+npx @modelcontextprotocol/inspector cargo run -q -p scion-mcp -- --api http://127.0.0.1:8080/api/v1
 
 # local storage backends (Postgres + an S3-compatible server) for integration tests; the
 # tests run their own server, so the compose scion-server service is not needed

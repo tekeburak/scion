@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/log.json",
+  "title": "scn log --json",
+  "description": "First-parent history, newest first.",
+  "type": "object",
+  "properties": {
+    "changesets": {
+      "type": "array",
+      "items": {
+        "$ref": "defs.json#/$defs/changeset"
+      }
+    }
+  },
+  "required": [
+    "changesets"
+  ],
+  "additionalProperties": false
+}

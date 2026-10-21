@@ -99,7 +99,7 @@ caller needs in that repository (`reader` < `writer` < `admin`).
 | Method and path | RPC | Role | Request | Reply |
 |---|---|---|---|---|
 | `POST /repos/{repo}/changesets` | `CreateChangeset` | `writer` on every changed path | changeset JSON; its blobs must be stored first | 201 `{"id", "root_tree"}` |
-| `GET /repos/{repo}/changesets/{id}` | `Log` (limit 1) | `reader` | | changeset JSON |
+| `GET /repos/{repo}/changesets/{id}` | `Log` (limit 1) | `reader` | | changeset JSON with `"root_tree"`, the tree it leaves |
 | `GET /repos/{repo}/log?head=&limit=&path=` | `Log`, or `PathLog` with `path` | `reader` (of `path`) | `limit` defaults to 50, at most 1000 | `{"changesets": [changeset JSON]}`, newest first along first parents; page by asking again from the last one's parent |
 | `GET /repos/{repo}/diff?old=&new=` | `Diff` | `reader` | without `old`, against the empty tree | `{"entries": [{"path", "old": file or null, "new": file or null}]}` with file `{"id", "kind", "size"}`; only paths the caller reads |
 | `GET /repos/{repo}/merge-base?a=&b=` | `MergeBase` | `reader` | | `{"base": id or null}` |

@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/init.json",
+  "title": "scn init --json",
+  "description": "The repository created and the root changeset `main` points to.",
+  "type": "object",
+  "properties": {
+    "server": {
+      "type": "string"
+    },
+    "repo": {
+      "type": "string"
+    },
+    "main": {
+      "$ref": "defs.json#/$defs/id"
+    }
+  },
+  "required": [
+    "server",
+    "repo",
+    "main"
+  ],
+  "additionalProperties": false
+}

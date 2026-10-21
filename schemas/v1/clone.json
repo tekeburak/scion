@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/clone.json",
+  "title": "scn clone --json",
+  "description": "The working copy made.",
+  "type": "object",
+  "properties": {
+    "server": {
+      "type": "string"
+    },
+    "repo": {
+      "type": "string"
+    },
+    "head": {
+      "$ref": "defs.json#/$defs/id"
+    },
+    "path": {
+      "type": "string"
+    },
+    "files": {
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "required": [
+    "server",
+    "repo",
+    "head",
+    "path",
+    "files"
+  ],
+  "additionalProperties": false
+}

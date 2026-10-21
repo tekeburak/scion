@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/add.json",
+  "title": "scn add --json",
+  "description": "Files newly marked for the next commit.",
+  "type": "object",
+  "properties": {
+    "added": {
+      "type": "array",
+      "items": {
+        "$ref": "defs.json#/$defs/path"
+      }
+    }
+  },
+  "required": [
+    "added"
+  ],
+  "additionalProperties": false
+}

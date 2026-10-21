@@ -91,7 +91,13 @@ pub async fn serve_with_web(
     github: Option<GitHub>,
 ) -> Result<(), Failure> {
     let (control, object) = servers(meta.clone(), objects.clone()).await?;
-    let api = api::router(meta.clone(), control.clone(), object.clone(), key.clone());
+    let api = api::router(
+        meta.clone(),
+        objects.clone(),
+        control.clone(),
+        object.clone(),
+        key.clone(),
+    );
     let login = LoginServer::new(github.clone(), key.clone());
     let pages = {
         let key = key.clone();

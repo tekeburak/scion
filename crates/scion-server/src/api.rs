@@ -23,6 +23,7 @@ use axum::http::request::Parts;
 use axum::http::{Method, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
+use scion_derived::{Deriver, RootTree};
 use scion_proto::v1::control_service_server::ControlService;
 use scion_proto::v1::object_service_server::ObjectService;
 use scion_proto::v1::{
@@ -32,7 +33,7 @@ use scion_proto::v1::{
     MergeRequest, MoveRefRequest, PathLogRequest, PutBlobRequest, RebaseRequest, RevertRequest,
     RevokeRequest, SubmitChangeRequestRequest, WhoAmIRequest,
 };
-use scion_store::MetadataStore;
+use scion_store::{MetadataStore, ObjectStore};
 use scion_types::{
     BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, FileType, Identity, RepoPath,
     Timestamp, Tree, TreeEntry,
@@ -50,6 +51,7 @@ use crate::token::TokenKey;
 #[derive(Clone)]
 struct Api {
     meta: Arc<dyn MetadataStore>,
+    store: Arc<dyn ObjectStore>,
     control: Arc<ControlServer>,
     objects: ObjectServer,
     key: TokenKey,
@@ -58,6 +60,7 @@ struct Api {
 /// The routes, to be served under `/api/v1`.
 pub(crate) fn router(
     meta: Arc<dyn MetadataStore>,
+    store: Arc<dyn ObjectStore>,
     control: Arc<ControlServer>,
     objects: ObjectServer,
     key: TokenKey,
@@ -92,6 +95,7 @@ pub(crate) fn router(
         .layer(DefaultBodyLimit::max(MAX_MESSAGE_BYTES))
         .with_state(Api {
             meta,
+            store,
             control,
             objects,
             key,
@@ -783,10 +787,11 @@ async fn changeset(
     State(api): State<Api>,
     caller: Caller,
     Path((repo, cs)): Path<(String, String)>,
-) -> Reply<Shown> {
+) -> Reply<WithTree> {
+    let head = id(&cs, "changeset")?;
     let request = LogRequest {
-        repo,
-        head: id(&cs, "changeset")?,
+        repo: repo.clone(),
+        head: head.clone(),
         limit: 1,
     };
     let reply = api
@@ -802,7 +807,33 @@ async fn changeset(
             format!("changeset {cs}"),
         )
     })?;
-    Ok(Json(shown(first)?))
+    let shown = shown(first)?;
+    // The log above authorized the read and found the changeset.
+    let cs =
+        ChangesetId::try_from_slice(&head).map_err(|e| bad_request(format!("changeset: {e}")))?;
+    let root = Deriver::new(&repo, &*api.meta, &*api.store)
+        .derive::<RootTree>(cs)
+        .await
+        .map_err(|e| {
+            Error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "data_loss",
+                e.to_string(),
+            )
+        })?;
+    Ok(Json(WithTree {
+        shown,
+        root_tree: root.0.to_string(),
+    }))
+}
+
+/// A changeset with the root tree it leaves, so a client can read any path
+/// at it.
+#[derive(Debug, Serialize)]
+struct WithTree {
+    #[serde(flatten)]
+    shown: Shown,
+    root_tree: String,
 }
 
 #[derive(Debug, Deserialize)]
