@@ -1104,3 +1104,12 @@ async fn an_admin_creates_repositories_and_manages_access_from_the_pages() {
         "{page}"
     );
 }
+
+#[tokio::test]
+async fn every_page_shows_the_server_version() {
+    let site = site().await;
+    let (status, page) = get(&site, None, "/").await;
+    assert_eq!(status, 200, "{page}");
+    let want = format!("<footer>Scion {}</footer>", scion_types::version());
+    assert!(page.contains(&want), "{page}");
+}

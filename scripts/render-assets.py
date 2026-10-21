@@ -57,14 +57,14 @@ ROADMAP = [
     ("7", "IAM, fuzzing, simulation", "done"),
     ("10", "Performance", "active"),
     ("11", "Web interface, agent API", "done"),
-    ("9", "Release and hosting", "planned"),
+    ("9", "Release and hosting", "active"),
     ("4", "Cache + daemon tiers", "planned"),
     ("8", "Virtual checkouts (FUSE / NFS)", "planned"),
 ]
 # Phases run in the order listed: git import comes right after the server and CLI so real
 # repositories can be tested and benchmarked.
-STATUS_DONE = "Done: git import, sparse clone, log, blame, change requests + land worker, merge, revert, access control, fuzzing"
-STATUS_NEXT = "now: performance, web interface and agent API; then release, cache tiers, virtual checkouts"
+STATUS_DONE = "Done: git import, sparse clone, log, blame, change requests + land worker, merge, revert, access control, web interface, agent API"
+STATUS_NEXT = "now: performance, release and hosting; then cache tiers, virtual checkouts"
 
 
 def t(x, y, s, size=20, fill=TEXT, weight=400, anchor="start", mono=False, extra=""):

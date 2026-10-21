@@ -24,6 +24,17 @@ mod path;
 mod tree;
 
 pub use canonical::{CanonicalError, Decode, Encode};
+
+/// The release this build belongs to: the workspace version, followed by the
+/// commit when built with `SCION_COMMIT` set (as the release workflow does).
+/// Every binary prints it for `--version`, and the server shows its own.
+pub fn version() -> &'static str {
+    static VERSION: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+    VERSION.get_or_init(|| match option_env!("SCION_COMMIT") {
+        Some(commit) => format!("{} ({commit})", env!("CARGO_PKG_VERSION")),
+        None => env!("CARGO_PKG_VERSION").to_owned(),
+    })
+}
 pub use changeset::{Changeset, FileChange, FileType, Identity, Timestamp};
 pub use id::{BlobId, ChangesetId, IdParseError, TreeId};
 pub use path::{PathComponent, PathError, RepoPath};

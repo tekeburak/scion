@@ -6,6 +6,7 @@
 //! scion-server grant <repo|*> <principal> <role> [--path <dir>]
 //! scion-server revoke <repo|*> <principal> [--path <dir>]
 //! scion-server token <principal> --ttl <duration>   print a token
+//! scion-server --version
 //! ```
 //!
 //! `--web <addr>` also serves the web interface and its HTTP/JSON API
@@ -118,6 +119,7 @@ async fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + S
             let token = scion_server::token(&token_key()?, &principal, ttl, SystemTime::now())?;
             println!("{token}");
         }
+        Command::Version => println!("scion-server {}", scion_types::version()),
     }
     Ok(())
 }

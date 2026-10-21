@@ -123,7 +123,9 @@ What works today:
   command, described by a JSON Schema in [`schemas/v1`](schemas/v1); a failure prints an error
   with a stable code (`conflict`, `needs_rebase`, `dirty`, `permission_denied`, …) and the paths
   it is about. `scn explain-conflict` names, for each path that keeps the head from rebasing onto
-  `main`, the changesets on both sides that changed it since the merge base.
+  `main`, the changesets on both sides that changed it since the merge base. Every binary
+  prints its version and the commit it was built from with `--version`; `GET /api/v1/version`
+  and the web interface's footer show the server's.
 - **Robustness checks**: a seeded, hermetic simulation runs many clients committing, landing,
   merging and reverting while land workers stop and the server restarts, and checks that
   `main` stays linear and nothing landed is lost or written twice; fuzz targets cover every
