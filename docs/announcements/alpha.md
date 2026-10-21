@@ -43,7 +43,8 @@ open-source repository's `library/` directory and times both tools on one 4-vCPU
 (compose Postgres + S3, server on loopback; git in a full clone, `scn` in a sparse clone).
 Medians: 16 writers each landing a different file at once finish in 643 ms against 3,536 ms for
 git's fetch-rebase-push retry loop (p99 per writer 626 ms against 3,522 ms), sparse clone 122 ms
-against 612 ms, `status` 8 ms against 214 ms, warm `blame` 13 ms against 56 ms. Where git wins:
+against 612 ms, `status` 8 ms against 214 ms, warm `blame` 13 ms against 56 ms, warm path `log` 25 ms against
+29 ms. Where git wins:
 a single commit + `land` is 63 ms against 46 ms, because it goes through a change request;
 import into an empty bucket takes 15× git's time (5.7× with the objects already stored); and a
 cold path `log` is 7.0× and a cold `blame` 4.5× git's, because each pointer hop is an
@@ -76,8 +77,8 @@ stored object.
 `scripts/bench-real` imports a pinned 600-commit slice of a real repository into git and into
 Scion on Postgres + an S3-compatible server and times each workload with both, checking every
 checkout byte for byte outside the timers. Sixteen writers landing at once (643 vs 3,536 ms),
-sparse clone (122 vs 612 ms), `status` (8 vs 214 ms) and warm `blame` (13 vs 56 ms) come in
-below git; a single commit + `land` (63 vs 46 ms), cold path `log` and `blame` (7.0× and 4.5×)
+sparse clone (122 vs 612 ms), `status` (8 vs 214 ms), warm `blame` (13 vs 56 ms) and warm
+path `log` (25 vs 29 ms) come in below git; a single commit + `land` (63 vs 46 ms), cold path `log` and `blame` (7.0× and 4.5×)
 and import (15× into an empty bucket, 5.7× warm) do not, and the README says why. A
 performance pass is under way: a path `log` already reads all of its changesets in one batch
 and the server's memos are LRU; next it moves trees and history pages into Postgres, streams
