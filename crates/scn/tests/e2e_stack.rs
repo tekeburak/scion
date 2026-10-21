@@ -11,7 +11,8 @@
 //! that principal lands under it, and a revoke makes its next land fail.
 //! A second test opens every page of the web interface on a repository
 //! seeded the same way, then lands from a change request's page a request
-//! the land worker rejected.
+//! the land worker rejected, and creates a repository and grants a role in
+//! it from the pages.
 //! Each run uses its own repository name, so runs never see each other's
 //! refs or changesets even though they share the database and bucket.
 
@@ -415,6 +416,61 @@ async fn web_pages_on_postgres_and_s3() {
 
     session_and_public(&web, r, &id, &wc).await;
     land_from_the_page(&server, &web, r, dir.path()).await;
+    create_and_grant_from_the_page(&server, &web, &format!("{r}-new"), dir.path()).await;
+}
+
+/// The admin's signed-in browser creates repository `r` and makes
+/// `sp:e2e-page` a writer of it from its settings page; that principal
+/// then clones it and lands a change with `scn`.
+async fn create_and_grant_from_the_page(server: &str, web: &str, r: &str, dir: &Path) {
+    let client = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap();
+    let session = format!("scion_session={}", token());
+    let form = async |path: &str, body: String| {
+        let response = client
+            .post(format!("{web}{path}"))
+            .header("cookie", &session)
+            .header("origin", web)
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(body)
+            .send()
+            .await
+            .unwrap();
+        let status = response.status().as_u16();
+        let to = response.headers()["location"].to_str().unwrap().to_owned();
+        (status, to)
+    };
+    let (status, to) = form("/", format!("repo={r}")).await;
+    assert_eq!((status, to.as_str()), (303, format!("/{r}").as_str()));
+    let page = "sp:e2e-page";
+    let (status, to) = form(
+        &format!("/{r}/settings/grant"),
+        format!("principal={}&role=writer", page.replace(':', "%3A")),
+    )
+    .await;
+    assert_eq!((status, to), (303, format!("/{r}/settings")));
+    let settings = client
+        .get(format!("{web}/{r}/settings"))
+        .header("cookie", &session)
+        .send()
+        .await
+        .unwrap()
+        .text()
+        .await
+        .unwrap();
+    assert!(
+        settings.contains(page) && settings.contains("writer"),
+        "{settings}"
+    );
+
+    scn_as(page, dir, &["clone", server, r, "page"]);
+    let wc = dir.join("page");
+    std::fs::write(wc.join("hello.txt"), b"hello\n").unwrap();
+    scn_as(page, &wc, &["add", "hello.txt"]);
+    scn_as(page, &wc, &["commit", "-m", "Hello from the page's grant"]);
+    assert!(scn_as(page, &wc, &["land"]).starts_with("landed "));
 }
 
 /// `sp:e2e-docs` commits a change to `src/` and loses its grant there

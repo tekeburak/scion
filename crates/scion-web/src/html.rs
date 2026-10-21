@@ -8,7 +8,7 @@ use axum::http::StatusCode;
 use maud::{DOCTYPE, Markup, PreEscaped, html};
 use pulldown_cmark::{CowStr, Event, Options, Parser, Tag};
 use scion_core::DiffEntry;
-use scion_store::ChangeRequest;
+use scion_store::{ChangeRequest, Grant};
 use scion_types::{Changeset, ChangesetId, FileType, RepoPath, Tree, TreeEntry};
 
 use crate::{Acted, Action, Content};
@@ -57,7 +57,7 @@ fn enc(s: &str) -> String {
     out
 }
 
-fn repo_url(repo: &str) -> String {
+pub(crate) fn repo_url(repo: &str) -> String {
     format!("/{}", enc(repo))
 }
 
@@ -96,6 +96,10 @@ pub(crate) fn request_url(repo: &str, id: u64) -> String {
     format!("/{}/requests/{id}", enc(repo))
 }
 
+pub(crate) fn settings_url(repo: &str) -> String {
+    format!("/{}/settings", enc(repo))
+}
+
 /// The first 12 hex digits of a changeset id.
 fn short(id: ChangesetId) -> String {
     id.to_string()[..12].to_owned()
@@ -132,6 +136,7 @@ fn crumbs(repo: &str, at: &str, path: Option<&RepoPath>) -> Markup {
             a href=(repo_url(repo)) { "Code" }
             a href=(log_url(repo, at, None)) { "Log" }
             a href=(requests_url(repo)) { "Change requests" }
+            a href=(settings_url(repo)) { "Settings" }
         }
         nav.crumbs {
             a href=(tree_url(repo, at, None)) { strong { (repo) } }
@@ -181,6 +186,14 @@ pub(crate) fn repos(principal: Option<&str>, sign_in: bool, repos: &[String]) ->
                 },
             }
             h1 { "Repositories" }
+            @if principal.is_some() {
+                form.act method="post" action="/" {
+                    input name="repo" required placeholder="name" aria-label="Repository name";
+                    " "
+                    button type="submit" { "Create repository" }
+                    span.muted { " (needs a server admin; you become its admin)" }
+                }
+            }
             @if repos.is_empty() {
                 p.muted {
                     @match principal {
@@ -542,6 +555,72 @@ pub(crate) fn request(
                     }
                 }
             }
+        },
+    )
+}
+
+/// A repository's visibility and grants, with forms to change them.
+pub(crate) fn settings(repo: &str, grants: &[Grant]) -> Markup {
+    let change = |what: &str| format!("{}/{what}", settings_url(repo));
+    let public = grants
+        .iter()
+        .any(|g| g.principal == crate::ANYONE && g.path_prefix.is_empty());
+    page(
+        &format!("Settings of {repo}"),
+        &html! {
+            (crumbs(repo, crate::MAIN, None))
+            h2 { "Visibility" }
+            @if public {
+                p { strong { "Public" } ": anyone reads it without signing in." }
+                form.act method="post" action=(change("revoke")) {
+                    input type="hidden" name="principal" value=(crate::ANYONE);
+                    button type="submit" { "Make private" }
+                }
+            } @else {
+                p { strong { "Private" } ": only its members read it." }
+                form.act method="post" action=(change("grant")) {
+                    input type="hidden" name="principal" value=(crate::ANYONE);
+                    input type="hidden" name="role" value="reader";
+                    button type="submit" { "Make public" }
+                }
+            }
+            h2 { "Members" }
+            table {
+                tr { th { "Principal" } th { "Role" } th { "On" } th {} }
+                @for g in grants {
+                    tr {
+                        td.mono { (g.principal) }
+                        td { (g.role) }
+                        td.mono {
+                            @if g.path_prefix.is_empty() { "the whole repository" }
+                            @else { (g.path_prefix) "/" }
+                        }
+                        td {
+                            form method="post" action=(change("revoke")) {
+                                input type="hidden" name="principal" value=(g.principal);
+                                input type="hidden" name="path" value=(g.path_prefix);
+                                button type="submit" { "Revoke" }
+                            }
+                        }
+                    }
+                }
+            }
+            h3 { "Grant a role" }
+            form.act method="post" action=(change("grant")) {
+                input name="principal" required placeholder="github:login or sp:name"
+                    aria-label="Principal";
+                " "
+                select name="role" aria-label="Role" {
+                    option value="reader" { "reader" }
+                    option value="writer" { "writer" }
+                    option value="admin" { "admin" }
+                }
+                " on "
+                input name="path" placeholder="directory (empty: all)" aria-label="Directory";
+                " "
+                button type="submit" { "Grant" }
+            }
+            p.muted { "Each role includes the ones before it. The same as " code { "scn access" } "." }
         },
     )
 }

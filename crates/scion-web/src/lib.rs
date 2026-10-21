@@ -14,13 +14,16 @@
 //! while trees and files are objects and need a reader of the repository
 //! only.
 //!
-//! A change request's page also acts on it for a signed-in caller, through
-//! the [`Act`] function the server passes in, which checks the caller's
-//! role as the control plane does: a writer rebases it onto `main` or lands
-//! it again, its submitter or an admin rejects it. The page shows only the
-//! buttons the caller's role allows. Actions are `POST`s, which a browser
-//! sends with the session cookie only from this site (it is `SameSite=Lax`),
-//! and one whose `Origin` names another host is refused as well.
+//! Pages also change things for a signed-in caller, through the [`Act`]
+//! function the server passes in, which checks the caller's role as the
+//! control plane does. On a change request's page a writer rebases it onto
+//! `main` or lands it again, and its submitter or an admin rejects it; the
+//! page shows only the buttons the caller's role allows. The repository
+//! list creates a repository, and a repository's settings page, for an
+//! admin of all of it, makes it public or private and grants and revokes
+//! roles. Changes are `POST`s, which a browser sends with the session
+//! cookie only from this site (it is `SameSite=Lax`), and one whose
+//! `Origin` names another host is refused as well.
 
 #![forbid(unsafe_code)]
 
@@ -30,7 +33,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use axum::Router;
-use axum::extract::{Path, Query, Request, State};
+use axum::extract::{Form, Path, Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -85,7 +88,29 @@ impl Action {
     }
 }
 
-/// What the server did for an [`Action`].
+/// What a page asks the server to do, for the signed-in principal.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Task {
+    /// An [`Action`] on this change request.
+    Request(ChangeRequest, Action),
+    /// Create the repository, with the principal its admin.
+    Init,
+    /// Give `principal` `role` on the paths under `path_prefix` (the whole
+    /// repository if empty), replacing its role there; as the page's form
+    /// sent them.
+    Grant {
+        principal: String,
+        role: String,
+        path_prefix: String,
+    },
+    /// Remove the grant to `principal` on `path_prefix`.
+    Revoke {
+        principal: String,
+        path_prefix: String,
+    },
+}
+
+/// What the server did for a [`Task`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Acted {
     /// The head replays cleanly onto `main` as this changeset.
@@ -97,17 +122,14 @@ pub enum Acted {
     Submitted(u64),
     /// The request is rejected.
     Rejected,
+    /// The repository was created, or its grants changed.
+    Done,
 }
 
-/// Runs an [`Action`] on a change request of `repo` for `principal`, or
-/// refuses it with an HTTP status and why; arguments in that order.
+/// Runs a [`Task`] on `repo` for `principal`, or refuses it with an HTTP
+/// status and why; arguments in that order.
 pub type Act = Arc<
-    dyn Fn(
-            String,
-            String,
-            ChangeRequest,
-            Action,
-        ) -> BoxFuture<'static, Result<Acted, (StatusCode, String)>>
+    dyn Fn(String, String, Task) -> BoxFuture<'static, Result<Acted, (StatusCode, String)>>
         + Send
         + Sync,
 >;
@@ -190,7 +212,7 @@ pub fn router(
     api: Router,
 ) -> Router {
     Router::new()
-        .route("/", get(repos))
+        .route("/", get(repos).post(create))
         .route("/login", get(sign_in))
         .route("/login/callback", get(callback))
         .route("/logout", post(sign_out))
@@ -202,6 +224,8 @@ pub fn router(
         .route("/{repo}/requests", get(requests))
         .route("/{repo}/requests/{id}", get(request))
         .route("/{repo}/requests/{id}/{action}", post(take_action))
+        .route("/{repo}/settings", get(settings))
+        .route("/{repo}/settings/{change}", post(change_grant))
         .with_state(Web {
             meta,
             objects,
@@ -351,6 +375,8 @@ struct Reader {
     /// The highest role its own grants give it on some path; `None` for a
     /// visitor, who reads only what [`ANYONE`] does.
     role: Option<Role>,
+    /// Whether it is an admin of the whole repository.
+    whole_admin: bool,
 }
 
 impl Reader {
@@ -393,11 +419,9 @@ async fn reader(web: &Web, headers: &HeaderMap, repo: &str) -> Result<Reader, Er
         .into_iter()
         .filter(|g| g.principal == ANYONE || Some(&g.principal) == principal.as_ref())
         .collect();
-    let role = grants
-        .iter()
-        .filter(|g| g.principal != ANYONE)
-        .map(|g| g.role)
-        .max();
+    let own = || grants.iter().filter(|g| g.principal != ANYONE);
+    let role = own().map(|g| g.role).max();
+    let whole_admin = own().any(|g| g.role == Role::Admin && g.path_prefix.is_empty());
     let prefixes: Vec<String> = grants.into_iter().map(|g| g.path_prefix).collect();
     match principal {
         // Also for a repository that does not exist, as on the control plane.
@@ -419,6 +443,7 @@ async fn reader(web: &Web, headers: &HeaderMap, repo: &str) -> Result<Reader, Er
             principal: principal.unwrap_or_else(|| ANYONE.to_owned()),
             prefixes,
             role,
+            whole_admin,
         }),
     }
 }
@@ -890,21 +915,120 @@ async fn take_action(
         ));
     }
     let cr = change_request(&web, &repo, &id).await?;
-    let acted = (web.act)(reader.principal.clone(), repo.clone(), cr.clone(), action)
-        .await
-        .map_err(|(status, why)| Error(status, why))?;
-    let to = match acted {
+    let task = Task::Request(cr.clone(), action);
+    let to = match run(&web, reader.principal.clone(), &repo, task).await? {
         Acted::Submitted(new) => html::request_url(&repo, new),
-        Acted::Rejected => html::request_url(&repo, cr.id),
         // A rebase leaves the request as it was.
-        outcome => {
+        outcome @ (Acted::Rebased(_) | Acted::Conflicts(_)) => {
             let page = html::request(&repo, &cr, &actions(&reader, &cr), Some(&outcome));
             return Ok(page.into_response());
         }
+        _ => html::request_url(&repo, cr.id),
     };
+    see_other(&to)
+}
+
+/// [`Act`] `task` on `repo` for `principal`.
+async fn run(web: &Web, principal: String, repo: &str, task: Task) -> Result<Acted, Error> {
+    (web.act)(principal, repo.to_owned(), task)
+        .await
+        .map_err(|(status, why)| Error(status, why))
+}
+
+/// Send the browser on to `to`.
+fn see_other(to: &str) -> Result<Response, Error> {
     let to = HeaderValue::try_from(to)
         .map_err(|e| Error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     Ok((StatusCode::SEE_OTHER, [(header::LOCATION, to)]).into_response())
+}
+
+/// The principal of a request that changes something: a browser's own
+/// page sent it, with a token or a session.
+fn changer(web: &Web, headers: &HeaderMap, doing: &str) -> Result<String, Error> {
+    same_origin(headers)?;
+    viewer(web, headers)?.ok_or_else(|| {
+        Error(
+            StatusCode::UNAUTHORIZED,
+            format!("{doing} needs a signed-in principal: sign in at /login"),
+        )
+    })
+}
+
+/// What the repository list's form sends.
+#[derive(Debug, Deserialize)]
+struct NewRepo {
+    repo: String,
+}
+
+/// Create a repository, its creator its admin, and show it; the server
+/// checks the creator is a server admin, as for `scn init`.
+async fn create(
+    State(web): State<Web>,
+    headers: HeaderMap,
+    Form(form): Form<NewRepo>,
+) -> Result<Response, Error> {
+    let principal = changer(&web, &headers, "creating a repository")?;
+    let repo = form.repo.trim();
+    if repo.is_empty() {
+        return Err(bad_request("a repository needs a name".into()));
+    }
+    run(&web, principal, repo, Task::Init).await?;
+    see_other(&html::repo_url(repo))
+}
+
+/// Who may do what in a repository, and its visibility, for an admin of
+/// all of it: the role `scn access` and the grants RPCs need.
+async fn settings(State(web): State<Web>, Path(repo): Path<String>, headers: HeaderMap) -> Page {
+    let reader = reader(&web, &headers, &repo).await?;
+    if !reader.whole_admin {
+        return Err(Error(
+            StatusCode::FORBIDDEN,
+            format!(
+                "{} is not an admin of all of {repo:?}; settings need one",
+                reader.principal
+            ),
+        ));
+    }
+    let grants = web.meta.grants(&repo).await?;
+    Ok(html::settings(&repo, &grants))
+}
+
+/// What the settings page's forms send; `role` only to grant.
+#[derive(Debug, Deserialize)]
+struct GrantForm {
+    principal: String,
+    role: Option<String>,
+    #[serde(default)]
+    path: String,
+}
+
+/// Grant or revoke a role from the settings page, and show it again.
+async fn change_grant(
+    State(web): State<Web>,
+    Path((repo, change)): Path<(String, String)>,
+    headers: HeaderMap,
+    Form(form): Form<GrantForm>,
+) -> Result<Response, Error> {
+    let principal = changer(&web, &headers, "managing access")?;
+    let (principal_arg, path_prefix) = (
+        form.principal.trim().to_owned(),
+        form.path.trim().trim_matches('/').to_owned(),
+    );
+    let task = match (change.as_str(), form.role) {
+        ("grant", Some(role)) => Task::Grant {
+            principal: principal_arg,
+            role,
+            path_prefix,
+        },
+        ("revoke", _) => Task::Revoke {
+            principal: principal_arg,
+            path_prefix,
+        },
+        ("grant", None) => return Err(bad_request("a grant needs a role".into())),
+        _ => return Err(not_found(format!("no settings change {change:?}"))),
+    };
+    run(&web, principal, &repo, task).await?;
+    see_other(&html::settings_url(&repo))
 }
 
 /// Refuse a `POST` a browser sent from a page of another host. One with no

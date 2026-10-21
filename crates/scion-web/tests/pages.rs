@@ -21,7 +21,7 @@ use scion_types::{
     BlobId, Changeset, ChangesetId, FileChange, FileType, Identity, RepoPath, Timestamp, Tree,
     TreeId,
 };
-use scion_web::{Acted, Action};
+use scion_web::{Acted, Action, Task};
 use tokio::net::TcpListener;
 
 const REPO: &str = "demo";
@@ -342,25 +342,42 @@ struct Site {
     base: String,
     first: ChangesetId,
     second: ChangesetId,
-    /// Every action the pages asked for: who, on which request, what.
-    acted: Arc<Mutex<Vec<(String, u64, Action)>>>,
+    /// Every task the pages asked for: who, in which repository, what.
+    acted: Arc<Mutex<Vec<(String, String, Task)>>>,
 }
 
-/// Stands in for the server: records each action, refuses `sp:docs` as the
-/// server would, lands as request 99 and finds `src/lib.rs` conflicting.
-fn act(acted: Arc<Mutex<Vec<(String, u64, Action)>>>) -> scion_web::Act {
-    Arc::new(move |principal, repo, cr, action| {
-        assert_eq!(repo, REPO);
+impl Site {
+    /// The change-request actions asked for so far: who, on which request,
+    /// what.
+    fn actions(&self) -> Vec<(String, u64, Action)> {
+        self.acted
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(who, _, task)| match task {
+                Task::Request(cr, action) => Some((who.clone(), cr.id, *action)),
+                _ => None,
+            })
+            .collect()
+    }
+}
+
+/// Stands in for the server: records each task, refuses `sp:docs` as the
+/// server would, lands as request 99, finds `src/lib.rs` conflicting and
+/// does everything else.
+fn act(acted: Arc<Mutex<Vec<(String, String, Task)>>>) -> scion_web::Act {
+    Arc::new(move |principal, repo, task| {
         let refused = principal == "sp:docs";
-        acted.lock().unwrap().push((principal, cr.id, action));
+        acted.lock().unwrap().push((principal, repo, task.clone()));
         Box::pin(async move {
             if refused {
                 return Err((StatusCode::FORBIDDEN, "sp:docs may not".to_owned()));
             }
-            Ok(match action {
-                Action::Land => Acted::Submitted(99),
-                Action::Rebase => Acted::Conflicts(vec!["src/lib.rs".into()]),
-                Action::Reject => Acted::Rejected,
+            Ok(match task {
+                Task::Request(_, Action::Land) => Acted::Submitted(99),
+                Task::Request(_, Action::Rebase) => Acted::Conflicts(vec!["src/lib.rs".into()]),
+                Task::Request(_, Action::Reject) => Acted::Rejected,
+                _ => Acted::Done,
             })
         })
     })
@@ -917,7 +934,7 @@ async fn a_change_request_page_offers_the_actions_of_the_callers_role() {
     assert_eq!(refused.status().as_u16(), 403);
     assert!(refused.text().await.unwrap().contains("sp:docs may not"));
     assert_eq!(
-        *site.acted.lock().unwrap(),
+        site.actions(),
         [
             ("sp:bob".to_owned(), 1, Action::Land),
             ("sp:ada".to_owned(), 1, Action::Reject),
@@ -948,5 +965,125 @@ async fn a_change_request_page_offers_the_actions_of_the_callers_role() {
         let response = post(&site, principal, origin, path).await;
         assert_eq!(response.status().as_u16(), status, "{path} {origin:?}");
     }
-    assert_eq!(site.acted.lock().unwrap().len(), 4);
+    assert_eq!(site.actions().len(), 4);
+}
+
+/// POST the form `body` to `path` as `principal`, without following a
+/// redirect.
+async fn post_form(
+    site: &Site,
+    principal: Option<&str>,
+    path: &str,
+    body: &str,
+) -> reqwest::Response {
+    let mut request = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap()
+        .post(format!("{}{path}", site.base))
+        .header("content-type", "application/x-www-form-urlencoded")
+        .body(body.to_owned());
+    if let Some(p) = principal {
+        request = request.bearer_auth(format!("token-{p}"));
+    }
+    request.send().await.unwrap()
+}
+
+#[tokio::test]
+async fn an_admin_creates_repositories_and_manages_access_from_the_pages() {
+    let site = site().await;
+    let root = Grant {
+        principal: "sp:root".into(),
+        path_prefix: String::new(),
+        role: Role::Admin,
+    };
+    site.store.put_grant(REPO, &root).await.unwrap();
+
+    // Settings are for an admin of the whole repository.
+    let (status, page) = get(&site, Some("sp:ada"), "/demo/settings").await;
+    assert_eq!(status, 403, "{page}");
+    assert!(page.contains("sp:ada is not an admin of all of"), "{page}");
+    site.store.take();
+    let (status, page) = get(&site, Some("sp:root"), "/demo/settings").await;
+    assert_eq!(status, 200, "{page}");
+    assert!(site.store.take() <= 5);
+    for want in [
+        "Private",
+        "Make public",
+        "sp:ada",
+        "docs/",
+        "the whole repository",
+    ] {
+        assert!(page.contains(want), "lacks {want:?}: {page}");
+    }
+
+    let changes = [
+        ("principal=sp%3Abob&role=writer&path=src%2F", 303),
+        ("principal=anyone&role=reader", 303),
+        ("principal=anyone", 400),
+    ];
+    for (body, status) in changes {
+        let response = post_form(&site, Some("sp:root"), "/demo/settings/grant", body).await;
+        assert_eq!(response.status().as_u16(), status, "{body}");
+    }
+    let revoked = post_form(
+        &site,
+        Some("sp:root"),
+        "/demo/settings/revoke",
+        "principal=sp%3Adocs&path=docs",
+    )
+    .await;
+    assert_eq!(revoked.status().as_u16(), 303);
+    assert_eq!(revoked.headers()["location"], "/demo/settings");
+    for (who, path, status) in [
+        (Some("sp:root"), "/demo/settings/frob", 404),
+        (None, "/demo/settings/revoke", 401),
+    ] {
+        let response = post_form(&site, who, path, "principal=sp%3Aada").await;
+        assert_eq!(response.status().as_u16(), status, "{path}");
+    }
+
+    // Anyone signed in is offered the form; the server decides.
+    let (_, page) = get(&site, Some("sp:ada"), "/").await;
+    assert!(page.contains("Create repository"), "{page}");
+    let (_, page) = get(&site, None, "/").await;
+    assert!(!page.contains("Create repository"), "{page}");
+    let created = post_form(&site, Some("sp:root"), "/", "repo=+new-one+").await;
+    assert_eq!(created.status().as_u16(), 303);
+    assert_eq!(created.headers()["location"], "/new-one");
+    let unnamed = post_form(&site, Some("sp:root"), "/", "repo=+").await;
+    assert_eq!(unnamed.status().as_u16(), 400);
+
+    let granted = |principal: &str, role: &str, path_prefix: &str| Task::Grant {
+        principal: principal.into(),
+        role: role.into(),
+        path_prefix: path_prefix.into(),
+    };
+    let root = |repo: &str, task| ("sp:root".to_owned(), repo.to_owned(), task);
+    assert_eq!(
+        *site.acted.lock().unwrap(),
+        [
+            root(REPO, granted("sp:bob", "writer", "src")),
+            root(REPO, granted("anyone", "reader", "")),
+            root(
+                REPO,
+                Task::Revoke {
+                    principal: "sp:docs".into(),
+                    path_prefix: "docs".into()
+                }
+            ),
+            root("new-one", Task::Init),
+        ]
+    );
+
+    // Public once anyone reads it.
+    site.store
+        .put_grant(REPO, &grant(scion_web::ANYONE, ""))
+        .await
+        .unwrap();
+    let (_, page) = get(&site, Some("sp:root"), "/demo/settings").await;
+    assert!(
+        page.contains("Public") && page.contains("Make private"),
+        "{page}"
+    );
 }

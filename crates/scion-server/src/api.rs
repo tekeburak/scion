@@ -38,7 +38,7 @@ use scion_types::{
     BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, FileType, Identity, RepoPath,
     Timestamp, Tree, TreeEntry,
 };
-use scion_web::{ANYONE, Act, Acted, Action};
+use scion_web::{ANYONE, Act, Acted, Action, Task};
 use serde::{Deserialize, Serialize};
 use tonic::{Code, Request, Status};
 
@@ -102,18 +102,19 @@ pub(crate) fn router(
         })
 }
 
-/// What the web interface's change-request pages do, as the signed-in
-/// principal, through the RPCs `scn` calls, so roles are checked as
+/// What the web interface's pages do, as the signed-in principal, through
+/// the RPCs `scn` calls, so roles are checked and form input validated as
 /// there: a land submits the request's head again and waits for the land
-/// worker, a rebase replays the head onto `main`; a reject is
-/// [`crate::land::reject`].
+/// worker, a rebase replays the head onto `main`, a reject is
+/// [`crate::land::reject`]; creating a repository and granting or revoking
+/// a role are `scn init` and `scn access`.
 pub(crate) fn page_actions(meta: Arc<dyn MetadataStore>, control: Arc<ControlServer>) -> Act {
-    Arc::new(move |principal, repo, cr, action| {
+    Arc::new(move |principal, repo, task| {
         let (meta, control) = (meta.clone(), control.clone());
         Box::pin(async move {
             // The page checked the token; its expiry is never read.
             let caller = Caller(Some(Principal(principal, SystemTime::UNIX_EPOCH)));
-            page_action(&*meta, &control, &caller, repo, &cr, action)
+            page_action(&*meta, &control, &caller, repo, task)
                 .await
                 .map_err(|e| (e.0, e.2))
         })
@@ -125,10 +126,50 @@ async fn page_action(
     control: &ControlServer,
     caller: &Caller,
     repo: String,
-    cr: &scion_store::ChangeRequest,
-    action: Action,
+    task: Task,
 ) -> Result<Acted, Error> {
     let fail = |e: Status| caller.error(&e);
+    let (cr, action) = match task {
+        Task::Request(cr, action) => (cr, action),
+        Task::Init => {
+            control
+                .init_repo(caller.request(InitRepoRequest { repo }))
+                .await
+                .map_err(fail)?;
+            return Ok(Acted::Done);
+        }
+        Task::Grant {
+            principal,
+            role,
+            path_prefix,
+        } => {
+            let grant = Some(AccessGrant {
+                principal,
+                path_prefix,
+                role,
+            });
+            control
+                .grant(caller.request(GrantRequest { repo, grant }))
+                .await
+                .map_err(fail)?;
+            return Ok(Acted::Done);
+        }
+        Task::Revoke {
+            principal,
+            path_prefix,
+        } => {
+            let request = RevokeRequest {
+                repo,
+                principal,
+                path_prefix,
+            };
+            control
+                .revoke(caller.request(request))
+                .await
+                .map_err(fail)?;
+            return Ok(Acted::Done);
+        }
+    };
     match action {
         Action::Land => {
             let request = SubmitChangeRequestRequest {
@@ -169,7 +210,7 @@ async fn page_action(
             })
         }
         Action::Reject => {
-            crate::land::reject(meta, &caller.request(()), &repo, cr)
+            crate::land::reject(meta, &caller.request(()), &repo, &cr)
                 .await
                 .map_err(fail)?;
             Ok(Acted::Rejected)

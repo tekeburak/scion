@@ -389,7 +389,12 @@ is `SameSite=Lax`, so a browser sends it only from this site, and a `POST` whose
 names another host is refused as well. A separate code-review product is not a goal;
 change-request pages are.
 
-*Planned, Phase 11.* Creating repositories and granting roles from the pages.
+The pages also **create and administer repositories**, again through the RPCs `scn` calls: a
+signed-in server admin creates one from the repository list (`InitRepo`, as `scn init`, its
+creator its admin), and a repository's settings page, for an admin of all of it, lists its
+grants and grants and revokes roles (`Grant`, `Revoke`, as `scn access`; the server checks the
+form's principal, role and directory as it checks the command line). Making a repository
+public or private is a grant or revoke of `reader` to `anyone`.
 
 ### Ingestion
 

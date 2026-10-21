@@ -638,3 +638,76 @@ async fn change_request_pages_land_rebase_and_reject_by_role() {
     assert_eq!(status, 409, "{body}");
     assert!(body.contains("is landed"), "{body}");
 }
+
+#[tokio::test]
+async fn pages_create_a_repository_and_manage_its_access() {
+    let (base, _) = serve().await;
+    let web = base.strip_suffix("/api/v1").unwrap().to_owned();
+    let api = Client::new(&base, Some("sp:test"));
+    let form = async |principal: &str, path: &str, body: &str| {
+        let response = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap()
+            .post(format!("{web}{path}"))
+            .bearer_auth(token_of(principal))
+            .header("content-type", "application/x-www-form-urlencoded")
+            .body(body.to_owned())
+            .send()
+            .await
+            .unwrap();
+        let status = response.status().as_u16();
+        (status, response.text().await.unwrap())
+    };
+
+    // Only a server admin creates one, and becomes its admin.
+    let (status, body) = form("sp:dev", "/", "repo=site").await;
+    assert_eq!(status, 403, "{body}");
+    assert_eq!(form("sp:test", "/", "repo=site").await.0, 303);
+    assert_eq!(form("sp:test", "/", "repo=site").await.0, 409);
+    api.ok("/repos/site/refs/main").await;
+
+    let grants = async || api.ok("/repos/site/grants").await["grants"].clone();
+    let dev = json!({"principal": "sp:dev", "role": "writer", "path": "docs"});
+    let grant = "principal=sp%3Adev&role=writer&path=docs";
+    assert_eq!(form("sp:test", "/site/settings/grant", grant).await.0, 303);
+    assert!(
+        grants().await.as_array().unwrap().contains(&dev),
+        "{}",
+        grants().await
+    );
+    // A writer manages nothing; a role or principal the CLI refuses is
+    // refused here too.
+    let (status, body) = form("sp:dev", "/site/settings/grant", grant).await;
+    assert_eq!(status, 403, "{body}");
+    for bad in [
+        "principal=sp%3Adev&role=owner",
+        "principal=nobody&role=reader",
+    ] {
+        let (status, body) = form("sp:test", "/site/settings/grant", bad).await;
+        assert_eq!(status, 400, "{bad}: {body}");
+    }
+    let revoke = "principal=sp%3Adev&path=docs";
+    assert_eq!(
+        form("sp:test", "/site/settings/revoke", revoke).await.0,
+        303
+    );
+    assert!(!grants().await.as_array().unwrap().contains(&dev));
+    assert_eq!(
+        form("sp:test", "/site/settings/revoke", revoke).await.0,
+        404
+    );
+
+    // Public from the page: a visitor reads it.
+    let visit = async || {
+        reqwest::get(format!("{web}/site"))
+            .await
+            .unwrap()
+            .status()
+            .as_u16()
+    };
+    assert_eq!(visit().await, 401);
+    let public = "principal=anyone&role=reader";
+    assert_eq!(form("sp:test", "/site/settings/grant", public).await.0, 303);
+    assert_eq!(visit().await, 200);
+}
