@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/commit.json",
+  "title": "scn commit --json",
+  "description": "The changeset created; it is the working copy's head.",
+  "type": "object",
+  "properties": {
+    "head": {
+      "$ref": "defs.json#/$defs/id"
+    }
+  },
+  "required": [
+    "head"
+  ],
+  "additionalProperties": false
+}

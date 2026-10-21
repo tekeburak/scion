@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/diff.json",
+  "title": "scn diff --json",
+  "description": "Per file, each side's kind and size (null where the file is absent) and the unified diff (empty when only the kind changed).",
+  "type": "object",
+  "properties": {
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": {
+            "$ref": "defs.json#/$defs/path"
+          },
+          "old": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "regular",
+                  "executable",
+                  "symlink"
+                ]
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "kind",
+              "size"
+            ],
+            "additionalProperties": false
+          },
+          "new": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "regular",
+                  "executable",
+                  "symlink"
+                ]
+              },
+              "size": {
+                "type": "integer",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "kind",
+              "size"
+            ],
+            "additionalProperties": false
+          },
+          "patch": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "path",
+          "old",
+          "new",
+          "patch"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "files"
+  ],
+  "additionalProperties": false
+}

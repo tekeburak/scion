@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/blame.json",
+  "title": "scn blame --json",
+  "description": "Each line of the file and the changeset that last changed it.",
+  "type": "object",
+  "properties": {
+    "path": {
+      "$ref": "defs.json#/$defs/path"
+    },
+    "changeset": {
+      "$ref": "defs.json#/$defs/id"
+    },
+    "lines": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "changeset": {
+            "$ref": "defs.json#/$defs/id"
+          },
+          "line": {
+            "type": "string",
+            "description": "The line without its newline."
+          }
+        },
+        "required": [
+          "changeset",
+          "line"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": [
+    "path",
+    "changeset",
+    "lines"
+  ],
+  "additionalProperties": false
+}

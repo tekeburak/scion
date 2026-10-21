@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/access-grant.json",
+  "title": "scn access grant --json",
+  "description": "The grant given.",
+  "type": "object",
+  "properties": {
+    "principal": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "role": {
+      "enum": [
+        "reader",
+        "writer",
+        "admin"
+      ]
+    }
+  },
+  "required": [
+    "principal",
+    "path",
+    "role"
+  ],
+  "additionalProperties": false
+}

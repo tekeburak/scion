@@ -2,6 +2,8 @@
 //! GitHub, and keeps the token it gets for that server only. The web
 //! interface signs a browser in with GitHub's web flow against the same fake.
 
+mod schema;
+
 use std::collections::HashMap;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
@@ -180,6 +182,24 @@ async fn a_denied_or_expired_code_says_which() {
         assert!(err.contains(want), "{app}: {err}");
         assert!(!token_file(config.path(), &server).exists(), "{app}");
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn login_json_keeps_stdout_for_the_result() {
+    let github = fake_github().await;
+    let server = serve(Some(("ok", &github))).await;
+    let config = tempfile::tempdir().unwrap();
+    let (ok, out, err) = scn(config.path(), &["--json", "login", &server]);
+    assert!(ok, "scn login failed: {err}");
+    assert!(err.contains("enter the code WDJB-MJHT"), "{err}");
+    let v = schema::check("login", &out);
+    assert_eq!(v["principal"], "github:octocat", "{v}");
+
+    let server = serve(Some(("denied", &github))).await;
+    let (ok, out, _) = scn(config.path(), &["--json", "login", &server]);
+    assert!(!ok);
+    let v = schema::check("error", &out);
+    assert_eq!(v["error"]["code"], "permission_denied", "{v}");
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

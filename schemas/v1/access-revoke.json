@@ -1,0 +1,20 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/access-revoke.json",
+  "title": "scn access revoke --json",
+  "description": "The grant removed.",
+  "type": "object",
+  "properties": {
+    "principal": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "principal",
+    "path"
+  ],
+  "additionalProperties": false
+}

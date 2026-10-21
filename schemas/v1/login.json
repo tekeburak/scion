@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/login.json",
+  "title": "scn login --json",
+  "description": "Signed in; the token is saved for later commands. The code to enter is printed on stderr.",
+  "type": "object",
+  "properties": {
+    "server": {
+      "type": "string"
+    },
+    "principal": {
+      "type": "string"
+    },
+    "expires_unix_seconds": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "token_path": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "server",
+    "principal",
+    "expires_unix_seconds",
+    "token_path"
+  ],
+  "additionalProperties": false
+}

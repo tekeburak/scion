@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/merge.json",
+  "title": "scn merge --json",
+  "description": "The merge; `head` equals `previous` when it already contained `merged`.",
+  "type": "object",
+  "properties": {
+    "previous": {
+      "$ref": "defs.json#/$defs/id"
+    },
+    "merged": {
+      "$ref": "defs.json#/$defs/id"
+    },
+    "head": {
+      "$ref": "defs.json#/$defs/id"
+    }
+  },
+  "required": [
+    "previous",
+    "merged",
+    "head"
+  ],
+  "additionalProperties": false
+}

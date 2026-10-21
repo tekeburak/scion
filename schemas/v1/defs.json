@@ -1,0 +1,240 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/defs.json",
+  "title": "Shared definitions of the scn --json schemas",
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "description": "A changeset or blob id: 64 lowercase hex digits."
+    },
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A repository path: no leading `/`, no `.` or `..`."
+    },
+    "person": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "email"
+      ],
+      "additionalProperties": false
+    },
+    "date": {
+      "type": "object",
+      "properties": {
+        "unix_secs": {
+          "type": "integer"
+        },
+        "tz_offset_minutes": {
+          "type": "integer"
+        }
+      },
+      "required": [
+        "unix_secs",
+        "tz_offset_minutes"
+      ],
+      "additionalProperties": false
+    },
+    "kind": {
+      "enum": [
+        "regular",
+        "executable",
+        "symlink"
+      ]
+    },
+    "grant": {
+      "type": "object",
+      "properties": {
+        "principal": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string",
+          "description": "Directory the role holds under; empty for the whole repository."
+        },
+        "role": {
+          "enum": [
+            "reader",
+            "writer",
+            "admin"
+          ]
+        }
+      },
+      "required": [
+        "principal",
+        "path",
+        "role"
+      ],
+      "additionalProperties": false
+    },
+    "changeset": {
+      "type": "object",
+      "description": "A changeset, as the HTTP API's changeset JSON (docs/API.md), with its id.",
+      "properties": {
+        "id": {
+          "$ref": "defs.json#/$defs/id"
+        },
+        "parents": {
+          "type": "array",
+          "items": {
+            "$ref": "defs.json#/$defs/id"
+          }
+        },
+        "author": {
+          "$ref": "#/$defs/person"
+        },
+        "author_date": {
+          "$ref": "#/$defs/date"
+        },
+        "committer": {
+          "$ref": "#/$defs/person"
+        },
+        "committer_date": {
+          "$ref": "#/$defs/date"
+        },
+        "message": {
+          "type": "string"
+        },
+        "file_changes": {
+          "type": "object",
+          "description": "What the changeset does to each path, against its first parent.",
+          "additionalProperties": {
+            "$ref": "#/$defs/file_change"
+          }
+        },
+        "extra": {
+          "type": "object",
+          "description": "Extension values, in hex.",
+          "additionalProperties": {
+            "type": "string"
+          }
+        },
+        "landed_by": {
+          "description": "With `log --landed`: the change request that landed it, or null.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/change_request"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "parents",
+        "author",
+        "author_date",
+        "message",
+        "file_changes",
+        "extra"
+      ],
+      "additionalProperties": false
+    },
+    "file_change": {
+      "type": "object",
+      "properties": {
+        "change": {
+          "enum": [
+            "tracked",
+            "deleted"
+          ]
+        },
+        "content": {
+          "$ref": "defs.json#/$defs/id"
+        },
+        "kind": {
+          "$ref": "#/$defs/kind"
+        },
+        "size": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "copy_from": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "$ref": "defs.json#/$defs/path"
+            },
+            "changeset": {
+              "$ref": "defs.json#/$defs/id"
+            }
+          },
+          "required": [
+            "path",
+            "changeset"
+          ],
+          "additionalProperties": false
+        }
+      },
+      "required": [
+        "change"
+      ],
+      "additionalProperties": false
+    },
+    "change_request": {
+      "type": "object",
+      "description": "A change request, as the HTTP API's change request JSON (docs/API.md).",
+      "properties": {
+        "id": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "head": {
+          "$ref": "defs.json#/$defs/id"
+        },
+        "base": {
+          "$ref": "defs.json#/$defs/id"
+        },
+        "status": {
+          "enum": [
+            "pending",
+            "landing",
+            "landed",
+            "needs_rebase",
+            "rejected"
+          ]
+        },
+        "landed": {
+          "$ref": "defs.json#/$defs/id"
+        },
+        "conflicts": {
+          "description": "The conflicting paths (needs_rebase) or the paths its submitter may not change (rejected).",
+          "type": "array",
+          "items": {
+            "$ref": "defs.json#/$defs/path"
+          }
+        },
+        "submitted_unix_micros": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "landed_unix_micros": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "id",
+        "head",
+        "base",
+        "status",
+        "conflicts",
+        "submitted_unix_micros"
+      ],
+      "additionalProperties": false
+    }
+  }
+}

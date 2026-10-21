@@ -109,6 +109,11 @@ What works today:
   a repository and reading trees, blobs, log, diff and blame to uploading blobs, creating
   changesets and landing them, with the same tokens, roles and public reads. A clone, a
   commit and a land need nothing but `curl`.
+- **Output for scripts and agents**: `scn --json <command>` prints one JSON document per
+  command, described by a JSON Schema in [`schemas/v1`](schemas/v1); a failure prints an error
+  with a stable code (`conflict`, `needs_rebase`, `dirty`, `permission_denied`, …) and the paths
+  it is about. `scn explain-conflict` names, for each path that keeps the head from rebasing onto
+  `main`, the changesets on both sides that changed it since the merge base.
 - **Robustness checks**: a seeded, hermetic simulation runs many clients committing, landing,
   merging and reverting while land workers stop and the server restarts, and checks that
   `main` stays linear and nothing landed is lost or written twice; fuzz targets cover every

@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/access-list.json",
+  "title": "scn access list --json",
+  "description": "Every grant in the repository.",
+  "type": "object",
+  "properties": {
+    "grants": {
+      "type": "array",
+      "items": {
+        "$ref": "defs.json#/$defs/grant"
+      }
+    }
+  },
+  "required": [
+    "grants"
+  ],
+  "additionalProperties": false
+}

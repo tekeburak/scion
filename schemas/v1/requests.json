@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/tekeburak/scion/schemas/v1/requests.json",
+  "title": "scn requests --json",
+  "description": "Change requests, newest first.",
+  "type": "object",
+  "properties": {
+    "requests": {
+      "type": "array",
+      "items": {
+        "$ref": "defs.json#/$defs/change_request"
+      }
+    }
+  },
+  "required": [
+    "requests"
+  ],
+  "additionalProperties": false
+}
