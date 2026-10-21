@@ -13,6 +13,7 @@ scion-store.workspace = true
 scion-proto.workspace = true
 scion-derived.workspace = true
 scion-core.workspace = true
+scion-web.workspace = true
 async-trait.workspace = true
 blake3.workspace = true
 bytes.workspace = true

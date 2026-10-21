@@ -9,6 +9,8 @@
 //! with `scn update` between, and a `release/1` fix is merged and landed.
 //! Last, the admin grants a second principal a directory with `scn access`,
 //! that principal lands under it, and a revoke makes its next land fail.
+//! A second test opens every page of the web interface on a repository
+//! seeded the same way.
 //! Each run uses its own repository name, so runs never see each other's
 //! refs or changesets even though they share the database and bucket.
 
@@ -44,9 +46,9 @@ fn env_or(key: &str, default: &str) -> String {
     std::env::var(key).unwrap_or_else(|_| default.to_owned())
 }
 
-/// `scion-server` on the compose stack, holding no repository of its own.
-/// Returns its address.
-async fn serve() -> String {
+/// `scion-server` on the compose stack, holding no repository of its own,
+/// with its web interface. Returns the gRPC and the web address.
+async fn serve() -> (String, String) {
     let meta = PostgresStore::connect(&env_or(
         "SCION_TEST_DATABASE_URL",
         "postgres://scion:scion@localhost:5432/scion",
@@ -72,18 +74,20 @@ async fn serve() -> String {
         .with_allow_http(true)
         .build()
         .expect("valid S3 configuration");
-    let objects = ObjectStorage::new(Arc::new(s3));
+    let (meta, objects) = (Arc::new(meta), Arc::new(ObjectStorage::new(Arc::new(s3))));
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    tokio::spawn(scion_server::serve(
-        listener,
-        Arc::new(meta),
-        Arc::new(objects),
+    let web = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let web_addr = web.local_addr().unwrap();
+    tokio::spawn(scion_server::serve_web(
+        web,
+        meta.clone(),
+        objects.clone(),
         key(),
-        None,
     ));
-    format!("http://{addr}")
+    tokio::spawn(scion_server::serve(listener, meta, objects, key(), None));
+    (format!("http://{addr}"), format!("http://{web_addr}"))
 }
 
 /// Run `scn args` in `dir`; panics unless it succeeds. Returns stdout.
@@ -124,7 +128,7 @@ async fn init_clone_commit_land_on_postgres_and_s3() {
         .unwrap()
         .as_nanos();
     let repo = format!("e2e-{}-{nanos}", std::process::id());
-    let server = serve().await;
+    let (server, _) = serve().await;
     let dir = tempfile::tempdir().unwrap();
 
     // A new repository, seeded through a working copy: no git involved.
@@ -321,4 +325,89 @@ fn two_clones_land_at_once(a: &Path, b: &Path) {
     for msg in ["a 0", "b 0", "a 1", "b 1"] {
         assert!(log.contains(&format!("    {msg}\n")), "{msg} landed: {log}");
     }
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn web_pages_on_postgres_and_s3() {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let repo = format!("web-{}-{nanos}", std::process::id());
+    let (server, web) = serve().await;
+    let dir = tempfile::tempdir().unwrap();
+    scn(dir.path(), &["init", &server, &repo]);
+    scn(dir.path(), &["clone", &server, &repo, "wc"]);
+    let wc = dir.path().join("wc");
+    std::fs::create_dir_all(wc.join("src")).unwrap();
+    std::fs::write(wc.join("README.md"), b"# Web demo\n\nServed from S3.\n").unwrap();
+    std::fs::write(wc.join("src/lib.rs"), b"pub fn one() -> u8 {\n    1\n}\n").unwrap();
+    scn(&wc, &["add", "."]);
+    let root = committed(&scn(&wc, &["commit", "-m", "Seed the web demo"]));
+    assert!(scn(&wc, &["land"]).starts_with("landed "));
+    std::fs::write(wc.join("src/lib.rs"), b"pub fn one() -> u8 {\n    2\n}\n").unwrap();
+    let head = committed(&scn(&wc, &["commit", "-m", "Fix one"]));
+    assert!(scn(&wc, &["land"]).starts_with("landed "));
+
+    let (root, head) = (root.to_hex(), head.to_hex());
+    let r = &repo;
+    let pages = [
+        ("/".to_owned(), vec![repo.as_str()]),
+        (
+            format!("/{r}"),
+            vec!["<h1>Web demo</h1>", "Served from S3.", ">src/<"],
+        ),
+        (format!("/{r}/tree?path=src"), vec![">lib.rs<"]),
+        (
+            format!("/{r}/tree?path=src%2Flib.rs"),
+            vec!["pub fn one() -&gt; u8 {"],
+        ),
+        (
+            format!("/{r}/log"),
+            vec!["Fix one", "Seed the web demo", &head[..12]],
+        ),
+        (
+            format!("/{r}/log?path=src%2Flib.rs"),
+            vec!["Fix one", "Seed the web demo"],
+        ),
+        (
+            format!("/{r}/blame?path=src%2Flib.rs"),
+            vec![&root[..12], &head[..12]],
+        ),
+        (
+            format!("/{r}/changeset/{head}"),
+            vec!["Fix one", "src/lib.rs", "-    1", "+    2", &root],
+        ),
+        (format!("/{r}/requests"), vec!["landed", "sp:test"]),
+    ];
+    let client = reqwest::Client::new();
+    let get = async |path: &str| {
+        let response = client
+            .get(format!("{web}{path}"))
+            .bearer_auth(token())
+            .send()
+            .await
+            .unwrap();
+        let status = response.status().as_u16();
+        let page = response.text().await.unwrap();
+        assert_eq!(status, 200, "{path}: {page}");
+        page
+    };
+    for (path, wants) in pages {
+        let page = get(&path).await;
+        for want in wants {
+            assert!(page.contains(want), "{path} lacks {want:?}: {page}");
+        }
+    }
+    // Request ids are server-wide; the newest, listed first, landed `head`.
+    let list = get(&format!("/{r}/requests")).await;
+    let newest = format!("/{r}/requests/");
+    let id: String = list[list.find(&newest).expect("a request link") + newest.len()..]
+        .chars()
+        .take_while(char::is_ascii_digit)
+        .collect();
+    let page = get(&format!("/{r}/requests/{id}")).await;
+    assert!(page.contains("landed") && page.contains(&head), "{page}");
+    let response = client.get(format!("{web}/{r}")).send().await.unwrap();
+    assert_eq!(response.status().as_u16(), 401);
 }

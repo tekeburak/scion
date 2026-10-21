@@ -1,0 +1,29 @@
+[package]
+name = "scion-web"
+description = "Scion's web interface: server-rendered pages over the metadata and object stores"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+scion-types.workspace = true
+scion-store.workspace = true
+scion-derived.workspace = true
+scion-core.workspace = true
+axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "query"] }
+diffy = { workspace = true, features = ["std"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+maud = { version = "0.27", features = ["axum"] }
+pulldown-cmark = { version = "0.13", default-features = false, features = ["html"] }
+serde.workspace = true
+tokio = { workspace = true, features = ["net", "time"] }
+
+[dev-dependencies]
+async-trait.workspace = true
+bytes.workspace = true
+reqwest = { version = "0.13", default-features = false }
+
+[lints]
+workspace = true

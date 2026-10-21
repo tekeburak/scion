@@ -1012,6 +1012,18 @@ impl MetadataStore for PostgresStore {
             })
             .collect()
     }
+
+    async fn repos_of(&self, principal: &str) -> Result<Vec<String>> {
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT DISTINCT r.name COLLATE \"C\" FROM grants g JOIN repos r ON r.id = g.repo \
+             WHERE g.principal = $1 AND r.name <> $2 ORDER BY 1",
+        )
+        .bind(principal)
+        .bind(SERVER_GRANTS)
+        .fetch_all(&self.pool)
+        .await?;
+        Ok(rows.into_iter().map(|(name,)| name).collect())
+    }
 }
 
 #[cfg(all(test, feature = "integration"))]

@@ -278,6 +278,11 @@ impl MetadataStore for SimStore {
         self.step().await;
         self.inner.grants(repo).await
     }
+
+    async fn repos_of(&self, principal: &str) -> Result<Vec<String>> {
+        self.step().await;
+        self.inner.repos_of(principal).await
+    }
 }
 
 #[async_trait]

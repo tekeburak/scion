@@ -423,6 +423,18 @@ impl MetadataStore for MemoryStore {
             })
             .collect())
     }
+
+    async fn repos_of(&self, principal: &str) -> Result<Vec<String>> {
+        let m = self.meta.read().expect("poisoned");
+        let mut repos: Vec<String> = m
+            .grants
+            .keys()
+            .filter(|(r, p, _)| p == principal && r != SERVER_GRANTS)
+            .map(|(r, _, _)| r.clone())
+            .collect();
+        repos.dedup();
+        Ok(repos)
+    }
 }
 
 #[async_trait]

@@ -19,6 +19,7 @@ tonic.workspace = true
 axum = { version = "0.8", default-features = false, features = ["tokio", "http1", "form"] }
 bytes.workspace = true
 object_store = { version = "0.14.2", features = ["aws"] }
+reqwest = { version = "0.13", default-features = false }
 scion-derived = { workspace = true, features = ["test-util"] }
 scion-server.workspace = true
 scion-store.workspace = true

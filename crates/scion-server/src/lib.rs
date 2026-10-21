@@ -74,6 +74,23 @@ pub async fn serve(
     Ok(())
 }
 
+/// Serve the web interface on `listener` until the future is dropped or
+/// accepting fails. Its pages read the same stores as the control plane and
+/// take the same tokens, signed with `key`.
+pub async fn serve_web(
+    listener: TcpListener,
+    meta: Arc<dyn MetadataStore>,
+    objects: Arc<dyn ObjectStore>,
+    key: TokenKey,
+) -> std::io::Result<()> {
+    let verify = move |token: &str| {
+        key.verify(token, std::time::SystemTime::now())
+            .map(|(principal, _)| principal)
+            .map_err(|e| e.to_string())
+    };
+    scion_web::serve(listener, meta, objects, Arc::new(verify)).await
+}
+
 /// The health, login, control and object services [`serve`] runs, for a
 /// server built with its own layers. Starts the land worker of every
 /// repository with requests waiting. Control and object requests need a

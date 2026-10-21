@@ -1,12 +1,15 @@
 //! `scion-server` binary.
 //!
 //! ```text
-//! scion-server                                      serve
+//! scion-server [--web <addr>]                       serve
 //! scion-server backfill <repo> <type>               derive <type> for the whole history
 //! scion-server grant <repo|*> <principal> <role> [--path <dir>]
 //! scion-server revoke <repo|*> <principal> [--path <dir>]
 //! scion-server token <principal> --ttl <duration>   print a token
 //! ```
+//!
+//! `--web <addr>` also serves the web interface on `addr` (for example
+//! `127.0.0.1:8080`), in the same process as the gRPC services.
 //!
 //! `backfill` derives one derived type (`root_tree`, `path_history`,
 //! `skip_list`) for every changeset reachable from the repository's refs that
@@ -61,7 +64,7 @@ fn token_key() -> Result<TokenKey, Box<dyn std::error::Error + Send + Sync>> {
 
 async fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     match Command::parse(args)? {
-        Command::Serve => {
+        Command::Serve { web } => {
             let key = token_key()?;
             let listen =
                 std::env::var("SCION_LISTEN").unwrap_or_else(|_| "0.0.0.0:7420".to_owned());
@@ -74,7 +77,19 @@ async fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + S
             let listener = TcpListener::bind(&listen).await?;
             eprintln!("scion-server listening on {}", listener.local_addr()?);
             let (meta, objects) = (Arc::new(meta), Arc::new(objects));
-            scion_server::serve(listener, meta, objects, key, github).await?;
+            match web {
+                None => scion_server::serve(listener, meta, objects, key, github).await?,
+                Some(addr) => {
+                    let web = TcpListener::bind(&addr).await?;
+                    eprintln!("web interface on http://{}", web.local_addr()?);
+                    let pages =
+                        scion_server::serve_web(web, meta.clone(), objects.clone(), key.clone());
+                    tokio::try_join!(
+                        scion_server::serve(listener, meta, objects, key, github),
+                        async { pages.await.map_err(Into::into) },
+                    )?;
+                }
+            }
         }
         Command::Backfill { repo, ty } => {
             let meta = metadata().await?;

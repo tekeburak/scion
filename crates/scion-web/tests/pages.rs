@@ -1,0 +1,592 @@
+//! Every page on the memory stores: what it shows, who may see it, and how
+//! many metadata calls it costs. A metadata call is a round trip to
+//! Postgres; every page but the log makes at most five of them, whatever
+//! the history behind it, and the log makes one more per changeset it lists
+//! (the first-parent walk of `scion_core::log`, which the `Log` RPC shares).
+
+use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use async_trait::async_trait;
+use bytes::Bytes;
+use scion_derived::{Blame, Deriver, PathHistory, RootTree, SkipList};
+use scion_store::{
+    ChangeRequest, ChangeRequestStatus, DerivedPointer, Grant, LandOutcome, MemoryStore,
+    MetadataStore, ObjectStore, RefState, Role,
+};
+use scion_types::{
+    BlobId, Changeset, ChangesetId, FileChange, FileType, Identity, RepoPath, Timestamp, Tree,
+    TreeId,
+};
+use tokio::net::TcpListener;
+
+const REPO: &str = "demo";
+
+/// Counts every metadata call; batched reads count once, as they are one
+/// round trip on Postgres.
+#[derive(Debug, Default)]
+struct Counting {
+    inner: MemoryStore,
+    calls: AtomicUsize,
+}
+
+impl Counting {
+    fn meta(&self) {
+        self.calls.fetch_add(1, Ordering::Relaxed);
+    }
+    /// The metadata calls so far, starting again from zero.
+    fn take(&self) -> usize {
+        self.calls.swap(0, Ordering::Relaxed)
+    }
+}
+
+#[async_trait]
+impl MetadataStore for Counting {
+    async fn create_repo(&self, name: &str) -> scion_store::Result<()> {
+        self.meta();
+        self.inner.create_repo(name).await
+    }
+    async fn put_changesets(&self, batch: &[Changeset]) -> scion_store::Result<()> {
+        self.meta();
+        self.inner.put_changesets(batch).await
+    }
+    async fn get_changeset(
+        &self,
+        repo: &str,
+        id: ChangesetId,
+    ) -> scion_store::Result<Option<Changeset>> {
+        self.meta();
+        self.inner.get_changeset(repo, id).await
+    }
+    async fn get_changesets(
+        &self,
+        repo: &str,
+        ids: &[ChangesetId],
+    ) -> scion_store::Result<Vec<Option<Changeset>>> {
+        self.meta();
+        self.inner.get_changesets(repo, ids).await
+    }
+    async fn get_derived_many(
+        &self,
+        repo: &str,
+        ty: &str,
+        version: u32,
+        ids: &[ChangesetId],
+    ) -> scion_store::Result<Vec<Option<Vec<u8>>>> {
+        self.meta();
+        self.inner.get_derived_many(repo, ty, version, ids).await
+    }
+    async fn generation(&self, repo: &str, id: ChangesetId) -> scion_store::Result<Option<u64>> {
+        self.meta();
+        self.inner.generation(repo, id).await
+    }
+    async fn create_ref(
+        &self,
+        repo: &str,
+        name: &str,
+        target: ChangesetId,
+    ) -> scion_store::Result<RefState> {
+        self.meta();
+        self.inner.create_ref(repo, name, target).await
+    }
+    async fn get_ref(&self, repo: &str, name: &str) -> scion_store::Result<Option<RefState>> {
+        self.meta();
+        self.inner.get_ref(repo, name).await
+    }
+    async fn move_ref(
+        &self,
+        repo: &str,
+        name: &str,
+        expected_version: u64,
+        new_target: ChangesetId,
+    ) -> scion_store::Result<RefState> {
+        self.meta();
+        self.inner
+            .move_ref(repo, name, expected_version, new_target)
+            .await
+    }
+    async fn list_refs(&self, repo: &str) -> scion_store::Result<Vec<(String, RefState)>> {
+        self.meta();
+        self.inner.list_refs(repo).await
+    }
+    async fn put_derived_many(
+        &self,
+        repo: &str,
+        pointers: Vec<DerivedPointer>,
+    ) -> scion_store::Result<()> {
+        self.meta();
+        self.inner.put_derived_many(repo, pointers).await
+    }
+    async fn get_derived(
+        &self,
+        repo: &str,
+        ty: &str,
+        version: u32,
+        cs: ChangesetId,
+    ) -> scion_store::Result<Option<Vec<u8>>> {
+        self.meta();
+        self.inner.get_derived(repo, ty, version, cs).await
+    }
+    async fn put_ingest_checkpoints(
+        &self,
+        repo: &str,
+        done: &[(Vec<u8>, ChangesetId)],
+    ) -> scion_store::Result<()> {
+        self.meta();
+        self.inner.put_ingest_checkpoints(repo, done).await
+    }
+    async fn ingest_checkpoints(
+        &self,
+        repo: &str,
+    ) -> scion_store::Result<Vec<(Vec<u8>, ChangesetId)>> {
+        self.meta();
+        self.inner.ingest_checkpoints(repo).await
+    }
+
+    async fn submit_change_request(
+        &self,
+        repo: &str,
+        head: ChangesetId,
+        base: ChangesetId,
+        submitter: &str,
+    ) -> scion_store::Result<ChangeRequest> {
+        self.meta();
+        self.inner
+            .submit_change_request(repo, head, base, submitter)
+            .await
+    }
+
+    async fn get_change_request(
+        &self,
+        repo: &str,
+        id: u64,
+    ) -> scion_store::Result<Option<ChangeRequest>> {
+        self.meta();
+        self.inner.get_change_request(repo, id).await
+    }
+
+    async fn list_change_requests(
+        &self,
+        repo: &str,
+        status: Option<ChangeRequestStatus>,
+        limit: u32,
+    ) -> scion_store::Result<Vec<ChangeRequest>> {
+        self.meta();
+        self.inner.list_change_requests(repo, status, limit).await
+    }
+
+    async fn find_landings(
+        &self,
+        repo: &str,
+        changesets: &[ChangesetId],
+    ) -> scion_store::Result<Vec<(ChangesetId, ChangeRequest)>> {
+        self.meta();
+        self.inner.find_landings(repo, changesets).await
+    }
+
+    async fn claim_next_change_request(
+        &self,
+        repo: &str,
+    ) -> scion_store::Result<Option<ChangeRequest>> {
+        self.meta();
+        self.inner.claim_next_change_request(repo).await
+    }
+
+    async fn landing_change_request(
+        &self,
+        repo: &str,
+    ) -> scion_store::Result<Option<ChangeRequest>> {
+        self.meta();
+        self.inner.landing_change_request(repo).await
+    }
+
+    async fn finish_change_request(
+        &self,
+        repo: &str,
+        id: u64,
+        outcome: LandOutcome,
+    ) -> scion_store::Result<ChangeRequest> {
+        self.meta();
+        self.inner.finish_change_request(repo, id, outcome).await
+    }
+
+    async fn repos_with_open_change_requests(&self) -> scion_store::Result<Vec<String>> {
+        self.meta();
+        self.inner.repos_with_open_change_requests().await
+    }
+
+    async fn put_grant(&self, repo: &str, grant: &Grant) -> scion_store::Result<()> {
+        self.meta();
+        self.inner.put_grant(repo, grant).await
+    }
+
+    async fn delete_grant(
+        &self,
+        repo: &str,
+        principal: &str,
+        path_prefix: &str,
+    ) -> scion_store::Result<bool> {
+        self.meta();
+        self.inner.delete_grant(repo, principal, path_prefix).await
+    }
+
+    async fn grants_for(&self, repo: &str, principal: &str) -> scion_store::Result<Vec<Grant>> {
+        self.meta();
+        self.inner.grants_for(repo, principal).await
+    }
+
+    async fn grants(&self, repo: &str) -> scion_store::Result<Vec<Grant>> {
+        self.meta();
+        self.inner.grants(repo).await
+    }
+    async fn repos_of(&self, principal: &str) -> scion_store::Result<Vec<String>> {
+        self.meta();
+        self.inner.repos_of(principal).await
+    }
+}
+
+#[async_trait]
+impl ObjectStore for Counting {
+    async fn put_blob(&self, bytes: Bytes) -> scion_store::Result<BlobId> {
+        self.inner.put_blob(bytes).await
+    }
+    async fn get_blob(&self, id: BlobId) -> scion_store::Result<Option<Bytes>> {
+        self.inner.get_blob(id).await
+    }
+    async fn has_blobs(&self, ids: &[BlobId]) -> scion_store::Result<Vec<bool>> {
+        self.inner.has_blobs(ids).await
+    }
+    async fn put_tree(&self, tree: &Tree) -> scion_store::Result<TreeId> {
+        self.inner.put_tree(tree).await
+    }
+    async fn get_tree(&self, id: TreeId) -> scion_store::Result<Option<Tree>> {
+        self.inner.get_tree(id).await
+    }
+}
+
+fn changeset(
+    repo: &str,
+    parents: Vec<ChangesetId>,
+    files: &[(&str, &[u8])],
+    msg: &str,
+) -> Changeset {
+    Changeset {
+        repo: repo.into(),
+        parents,
+        author: Identity::new("Ada", "ada@example.com"),
+        author_date: Timestamp::new(1_791_969_120, 180),
+        committer: None,
+        committer_date: None,
+        message: msg.into(),
+        file_changes: files
+            .iter()
+            .map(|(path, content)| {
+                let change = FileChange::Tracked {
+                    content: BlobId::hash(content),
+                    kind: FileType::Regular,
+                    size: content.len() as u64,
+                    copy_from: None,
+                };
+                (RepoPath::new(*path).unwrap(), change)
+            })
+            .collect::<BTreeMap<_, _>>(),
+        extra: BTreeMap::new(),
+    }
+}
+
+/// Store `cs` with its blobs and derive what pages read, as
+/// `CreateChangeset` and a first blame would.
+async fn commit(store: &Counting, cs: &Changeset, files: &[(&str, &[u8])]) -> ChangesetId {
+    for (_, content) in files {
+        store
+            .put_blob(Bytes::copy_from_slice(content))
+            .await
+            .unwrap();
+    }
+    let id = store.put_changeset(cs).await.unwrap();
+    let deriver = Deriver::new(&cs.repo, store, store);
+    deriver.derive::<RootTree>(id).await.unwrap();
+    deriver.derive::<SkipList>(id).await.unwrap();
+    deriver.derive::<PathHistory>(id).await.unwrap();
+    for (path, _) in files {
+        Blame::for_path(&deriver, id, &RepoPath::new(*path).unwrap())
+            .await
+            .unwrap();
+    }
+    id
+}
+
+fn grant(principal: &str, path_prefix: &str) -> Grant {
+    Grant {
+        principal: principal.into(),
+        path_prefix: path_prefix.into(),
+        role: Role::Reader,
+    }
+}
+
+struct Site {
+    store: Arc<Counting>,
+    base: String,
+    first: ChangesetId,
+    second: ChangesetId,
+}
+
+/// `demo`: a README, `src/lib.rs` and, from the second changeset,
+/// `docs/guide.md`; a change request that needs a rebase. `sp:ada` reads it
+/// all, `sp:docs` only `docs/`.
+async fn site() -> Site {
+    let store = Arc::new(Counting::default());
+    store.create_repo(REPO).await.unwrap();
+    let files: &[(&str, &[u8])] = &[
+        (
+            "README.md",
+            b"# Demo\n\nHello <b>there</b>, see [the guide](docs/guide.md).\n",
+        ),
+        ("src/lib.rs", b"pub fn one() -> u8 {\n    1\n}\n"),
+    ];
+    let first = changeset(REPO, vec![], files, "Start the demo");
+    let first = commit(&store, &first, files).await;
+    let files: &[(&str, &[u8])] = &[
+        ("src/lib.rs", b"pub fn one() -> u8 {\n    2\n}\n"),
+        ("docs/guide.md", b"Read me.\n"),
+    ];
+    let second = changeset(REPO, vec![first], files, "Fix one\n\nIt said one.");
+    let second = commit(&store, &second, files).await;
+    store.create_ref(REPO, "main", second).await.unwrap();
+    store.create_ref(REPO, "release/1", first).await.unwrap();
+    store.put_grant(REPO, &grant("sp:ada", "")).await.unwrap();
+    store
+        .put_grant(REPO, &grant("sp:docs", "docs"))
+        .await
+        .unwrap();
+    let cr = store
+        .submit_change_request(REPO, second, first, "sp:ada")
+        .await
+        .unwrap();
+    store.claim_next_change_request(REPO).await.unwrap();
+    store
+        .finish_change_request(
+            REPO,
+            cr.id,
+            LandOutcome::NeedsRebase(vec!["src/lib.rs".into()]),
+        )
+        .await
+        .unwrap();
+
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let verify = |token: &str| {
+        token
+            .strip_prefix("token-")
+            .map(str::to_owned)
+            .ok_or_else(|| "not a token".to_owned())
+    };
+    tokio::spawn(scion_web::serve(
+        listener,
+        store.clone(),
+        store.clone(),
+        Arc::new(verify),
+    ));
+    Site {
+        store,
+        base,
+        first,
+        second,
+    }
+}
+
+/// GET `path` as `principal`: the status and the page.
+async fn get(site: &Site, principal: Option<&str>, path: &str) -> (u16, String) {
+    let mut request = reqwest::Client::new().get(format!("{}{path}", site.base));
+    if let Some(p) = principal {
+        request = request.bearer_auth(format!("token-{p}"));
+    }
+    let response = request.send().await.unwrap();
+    let status = response.status().as_u16();
+    (status, response.text().await.unwrap())
+}
+
+#[tokio::test]
+async fn every_page_shows_its_content_within_five_metadata_calls() {
+    let site = site().await;
+    let (first, second) = (site.first.to_string(), site.second.to_string());
+    let pages: Vec<(String, Vec<&str>)> = vec![
+        ("/".into(), vec![">demo<"]),
+        (
+            "/demo".into(),
+            vec![
+                "<h1>Demo</h1>",
+                "&lt;b&gt;there&lt;/b&gt;",
+                "path=docs%2Fguide.md",
+                ">release/1<",
+                ">src/<",
+            ],
+        ),
+        (
+            "/demo/tree?path=src".into(),
+            vec![">lib.rs<", "History of src/"],
+        ),
+        ("/demo/tree?path=README.md".into(), vec!["# Demo", "Blame"]),
+        (
+            "/demo/tree?at=release%2F1".into(),
+            vec![">README.md<", ">src/<"],
+        ),
+        (
+            "/demo/log".into(),
+            vec![
+                "Fix one",
+                "Start the demo",
+                "Ada",
+                "2026-10-14 12:12:00 +0300",
+                &second[..12],
+            ],
+        ),
+        ("/demo/log?path=docs%2Fguide.md".into(), vec!["Fix one"]),
+        (
+            "/demo/blame?path=README.md".into(),
+            vec![&first[..12], "Hello &lt;b&gt;there"],
+        ),
+        (
+            format!("/demo/changeset/{second}"),
+            vec![
+                "It said one.",
+                "2 files changed",
+                "docs/guide.md",
+                "src/lib.rs",
+                "<span class=\"del\">-    1</span>",
+                "<span class=\"add\">+    2</span>",
+                &first,
+            ],
+        ),
+        (
+            "/demo/requests".into(),
+            vec!["#1", "needs_rebase", "sp:ada"],
+        ),
+        (
+            "/demo/requests/1".into(),
+            vec!["Conflicts with main", "src/lib.rs", &second],
+        ),
+    ];
+    for (path, wants) in pages {
+        site.store.take();
+        let (status, page) = get(&site, Some("sp:ada"), &path).await;
+        assert_eq!(status, 200, "{path}: {page}");
+        for want in wants {
+            assert!(page.contains(want), "{path} lacks {want:?}: {page}");
+        }
+        let calls = site.store.take();
+        assert!(calls <= 5, "{path} made {calls} metadata calls");
+    }
+}
+
+#[tokio::test]
+async fn blame_of_a_changed_line_names_the_changeset_that_changed_it() {
+    let site = site().await;
+    let (status, page) = get(&site, Some("sp:ada"), "/demo/blame?path=src%2Flib.rs").await;
+    assert_eq!(status, 200, "{page}");
+    let first = page.find(&site.first.to_string()[..12]).expect("first");
+    let second = page.find(&site.second.to_string()[..12]).expect("second");
+    assert!(
+        first < second,
+        "line 1 is from the first changeset, line 2 the second"
+    );
+}
+
+#[tokio::test]
+async fn pages_need_a_token_and_a_grant() {
+    let site = site().await;
+    let (status, page) = get(&site, None, "/demo").await;
+    assert_eq!(status, 401, "{page}");
+    assert!(page.contains("Authorization: Bearer"), "{page}");
+    let response = reqwest::Client::new()
+        .get(format!("{}/demo", site.base))
+        .bearer_auth("forged")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 401);
+
+    for path in ["/demo", "/missing", "/demo/log", "/demo/requests/1"] {
+        let (status, page) = get(&site, Some("sp:nobody"), path).await;
+        assert_eq!(status, 403, "{path}: {page}");
+        assert!(page.contains("sp:nobody is not a reader"), "{page}");
+    }
+    let (status, page) = get(&site, Some("sp:nobody"), "/").await;
+    assert_eq!(status, 200);
+    assert!(page.contains("holds no grant"), "{page}");
+}
+
+#[tokio::test]
+async fn a_directory_reader_sees_log_blame_and_diffs_under_its_directory_only() {
+    let site = site().await;
+    let docs = Some("sp:docs");
+    for path in ["/demo/log?path=src", "/demo/blame?path=src%2Flib.rs"] {
+        let (status, page) = get(&site, docs, path).await;
+        assert_eq!(status, 403, "{path}: {page}");
+        assert!(page.contains("may not read src"), "{page}");
+    }
+    let (status, page) = get(&site, docs, "/demo/log?path=docs").await;
+    assert_eq!(status, 200, "{page}");
+    let (status, page) = get(&site, docs, &format!("/demo/changeset/{}", site.second)).await;
+    assert_eq!(status, 200, "{page}");
+    assert!(page.contains("docs/guide.md"), "{page}");
+    assert!(!page.contains("src/lib.rs"), "{page}");
+    let (_, page) = get(&site, docs, "/").await;
+    assert!(page.contains(">demo<"), "{page}");
+}
+
+#[tokio::test]
+async fn bad_locations_are_refused_by_name() {
+    let site = site().await;
+    for (path, status, says) in [
+        ("/demo/tree?path=nope", 404, "no nope"),
+        (
+            "/demo/tree?at=topic",
+            400,
+            "neither a changeset id nor a ref",
+        ),
+        ("/demo/tree?at=release%2F9", 404, "no ref"),
+        ("/demo/tree?path=..%2Fx", 400, "path"),
+        ("/demo/blame", 400, "needs a file path"),
+        ("/demo/changeset/zz", 400, "changeset"),
+        ("/demo/requests/9", 404, "no change request 9"),
+    ] {
+        let (got, page) = get(&site, Some("sp:ada"), path).await;
+        assert_eq!(got, status, "{path}: {page}");
+        assert!(page.contains(says), "{path}: {page}");
+    }
+}
+
+#[tokio::test]
+async fn a_long_log_pages_from_the_last_parent() {
+    let site = site().await;
+    let mut head = site.second;
+    for i in 0..60 {
+        let path = format!("n/{i}");
+        let files: &[(&str, &[u8])] = &[(&path, b"x")];
+        let cs = changeset(REPO, vec![head], files, &format!("Step {i}"));
+        head = commit(&site.store, &cs, files).await;
+    }
+    let main = site.store.get_ref(REPO, "main").await.unwrap().unwrap();
+    site.store
+        .move_ref(REPO, "main", main.version, head)
+        .await
+        .unwrap();
+
+    let (_, page) = get(&site, Some("sp:ada"), "/demo/log").await;
+    assert!(
+        page.contains("Step 59") && page.contains("Step 10"),
+        "{page}"
+    );
+    assert!(!page.contains("Step 9<"), "a page lists 50: {page}");
+    let (link, _) = page.rsplit_once(">Older<").expect("an Older link");
+    let (_, older) = link.rsplit_once("href=\"").unwrap();
+    let older = older.trim_end_matches('"').replace("&amp;", "&");
+    let (_, page) = get(&site, Some("sp:ada"), &older).await;
+    assert!(
+        page.contains("Step 9<") && page.contains("Start the demo"),
+        "{page}"
+    );
+    assert!(!page.contains("Step 10<"), "{page}");
+}
