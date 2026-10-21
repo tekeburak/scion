@@ -98,6 +98,7 @@ pub async fn serve_with_web(
         object.clone(),
         key.clone(),
     );
+    let act = api::page_actions(meta.clone(), control.clone());
     let login = LoginServer::new(github.clone(), key.clone());
     let pages = {
         let key = key.clone();
@@ -106,7 +107,15 @@ pub async fn serve_with_web(
                 .map(|(principal, _)| principal)
                 .map_err(|e| e.to_string())
         };
-        scion_web::serve(web, meta, objects, Arc::new(verify), login.web_login(), api)
+        scion_web::serve(
+            web,
+            meta,
+            objects,
+            Arc::new(verify),
+            login.web_login(),
+            act,
+            api,
+        )
     };
     let grpc = tonic::transport::Server::builder()
         .timeout(RPC_DEADLINE)

@@ -549,3 +549,92 @@ async fn bad_requests_are_refused_by_name() {
         .unwrap();
     assert_eq!(forged.status().as_u16(), 401);
 }
+
+#[tokio::test]
+async fn change_request_pages_land_rebase_and_reject_by_role() {
+    let (base, _) = serve().await;
+    let web = base.strip_suffix("/api/v1").unwrap().to_owned();
+    let api = Client::new(&base, Some("sp:test"));
+    let (c1, c2, c3) = history(&api).await;
+    for grant in [
+        json!({"principal": "sp:dev", "role": "reader", "path": ""}),
+        json!({"principal": "sp:dev", "role": "writer", "path": "docs"}),
+    ] {
+        assert_eq!(api.put("/repos/demo/grants", &grant).await.0, 204);
+    }
+    let page = async |principal: &str, path: &str| {
+        let response = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .unwrap()
+            .post(format!("{web}{path}"))
+            .bearer_auth(token_of(principal))
+            .send()
+            .await
+            .unwrap();
+        let status = response.status().as_u16();
+        let to = response
+            .headers()
+            .get("location")
+            .map(|l| l.to_str().unwrap().to_owned());
+        (status, to, response.text().await.unwrap())
+    };
+
+    // `sp:dev` may not change b.txt, so its request is rejected; an admin
+    // lands the same head from the page, and main moves.
+    let dev = Client::new(&base, Some("sp:dev"));
+    let denied = dev.land("demo", &c3).await;
+    assert_eq!(denied["status"], "rejected", "{denied}");
+    let id = denied["id"].as_u64().unwrap();
+    let (status, to, body) = page("sp:test", &format!("/demo/requests/{id}/land")).await;
+    assert_eq!(status, 303, "{body}");
+    let to = to.unwrap();
+    let new: u64 = to.strip_prefix("/demo/requests/").unwrap().parse().unwrap();
+    let landed = api.ok(&format!("/repos/demo/change-requests/{new}")).await;
+    assert_eq!(landed["status"], "landed", "{landed}");
+    let main = api.ok("/repos/demo/refs/main").await;
+    assert_eq!(main["target"], landed["landed"]);
+    assert_ne!(main["target"], c2.as_str());
+
+    // Two edits of README.md from c1: the second needs a rebase, and a
+    // rebase from the page still shows the conflicting path.
+    let two = api
+        .commit("demo", &c1, &[("README.md", "two\n")], "Two")
+        .await;
+    assert_eq!(api.land("demo", &two).await["status"], "landed");
+    let three = api
+        .commit("demo", &c1, &[("README.md", "three\n")], "Three")
+        .await;
+    let conflicted = api.land("demo", &three).await;
+    assert_eq!(conflicted["status"], "needs_rebase", "{conflicted}");
+    let id = conflicted["id"].as_u64().unwrap();
+    let (status, _, body) = page("sp:test", &format!("/demo/requests/{id}/rebase")).await;
+    assert_eq!(status, 200, "{body}");
+    assert!(
+        body.contains("Still conflicts with main") && body.contains("README.md"),
+        "{body}"
+    );
+
+    // Only its submitter or an admin rejects it; rejecting it again is no
+    // change, and a landed request is not rejected.
+    let reject = format!("/demo/requests/{id}/reject");
+    let (status, _, body) = page("sp:dev", &reject).await;
+    assert_eq!(status, 403, "{body}");
+    assert!(body.contains("sp:dev is not an admin of"), "{body}");
+    for _ in 0..2 {
+        let (status, to, body) = page("sp:test", &reject).await;
+        assert_eq!(
+            (status, to.as_deref()),
+            (303, Some(&reject[..reject.len() - 7])),
+            "{body}"
+        );
+    }
+    let rejected = api.ok(&format!("/repos/demo/change-requests/{id}")).await;
+    assert_eq!(
+        (&rejected["status"], &rejected["conflicts"]),
+        (&json!("rejected"), &json!([]))
+    );
+    let (status, _, body) = page("sp:test", &format!("/demo/requests/{new}/reject")).await;
+    assert_eq!(status, 409, "{body}");
+    assert!(body.contains("is landed"), "{body}");
+}

@@ -931,6 +931,25 @@ impl MetadataStore for PostgresStore {
         }
     }
 
+    async fn reject_change_request(&self, repo: &str, id: u64) -> Result<ChangeRequest> {
+        let row: Option<ChangeRequestRow> = sqlx::query_as(&format!(
+            "UPDATE change_requests c SET status = 'rejected', conflicts = NULL \
+             FROM repos r WHERE r.id = c.repo AND r.name = $1 AND c.id = $2 \
+             AND c.status IN ('pending', 'needs_rebase') RETURNING {CHANGE_REQUEST_COLUMNS}"
+        ))
+        .bind(repo)
+        .bind(to_i64(id)?)
+        .fetch_optional(&self.pool)
+        .await?;
+        match row {
+            Some(row) => change_request(row),
+            None => self
+                .get_change_request(repo, id)
+                .await?
+                .ok_or(StoreError::ChangeRequestNotFound(id)),
+        }
+    }
+
     async fn repos_with_open_change_requests(&self) -> Result<Vec<String>> {
         // Through `change_requests_status`, one probe per status.
         let rows: Vec<(String,)> = sqlx::query_as(

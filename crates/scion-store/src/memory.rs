@@ -356,6 +356,23 @@ impl MetadataStore for MemoryStore {
         Ok(cr.clone())
     }
 
+    async fn reject_change_request(&self, repo: &str, id: u64) -> Result<ChangeRequest> {
+        let mut m = self.meta.write().expect("poisoned");
+        let cr = m
+            .change_requests
+            .get_mut(repo)
+            .and_then(|r| r.get_mut(&id))
+            .ok_or(StoreError::ChangeRequestNotFound(id))?;
+        if matches!(
+            cr.status,
+            ChangeRequestStatus::Pending | ChangeRequestStatus::NeedsRebase
+        ) {
+            cr.status = ChangeRequestStatus::Rejected;
+            cr.conflicts.clear();
+        }
+        Ok(cr.clone())
+    }
+
     async fn repos_with_open_change_requests(&self) -> Result<Vec<String>> {
         let m = self.meta.read().expect("poisoned");
         let mut repos: Vec<String> = m

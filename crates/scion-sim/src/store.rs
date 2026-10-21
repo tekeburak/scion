@@ -254,6 +254,11 @@ impl MetadataStore for SimStore {
         self.inner.finish_change_request(repo, id, outcome).await
     }
 
+    async fn reject_change_request(&self, repo: &str, id: u64) -> Result<ChangeRequest> {
+        self.step().await;
+        self.inner.reject_change_request(repo, id).await
+    }
+
     async fn repos_with_open_change_requests(&self) -> Result<Vec<String>> {
         self.step().await;
         self.inner.repos_with_open_change_requests().await

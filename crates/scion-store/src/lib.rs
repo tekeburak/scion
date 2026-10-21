@@ -390,6 +390,11 @@ pub trait MetadataStore: Send + Sync {
         outcome: LandOutcome,
     ) -> Result<ChangeRequest>;
 
+    /// Reject a `pending` or `needs_rebase` request of `repo`, clearing its
+    /// conflicts, and return it; a request in any other status is returned
+    /// as it is. One the land worker claimed first stays `landing`.
+    async fn reject_change_request(&self, repo: &str, id: u64) -> Result<ChangeRequest>;
+
     /// The repositories with a `pending` or `landing` request, sorted: the
     /// ones whose land worker has work when the server starts.
     async fn repos_with_open_change_requests(&self) -> Result<Vec<String>>;

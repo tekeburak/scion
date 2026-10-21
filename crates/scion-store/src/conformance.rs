@@ -504,6 +504,54 @@ pub async fn change_requests<S: MetadataStore>(s: &S) {
     );
 }
 
+/// Only a `pending` or `needs_rebase` request is rejected, its conflicts
+/// cleared; any other comes back as it is.
+pub async fn reject_change_requests<S: MetadataStore>(s: &S) {
+    use ChangeRequestStatus::{Landed, Landing, NeedsRebase, Rejected};
+    let cs = |b: u8| ChangesetId::from_bytes([b; 32]);
+    s.create_repo(REPO).await.unwrap();
+    let mut ids = Vec::new();
+    for b in 1..=4 {
+        let cr = s
+            .submit_change_request(REPO, cs(b), cs(0), "sp:test")
+            .await
+            .unwrap();
+        ids.push(cr.id);
+    }
+    for outcome in [
+        LandOutcome::NeedsRebase(vec!["a.txt".to_owned()]),
+        LandOutcome::Landed(cs(7)),
+    ] {
+        let cr = s.claim_next_change_request(REPO).await.unwrap().unwrap();
+        s.finish_change_request(REPO, cr.id, outcome).await.unwrap();
+    }
+    let landing = s.claim_next_change_request(REPO).await.unwrap().unwrap();
+    assert_eq!((landing.id, landing.status), (ids[2], Landing));
+    let status = async |id| {
+        s.get_change_request(REPO, id)
+            .await
+            .unwrap()
+            .unwrap()
+            .status
+    };
+    assert_eq!(status(ids[0]).await, NeedsRebase);
+
+    for id in [ids[3], ids[0]] {
+        let cr = s.reject_change_request(REPO, id).await.unwrap();
+        assert_eq!((cr.status, cr.conflicts.len()), (Rejected, 0));
+        assert_eq!(s.get_change_request(REPO, id).await.unwrap(), Some(cr));
+    }
+    for (id, want) in [(ids[1], Landed), (ids[2], Landing), (ids[0], Rejected)] {
+        let before = s.get_change_request(REPO, id).await.unwrap().unwrap();
+        assert_eq!(before.status, want);
+        assert_eq!(s.reject_change_request(REPO, id).await.unwrap(), before);
+    }
+    assert!(matches!(
+        s.reject_change_request(REPO, u64::from(u32::MAX)).await,
+        Err(StoreError::ChangeRequestNotFound(_))
+    ));
+}
+
 /// Listing returns the newest requests first, of one status or of any, and
 /// only of the repository asked.
 pub async fn list_change_requests<S: MetadataStore>(s: &S) {
@@ -800,6 +848,10 @@ macro_rules! conformance_tests {
                 $crate::conformance::change_requests(&$ctor.await).await;
             }
             #[tokio::test]
+            async fn reject_change_requests() {
+                $crate::conformance::reject_change_requests(&$ctor.await).await;
+            }
+            #[tokio::test]
             async fn list_change_requests() {
                 $crate::conformance::list_change_requests(&$ctor.await).await;
             }
@@ -863,6 +915,10 @@ macro_rules! metadata_conformance_tests {
             #[tokio::test]
             async fn change_requests() {
                 $crate::conformance::change_requests(&$ctor.await).await;
+            }
+            #[tokio::test]
+            async fn reject_change_requests() {
+                $crate::conformance::reject_change_requests(&$ctor.await).await;
             }
             #[tokio::test]
             async fn list_change_requests() {

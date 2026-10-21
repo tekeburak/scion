@@ -5,11 +5,12 @@
 //! (the first-parent walk of `scion_core::log`, which the `Log` RPC shares).
 
 use std::collections::BTreeMap;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use async_trait::async_trait;
+use axum::http::StatusCode;
 use bytes::Bytes;
 use scion_derived::{Blame, Deriver, PathHistory, RootTree, SkipList};
 use scion_store::{
@@ -20,6 +21,7 @@ use scion_types::{
     BlobId, Changeset, ChangesetId, FileChange, FileType, Identity, RepoPath, Timestamp, Tree,
     TreeId,
 };
+use scion_web::{Acted, Action};
 use tokio::net::TcpListener;
 
 const REPO: &str = "demo";
@@ -212,6 +214,15 @@ impl MetadataStore for Counting {
         self.inner.finish_change_request(repo, id, outcome).await
     }
 
+    async fn reject_change_request(
+        &self,
+        repo: &str,
+        id: u64,
+    ) -> scion_store::Result<ChangeRequest> {
+        self.meta();
+        self.inner.reject_change_request(repo, id).await
+    }
+
     async fn repos_with_open_change_requests(&self) -> scion_store::Result<Vec<String>> {
         self.meta();
         self.inner.repos_with_open_change_requests().await
@@ -331,6 +342,28 @@ struct Site {
     base: String,
     first: ChangesetId,
     second: ChangesetId,
+    /// Every action the pages asked for: who, on which request, what.
+    acted: Arc<Mutex<Vec<(String, u64, Action)>>>,
+}
+
+/// Stands in for the server: records each action, refuses `sp:docs` as the
+/// server would, lands as request 99 and finds `src/lib.rs` conflicting.
+fn act(acted: Arc<Mutex<Vec<(String, u64, Action)>>>) -> scion_web::Act {
+    Arc::new(move |principal, repo, cr, action| {
+        assert_eq!(repo, REPO);
+        let refused = principal == "sp:docs";
+        acted.lock().unwrap().push((principal, cr.id, action));
+        Box::pin(async move {
+            if refused {
+                return Err((StatusCode::FORBIDDEN, "sp:docs may not".to_owned()));
+            }
+            Ok(match action {
+                Action::Land => Acted::Submitted(99),
+                Action::Rebase => Acted::Conflicts(vec!["src/lib.rs".into()]),
+                Action::Reject => Acted::Rejected,
+            })
+        })
+    })
 }
 
 /// `demo`: a README, `src/lib.rs` and, from the second changeset,
@@ -397,12 +430,14 @@ async fn site() -> Site {
             })
         }),
     };
+    let acted = Arc::default();
     tokio::spawn(scion_web::serve(
         listener,
         store.clone(),
         store.clone(),
         Arc::new(verify),
         Some(login),
+        act(Arc::clone(&acted)),
         axum::Router::new(),
     ));
     Site {
@@ -410,6 +445,7 @@ async fn site() -> Site {
         base,
         first,
         second,
+        acted,
     }
 }
 
@@ -795,4 +831,122 @@ async fn signing_in_with_github_sets_a_session_that_reads_change_requests() {
         set_cookies(&out),
         ["scion_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax"]
     );
+}
+
+/// POST `path` as `principal`, from a page of `origin` if given, without
+/// following a redirect.
+async fn post(
+    site: &Site,
+    principal: Option<&str>,
+    origin: Option<&str>,
+    path: &str,
+) -> reqwest::Response {
+    let mut request = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap()
+        .post(format!("{}{path}", site.base));
+    if let Some(p) = principal {
+        request = request.bearer_auth(format!("token-{p}"));
+    }
+    if let Some(o) = origin {
+        request = request.header("origin", o);
+    }
+    request.send().await.unwrap()
+}
+
+#[tokio::test]
+async fn a_change_request_page_offers_the_actions_of_the_callers_role() {
+    let site = site().await;
+    for (principal, role) in [("sp:bob", Role::Writer), ("sp:root", Role::Admin)] {
+        let g = Grant {
+            principal: principal.into(),
+            path_prefix: String::new(),
+            role,
+        };
+        site.store.put_grant(REPO, &g).await.unwrap();
+    }
+    let action = |a: &str| format!("action=\"/demo/requests/1/{a}\"");
+    // Request 1 needs a rebase; `sp:ada` submitted it and only reads.
+    for (principal, offered) in [
+        ("sp:ada", &["reject"][..]),
+        ("sp:bob", &["rebase", "land"]),
+        ("sp:root", &["rebase", "land", "reject"]),
+        ("sp:docs", &[]),
+    ] {
+        let (status, page) = get(&site, Some(principal), "/demo/requests/1").await;
+        assert_eq!(status, 200, "{page}");
+        for a in ["rebase", "land", "reject"] {
+            assert_eq!(
+                page.contains(&action(a)),
+                offered.contains(&a),
+                "{principal} {a}: {page}"
+            );
+        }
+    }
+    site.store.take();
+
+    // A land goes to the new request, a reject back to this one.
+    let landed = post(&site, Some("sp:bob"), None, "/demo/requests/1/land").await;
+    assert_eq!(landed.status().as_u16(), 303);
+    assert_eq!(landed.headers()["location"], "/demo/requests/99");
+    let rejected = post(
+        &site,
+        Some("sp:ada"),
+        Some(&site.base),
+        "/demo/requests/1/reject",
+    )
+    .await;
+    assert_eq!(rejected.status().as_u16(), 303);
+    assert_eq!(rejected.headers()["location"], "/demo/requests/1");
+    // A rebase shows where the head stands on the request's page.
+    let rebased = post(&site, Some("sp:bob"), None, "/demo/requests/1/rebase").await;
+    assert_eq!(rebased.status().as_u16(), 200);
+    let page = rebased.text().await.unwrap();
+    assert!(
+        page.contains("Still conflicts with main") && page.contains("scn update"),
+        "{page}"
+    );
+    assert!(
+        site.store.take() <= 3 * 2,
+        "each action reads the grants and the request"
+    );
+
+    // The server's refusal is shown with its status.
+    let refused = post(&site, Some("sp:docs"), None, "/demo/requests/1/reject").await;
+    assert_eq!(refused.status().as_u16(), 403);
+    assert!(refused.text().await.unwrap().contains("sp:docs may not"));
+    assert_eq!(
+        *site.acted.lock().unwrap(),
+        [
+            ("sp:bob".to_owned(), 1, Action::Land),
+            ("sp:ada".to_owned(), 1, Action::Reject),
+            ("sp:bob".to_owned(), 1, Action::Rebase),
+            ("sp:docs".to_owned(), 1, Action::Reject),
+        ]
+    );
+
+    // Refused before the server is asked: another site's page, a visitor
+    // or a principal that only reads what anyone does, an unknown action or
+    // request.
+    site.store
+        .put_grant(REPO, &grant(scion_web::ANYONE, ""))
+        .await
+        .unwrap();
+    for (principal, origin, path, status) in [
+        (
+            Some("sp:bob"),
+            Some("https://evil.example"),
+            "/demo/requests/1/land",
+            403,
+        ),
+        (None, None, "/demo/requests/1/land", 401),
+        (Some("sp:eve"), None, "/demo/requests/1/land", 403),
+        (Some("sp:bob"), None, "/demo/requests/1/merge", 404),
+        (Some("sp:bob"), None, "/demo/requests/7/land", 404),
+    ] {
+        let response = post(&site, principal, origin, path).await;
+        assert_eq!(response.status().as_u16(), status, "{path} {origin:?}");
+    }
+    assert_eq!(site.acted.lock().unwrap().len(), 4);
 }
