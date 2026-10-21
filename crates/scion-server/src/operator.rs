@@ -5,6 +5,7 @@ use std::time::{Duration, SystemTime};
 
 use scion_store::{Grant, MetadataStore, Role, SERVER_GRANTS};
 use scion_types::RepoPath;
+use scion_web::ANYONE;
 
 use crate::token::{TokenKey, check_principal};
 
@@ -55,7 +56,7 @@ impl Command {
             }),
             ["revoke", repo, principal, rest @ ..] => Ok(Self::Revoke {
                 repo: (*repo).to_owned(),
-                principal: principal_arg(principal)?,
+                principal: grantee_arg(principal)?,
                 path_prefix: parse_prefix(repo, path_option(rest)?)?,
             }),
             ["token", principal, "--ttl", ttl] => Ok(Self::Token {
@@ -132,16 +133,32 @@ pub(crate) fn parse_grant(
             "a server-wide grant ({SERVER_GRANTS}) is admin; got {role}"
         ));
     }
+    let principal = grantee_arg(principal)?;
+    if principal == ANYONE && role != Role::Reader {
+        return Err(format!(
+            "{ANYONE} can only be a reader (it makes a repository public); got {role}"
+        ));
+    }
     Ok(Grant {
-        principal: principal_arg(principal)?,
+        principal,
         path_prefix: parse_prefix(repo, dir)?,
         role,
     })
 }
 
+/// A principal a token can name.
 pub(crate) fn principal_arg(principal: &str) -> Result<String, String> {
     check_principal(principal).map_err(|e| e.to_string())?;
     Ok(principal.to_owned())
+}
+
+/// A principal a grant can name: one a token can, or [`ANYONE`], whom no
+/// token names and whose grants the web interface reads for every visitor.
+pub(crate) fn grantee_arg(principal: &str) -> Result<String, String> {
+    if principal == ANYONE {
+        return Ok(principal.to_owned());
+    }
+    principal_arg(principal).map_err(|e| format!("{e}; or {ANYONE}, to make a repository public"))
 }
 
 /// The prefix `dir` names in `repo`: a repository directory without the
@@ -236,10 +253,28 @@ mod tests {
     }
 
     #[test]
+    fn anyone_reads_a_repository_or_a_directory() {
+        let Ok(Command::Grant { grant, .. }) = parse("grant web anyone reader --path docs") else {
+            panic!()
+        };
+        assert_eq!(
+            (grant.principal.as_str(), grant.role),
+            (ANYONE, Role::Reader)
+        );
+        assert!(matches!(
+            parse("revoke web anyone"),
+            Ok(Command::Revoke { principal, .. }) if principal == ANYONE
+        ));
+    }
+
+    #[test]
     fn bad_command_lines_are_refused() {
         for (line, says) in [
             ("grant web sp:ci owner", "unknown role"),
             ("grant web alice writer", "github:<login> or sp:<name>"),
+            ("grant web anyone writer", "anyone can only be a reader"),
+            ("grant * anyone admin", "anyone can only be a reader"),
+            ("token anyone --ttl 1d", "github:<login> or sp:<name>"),
             ("grant * sp:ci writer", "server-wide grant"),
             ("grant * sp:ci admin --path lib", "has no --path"),
             ("grant web sp:ci writer --path /lib", "--path"),

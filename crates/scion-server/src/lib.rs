@@ -76,19 +76,22 @@ pub async fn serve(
 
 /// Serve the web interface on `listener` until the future is dropped or
 /// accepting fails. Its pages read the same stores as the control plane and
-/// take the same tokens, signed with `key`.
+/// take the same tokens, signed with `key`; browsers sign in through
+/// `github` when it has its client secret.
 pub async fn serve_web(
     listener: TcpListener,
     meta: Arc<dyn MetadataStore>,
     objects: Arc<dyn ObjectStore>,
     key: TokenKey,
+    github: Option<GitHub>,
 ) -> std::io::Result<()> {
+    let login = LoginServer::new(github, key.clone()).web_login();
     let verify = move |token: &str| {
         key.verify(token, std::time::SystemTime::now())
             .map(|(principal, _)| principal)
             .map_err(|e| e.to_string())
     };
-    scion_web::serve(listener, meta, objects, Arc::new(verify)).await
+    scion_web::serve(listener, meta, objects, Arc::new(verify), login).await
 }
 
 /// The health, login, control and object services [`serve`] runs, for a

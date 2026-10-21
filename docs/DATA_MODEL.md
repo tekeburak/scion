@@ -187,9 +187,11 @@ Who may do what is one table, `grants (repo, principal, path_prefix, role)`, pri
 `(repo, principal, path_prefix)`, so a principal holds at most one role per directory of a
 repository and granting again replaces it.
 
-- `principal` is `github:<login>` (signed in with `scn login`) or `sp:<name>` (a service
-  principal with a token from `scion-server token`); the name is ASCII letters, digits, `-`,
-  `_` and `.`, at most 100 bytes.
+- `principal` is `github:<login>` (signed in with `scn login` or on the web interface) or
+  `sp:<name>` (a service principal with a token from `scion-server token`); the name is ASCII
+  letters, digits, `-`, `_` and `.`, at most 100 bytes. The reserved principal `anyone`, whom
+  no token names, may hold only `reader`: such a grant makes the repository (or, with a
+  `path_prefix`, the directory) public on the web interface.
 - `role` is `reader`, `writer` or `admin`; each includes the ones before it.
 - `path_prefix` is empty for the whole repository, or a directory from the repository root
   (stored without a trailing `/`), under which alone the role holds.

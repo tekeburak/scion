@@ -322,13 +322,28 @@ blame, a changeset with its line diffs against its first parent (the first 20 fi
 1 MiB), and the change requests with their status, heads and conflicts. Every page needs a
 reader of its repository, checked from `grants` like an RPC; a directory-scoped reader gets
 log and blame only under its directories and a diff only of those paths, while trees and
-files, like the object plane, need a reader of the repository only. Until browser login exists
-(Phase 11.2) the token comes in `Authorization: Bearer <token>`. A page is bounded like an RPC:
-at most five metadata reads (the log adds one ancestry read per changeset it lists, the walk
+files, like the object plane, need a reader of the repository only.
+
+The token comes in `Authorization: Bearer <token>` or in the session cookie a browser gets by
+signing in with GitHub's web flow, the browser sibling of `scn login`: `/login` sends it to
+GitHub with a fresh state (a MAC of a counter and the time under the server key), also kept in
+a ten-minute cookie, and `/login/callback` checks that GitHub sent the same state back before
+it trades the code for a 30-day token of `github:<login>` with the OAuth app's client secret
+(`SCION_GITHUB_CLIENT_SECRET`; the app's callback URL is `https://<host>/login/callback`).
+The token goes into the `scion_session` cookie (`HttpOnly; Secure; SameSite=Lax`) and the
+server keeps no session state; `/logout` drops the cookie, and the token, like every token,
+stays valid until it expires. A repository is **public** when the reserved principal `anyone`
+holds a `reader` grant in it (`scn access grant anyone reader`, or `--path` for one
+directory): a visitor without a token reads what `anyone` may, and a signed-in one reads its
+own grants and those of `anyone`, both from one read of the repository's grants. No token
+names `anyone`, it can be granted nothing but `reader`, and the gRPC services do not read its
+grants, so public reads exist only in the web interface (and later its HTTP API).
+
+A page is bounded like an RPC: at most five metadata reads (the log adds one ancestry read per changeset it lists, the walk
 the `Log` RPC also makes), a 30-second deadline, and a content policy that loads nothing but
 the page's own style.
 
-*Planned, Phase 11.* Browser GitHub login and change-request actions, an HTTP/JSON API that
+*Planned, Phase 11.* Change-request actions, an HTTP/JSON API that
 mirrors the control plane for clients that do not speak gRPC, and an MCP server so coding
 agents can read, commit and land through tools, all through the same authorization. A
 separate code-review product is not a goal; change-request pages are.

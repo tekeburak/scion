@@ -85,6 +85,7 @@ async fn serve() -> (String, String) {
         meta.clone(),
         objects.clone(),
         key(),
+        None,
     ));
     tokio::spawn(scion_server::serve(listener, meta, objects, key(), None));
     (format!("http://{addr}"), format!("http://{web_addr}"))
@@ -410,4 +411,41 @@ async fn web_pages_on_postgres_and_s3() {
     assert!(page.contains("landed") && page.contains(&head), "{page}");
     let response = client.get(format!("{web}/{r}")).send().await.unwrap();
     assert_eq!(response.status().as_u16(), 401);
+
+    session_and_public(&web, r, &id, &wc).await;
+}
+
+/// A signed-in browser's session lists the change requests of the private
+/// repository `r`, the newest being `id`; once `anyone` reads `r`, so does a
+/// visitor without one.
+async fn session_and_public(web: &str, r: &str, id: &str, wc: &Path) {
+    let client = reqwest::Client::new();
+    // A signed-in browser's session cookie holds its token: it lists the
+    // change requests of the private repository.
+    let response = client
+        .get(format!("{web}/{r}/requests"))
+        .header("cookie", format!("scion_session={}", token()))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status().as_u16(), 200);
+    let page = response.text().await.unwrap();
+    assert!(page.contains(&format!("/{r}/requests/{id}")), "{page}");
+
+    // Public: anyone reads it without a session.
+    assert_eq!(
+        scn(wc, &["access", "grant", "anyone", "reader"]),
+        format!("granted anyone reader on {r}\n")
+    );
+    for (path, want) in [
+        (format!("/{r}"), "Served from S3."),
+        (format!("/{r}/log"), "Fix one"),
+        (format!("/{r}/requests"), "landed"),
+        ("/".to_owned(), r),
+    ] {
+        let response = client.get(format!("{web}{path}")).send().await.unwrap();
+        assert_eq!(response.status().as_u16(), 200, "{path}");
+        let page = response.text().await.unwrap();
+        assert!(page.contains(want), "{path} lacks {want:?}: {page}");
+    }
 }

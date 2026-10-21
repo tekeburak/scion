@@ -13,7 +13,7 @@ use scion_store::{Grant, MetadataStore, Role};
 use tonic::{Request, Response, Status};
 
 use crate::auth::{authorize, principal, token_of};
-use crate::operator::{parse_grant, parse_prefix, principal_arg};
+use crate::operator::{grantee_arg, parse_grant, parse_prefix};
 use crate::store_status;
 
 /// Refuse `request` unless its principal is an admin of all of `repo`.
@@ -67,7 +67,7 @@ pub(crate) async fn revoke(
 ) -> Result<Response<RevokeResponse>, Status> {
     let req = request.get_ref();
     whole_admin(meta, &request, &req.repo).await?;
-    let principal = principal_arg(&req.principal).map_err(Status::invalid_argument)?;
+    let principal = grantee_arg(&req.principal).map_err(Status::invalid_argument)?;
     let prefix =
         parse_prefix(&req.repo, dir(&req.path_prefix)).map_err(Status::invalid_argument)?;
     if meta

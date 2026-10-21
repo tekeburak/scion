@@ -7,6 +7,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::time::Duration;
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -382,11 +383,26 @@ async fn site() -> Site {
             .map(str::to_owned)
             .ok_or_else(|| "not a token".to_owned())
     };
+    // GitHub signs in `github:octocat` for the code `good`.
+    let nonces = Arc::new(AtomicUsize::new(0));
+    let login = scion_web::Login {
+        authorize: "https://github.example/login/oauth/authorize?client_id=app".into(),
+        nonce: Arc::new(move || format!("{:064x}", nonces.fetch_add(1, Ordering::Relaxed))),
+        exchange: Arc::new(|code| {
+            Box::pin(async move {
+                match code.as_str() {
+                    "good" => Ok(("token-github:octocat".to_owned(), Duration::from_secs(60))),
+                    _ => Err("GitHub: bad_verification_code".to_owned()),
+                }
+            })
+        }),
+    };
     tokio::spawn(scion_web::serve(
         listener,
         store.clone(),
         store.clone(),
         Arc::new(verify),
+        Some(login),
     ));
     Site {
         store,
@@ -498,6 +514,7 @@ async fn pages_need_a_token_and_a_grant() {
     let site = site().await;
     let (status, page) = get(&site, None, "/demo").await;
     assert_eq!(status, 401, "{page}");
+    assert!(page.contains("is not public: sign in at /login"), "{page}");
     assert!(page.contains("Authorization: Bearer"), "{page}");
     let response = reqwest::Client::new()
         .get(format!("{}/demo", site.base))
@@ -515,6 +532,10 @@ async fn pages_need_a_token_and_a_grant() {
     let (status, page) = get(&site, Some("sp:nobody"), "/").await;
     assert_eq!(status, 200);
     assert!(page.contains("holds no grant"), "{page}");
+    let (status, page) = get(&site, None, "/").await;
+    assert_eq!(status, 200);
+    assert!(page.contains("No repository is public"), "{page}");
+    assert!(page.contains("href=\"/login\""), "{page}");
 }
 
 #[tokio::test]
@@ -589,4 +610,188 @@ async fn a_long_log_pages_from_the_last_parent() {
         "{page}"
     );
     assert!(!page.contains("Step 10<"), "{page}");
+}
+
+/// GET `path` with `cookie`, not following redirects: the response.
+async fn get_with_cookie(site: &Site, cookie: &str, path: &str) -> reqwest::Response {
+    reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap()
+        .get(format!("{}{path}", site.base))
+        .header("cookie", cookie)
+        .send()
+        .await
+        .unwrap()
+}
+
+/// The `name=value` pairs of a response's `Set-Cookie` headers, each with
+/// its attributes.
+fn set_cookies(response: &reqwest::Response) -> Vec<String> {
+    response
+        .headers()
+        .get_all("set-cookie")
+        .iter()
+        .map(|v| v.to_str().unwrap().to_owned())
+        .collect()
+}
+
+#[tokio::test]
+async fn a_public_repository_reads_without_a_session() {
+    let site = site().await;
+    site.store
+        .put_grant(REPO, &grant(scion_web::ANYONE, ""))
+        .await
+        .unwrap();
+    let (status, page) = get(&site, None, "/").await;
+    assert_eq!(status, 200);
+    assert!(
+        page.contains(">demo<") && page.contains("Sign in with GitHub"),
+        "{page}"
+    );
+    for (path, want) in [
+        ("/demo", "<h1>Demo</h1>"),
+        ("/demo/log?path=src", "Fix one"),
+        ("/demo/requests", "needs_rebase"),
+    ] {
+        site.store.take();
+        let (status, page) = get(&site, None, path).await;
+        assert_eq!(status, 200, "{path}: {page}");
+        assert!(page.contains(want), "{path}: {page}");
+        let calls = site.store.take();
+        assert!(calls <= 5, "{path} made {calls} metadata calls");
+    }
+    // A principal without grants of its own reads it too.
+    let (status, page) = get(&site, Some("sp:nobody"), "/demo/requests").await;
+    assert_eq!(status, 200, "{page}");
+    let (_, page) = get(&site, Some("sp:nobody"), "/").await;
+    assert!(
+        page.contains(">demo<") && page.contains("Signed in as"),
+        "{page}"
+    );
+}
+
+#[tokio::test]
+async fn a_public_directory_shows_only_its_history_without_a_session() {
+    let site = site().await;
+    site.store
+        .put_grant(REPO, &grant(scion_web::ANYONE, "docs"))
+        .await
+        .unwrap();
+    let (status, page) = get(&site, None, "/demo/log?path=docs").await;
+    assert_eq!(status, 200, "{page}");
+    let (status, page) = get(&site, None, "/demo/blame?path=src%2Flib.rs").await;
+    assert_eq!(status, 403, "{page}");
+    assert!(page.contains("anyone may not read src/lib.rs"), "{page}");
+    // `sp:docs` reads docs/ by its own grant, and nothing more through anyone's.
+    let (status, _) = get(&site, Some("sp:docs"), "/demo/log?path=src").await;
+    assert_eq!(status, 403);
+}
+
+#[tokio::test]
+async fn signing_in_with_github_sets_a_session_that_reads_change_requests() {
+    let site = site().await;
+    site.store
+        .put_grant(REPO, &grant("github:octocat", ""))
+        .await
+        .unwrap();
+    let started = get_with_cookie(&site, "", "/login").await;
+    assert_eq!(started.status().as_u16(), 303);
+    let to = started.headers()["location"].to_str().unwrap().to_owned();
+    let state = to
+        .strip_prefix("https://github.example/login/oauth/authorize?client_id=app&state=")
+        .expect(&to)
+        .to_owned();
+    let cookies = set_cookies(&started);
+    assert_eq!(cookies.len(), 1, "{cookies:?}");
+    assert!(
+        cookies[0].starts_with(&format!("scion_login={state}; Path=/login; Max-Age=600;"))
+            && cookies[0].ends_with("HttpOnly; Secure; SameSite=Lax"),
+        "{cookies:?}"
+    );
+
+    let state_cookie = format!("scion_login={state}");
+    for (cookie, query, status, says) in [
+        (
+            "",
+            format!("code=good&state={state}"),
+            400,
+            "not started from this browser",
+        ),
+        (
+            state_cookie.as_str(),
+            "code=good&state=other".to_owned(),
+            400,
+            "not started",
+        ),
+        (
+            state_cookie.as_str(),
+            format!("code=bad&state={state}"),
+            502,
+            "bad_verification_code",
+        ),
+        (
+            state_cookie.as_str(),
+            "error=access_denied&error_description=The+user+said+no".to_owned(),
+            403,
+            "The user said no",
+        ),
+    ] {
+        let response = get_with_cookie(&site, cookie, &format!("/login/callback?{query}")).await;
+        assert_eq!(response.status().as_u16(), status, "{query}");
+        assert!(set_cookies(&response).is_empty(), "{query}");
+        assert!(response.text().await.unwrap().contains(says), "{query}");
+    }
+
+    let back = get_with_cookie(
+        &site,
+        &format!("other=1; {state_cookie}"),
+        &format!("/login/callback?code=good&state={state}"),
+    )
+    .await;
+    assert_eq!(back.status().as_u16(), 303);
+    assert_eq!(back.headers()["location"], "/");
+    let cookies = set_cookies(&back);
+    assert_eq!(
+        cookies,
+        [
+            "scion_session=token-github:octocat; Path=/; Max-Age=60; HttpOnly; Secure; SameSite=Lax",
+            "scion_login=; Path=/login; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
+        ]
+    );
+
+    let session = "scion_session=token-github:octocat";
+    let requests = get_with_cookie(&site, session, "/demo/requests").await;
+    assert_eq!(requests.status().as_u16(), 200);
+    let page = requests.text().await.unwrap();
+    assert!(
+        page.contains("needs_rebase") && page.contains("#1"),
+        "{page}"
+    );
+    let home = get_with_cookie(&site, session, "/").await;
+    let page = home.text().await.unwrap();
+    assert!(
+        page.contains("Signed in as <strong>github:octocat</strong>"),
+        "{page}"
+    );
+    assert!(page.contains(">demo<"), "{page}");
+
+    // A session that no longer verifies is no session.
+    let expired = get_with_cookie(&site, "scion_session=expired", "/demo").await;
+    assert_eq!(expired.status().as_u16(), 401);
+
+    let out = reqwest::Client::builder()
+        .redirect(reqwest::redirect::Policy::none())
+        .build()
+        .unwrap()
+        .post(format!("{}/logout", site.base))
+        .header("cookie", session)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(out.status().as_u16(), 303);
+    assert_eq!(
+        set_cookies(&out),
+        ["scion_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax"]
+    );
 }

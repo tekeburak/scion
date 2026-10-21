@@ -37,6 +37,10 @@
 //! * `SCION_GITHUB_CLIENT_ID`: the client id of a GitHub OAuth app with device
 //!   flow enabled, for `scn login`. Without it the server takes only tokens
 //!   from `scion-server token`.
+//! * `SCION_GITHUB_CLIENT_SECRET`: that app's client secret, with which the
+//!   web interface signs browsers in; the app's callback URL is
+//!   `https://<web address>/login/callback`. Without it the pages take only
+//!   `Authorization: Bearer` tokens, and show public repositories to anyone.
 
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -71,7 +75,11 @@ async fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + S
             let github = std::env::var("SCION_GITHUB_CLIENT_ID")
                 .ok()
                 .filter(|id| !id.is_empty())
-                .map(|id| GitHub::new(&id, "https://github.com", "https://api.github.com"));
+                .map(|id| GitHub::new(&id, "https://github.com", "https://api.github.com"))
+                .map(|app| match std::env::var("SCION_GITHUB_CLIENT_SECRET") {
+                    Ok(secret) if !secret.is_empty() => app.with_secret(&secret),
+                    _ => app,
+                });
             let meta = metadata().await?;
             let objects = ObjectStorage::new(Arc::new(AmazonS3Builder::from_env().build()?));
             let listener = TcpListener::bind(&listen).await?;
@@ -82,8 +90,13 @@ async fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + S
                 Some(addr) => {
                     let web = TcpListener::bind(&addr).await?;
                     eprintln!("web interface on http://{}", web.local_addr()?);
-                    let pages =
-                        scion_server::serve_web(web, meta.clone(), objects.clone(), key.clone());
+                    let pages = scion_server::serve_web(
+                        web,
+                        meta.clone(),
+                        objects.clone(),
+                        key.clone(),
+                        github.clone(),
+                    );
                     tokio::try_join!(
                         scion_server::serve(listener, meta, objects, key, github),
                         async { pages.await.map_err(Into::into) },

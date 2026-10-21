@@ -160,13 +160,33 @@ pub(crate) fn error(status: StatusCode, why: &str) -> Markup {
     )
 }
 
-pub(crate) fn repos(principal: &str, repos: &[String]) -> Markup {
+/// The repositories `principal` reads, or the public ones for a visitor
+/// who is not signed in; with a way to sign in or out.
+pub(crate) fn repos(principal: Option<&str>, sign_in: bool, repos: &[String]) -> Markup {
     page(
         "Repositories",
         &html! {
+            @match principal {
+                Some(p) => p.muted {
+                    "Signed in as " strong { (p) } ". "
+                    form method="post" action="/logout" style="display:inline" {
+                        button type="submit" { "Sign out" }
+                    }
+                },
+                None if sign_in => p { a href="/login" { "Sign in with GitHub" } },
+                None => p.muted {
+                    "Showing public repositories. This server has no GitHub sign-in; send \
+                     a token as Authorization: Bearer <token> to see yours."
+                },
+            }
             h1 { "Repositories" }
             @if repos.is_empty() {
-                p.muted { (principal) " holds no grant in any repository." }
+                p.muted {
+                    @match principal {
+                        Some(p) => { (p) " holds no grant in any repository, and none is public." }
+                        None => "No repository is public.",
+                    }
+                }
             } @else {
                 ul {
                     @for repo in repos {

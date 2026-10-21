@@ -97,11 +97,13 @@ What works today:
   list its roles from a working copy (`scn access grant|revoke|list`), and `scn whoami` shows
   who a token names, until when, and its roles in the repository.
 - **Web interface** (`scion-server --web <addr>`): server-rendered pages for the repositories a
-  token can read: repository home with its README, directories and files at any ref or
+  visitor can read: repository home with its README, directories and files at any ref or
   changeset, log and per-path history, blame, changesets with their line diffs, and change
   requests with their status and conflicts. The pages run inside the server and check the same
-  roles and directory grants as `scn`. Until browser sign-in arrives, they take the token as
-  `Authorization: Bearer <token>`.
+  roles and directory grants as `scn`. People sign in with GitHub in the browser (once the
+  OAuth app's `SCION_GITHUB_CLIENT_SECRET` is set; the server keeps no session state), tools
+  send `Authorization: Bearer <token>`, and `scn access grant anyone reader` makes a
+  repository, or with `--path` one directory, public: readable without signing in.
 - **Robustness checks**: a seeded, hermetic simulation runs many clients committing, landing,
   merging and reverting while land workers stop and the server restarts, and checks that
   `main` stays linear and nothing landed is lost or written twice; fuzz targets cover every
@@ -369,7 +371,7 @@ A performance pass is under way, aimed at every benchmark row being a multiple f
 a path log already reads all of its changesets in one batch and the server's memos keep their
 hot entries; next, trees and history pages move into the metadata database as the reference
 design keeps them, the object plane gains streaming batch requests, and landing becomes one
-round trip. The web interface's read-only pages are in; next come GitHub sign-in in the browser, change-request actions and repository settings from the page, an HTTP/JSON API and an MCP server so coding agents
+round trip. The web interface's pages and browser sign-in are in; next come change-request actions and repository settings from the page, an HTTP/JSON API and an MCP server so coding agents
 can read, commit and land through tools; released binaries, a server image, a production
 compose profile and a hosted instance; the regional cache and per-node daemon tiers with
 manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan, with

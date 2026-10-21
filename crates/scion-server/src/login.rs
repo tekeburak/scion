@@ -1,9 +1,12 @@
-//! GitHub device-flow login, the one service that needs no token. The server
-//! asks GitHub for a device code, hands it to the client, and exchanges it for
-//! a token of `github:<login>` once the user has authorized it; it keeps no
-//! state between the calls. Everything GitHub sends is checked here, at the
-//! boundary.
+//! GitHub login. The device flow is the one service that needs no token: the
+//! server asks GitHub for a device code, hands it to the client, and
+//! exchanges it for a token of `github:<login>` once the user has authorized
+//! it. The web interface signs browsers in with GitHub's web flow instead,
+//! through [`LoginServer::web_login`], which needs the OAuth app's client
+//! secret. The server keeps no state between the calls of either flow.
+//! Everything GitHub sends is checked here, at the boundary.
 
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use scion_proto::v1::login_service_server::LoginService;
@@ -26,6 +29,8 @@ const GITHUB_DEADLINE: Duration = Duration::from_secs(10);
 #[derive(Debug, Clone)]
 pub struct GitHub {
     client_id: String,
+    /// For the web flow only; the device flow needs none.
+    client_secret: Option<String>,
     /// `https://github.com`: device codes and access tokens.
     web: String,
     /// `https://api.github.com`: the user an access token belongs to.
@@ -38,9 +43,17 @@ impl GitHub {
     pub fn new(client_id: &str, web: &str, api: &str) -> Self {
         Self {
             client_id: client_id.to_owned(),
+            client_secret: None,
             web: web.trim_end_matches('/').to_owned(),
             api: api.trim_end_matches('/').to_owned(),
         }
+    }
+
+    /// The same app with its client secret, which also signs browsers in.
+    #[must_use]
+    pub fn with_secret(mut self, client_secret: &str) -> Self {
+        self.client_secret = Some(client_secret.to_owned());
+        self
     }
 }
 
@@ -68,6 +81,7 @@ struct User {
     login: String,
 }
 
+#[derive(Clone)]
 pub(crate) struct LoginServer {
     github: Option<GitHub>,
     key: TokenKey,
@@ -109,6 +123,89 @@ impl LoginServer {
             .and_then(reqwest::Response::error_for_status)
             .map_err(unavailable)?;
         reply.json().await.map_err(unavailable)
+    }
+
+    /// A token, valid for [`LOGIN_TTL`], for the GitHub user `access_token`
+    /// belongs to; with its principal and expiry.
+    async fn token_of_user(
+        &self,
+        github: &GitHub,
+        access_token: &str,
+    ) -> Result<(String, String, SystemTime), Status> {
+        let user: User = self
+            .http
+            .get(format!("{}/user", github.api))
+            .bearer_auth(access_token)
+            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
+            .send()
+            .await
+            .and_then(reqwest::Response::error_for_status)
+            .map_err(unavailable)?
+            .json()
+            .await
+            .map_err(unavailable)?;
+        let principal = format!("github:{}", user.login);
+        check_principal(&principal)
+            .map_err(|e| Status::unavailable(format!("GitHub sent a bad login: {e}")))?;
+        let expiry = SystemTime::now() + LOGIN_TTL;
+        let token = self
+            .key
+            .issue(&principal, expiry)
+            .map_err(|e| Status::internal(e.to_string()))?;
+        Ok((token, principal, expiry))
+    }
+
+    /// The web flow's sign-in, if this server has a GitHub app with its
+    /// secret: where a browser authorizes, and what turns the `code` GitHub
+    /// sends back into a token. GitHub sends the browser back to the app's
+    /// callback URL, `https://<host>/login/callback`.
+    pub(crate) fn web_login(&self) -> Option<scion_web::Login> {
+        let github = self.github.as_ref()?;
+        github.client_secret.as_ref()?;
+        let authorize = format!(
+            "{}/login/oauth/authorize?client_id={}",
+            github.web, github.client_id
+        );
+        let (nonce, exchange) = (self.clone(), self.clone());
+        Some(scion_web::Login {
+            authorize,
+            nonce: Arc::new(move || nonce.key.nonce()),
+            exchange: Arc::new(move |code| {
+                let login = exchange.clone();
+                Box::pin(async move {
+                    login
+                        .exchange_code(&code)
+                        .await
+                        .map_err(|e| e.message().to_owned())
+                })
+            }),
+        })
+    }
+
+    /// The token, and how long it is valid, for a web flow's `code`.
+    async fn exchange_code(&self, code: &str) -> Result<(String, Duration), Status> {
+        let github = self.github()?;
+        let secret = github.client_secret.as_deref().unwrap_or_default();
+        let url = format!("{}/login/oauth/access_token", github.web);
+        let reply: TokenReply = self
+            .post(
+                &url,
+                &[
+                    ("client_id", &github.client_id),
+                    ("client_secret", secret),
+                    ("code", code),
+                ],
+            )
+            .await?;
+        let Some(access_token) = reply.access_token else {
+            let why = reply
+                .error_description
+                .or(reply.error)
+                .unwrap_or_else(|| "no access token".to_owned());
+            return Err(Status::unavailable(format!("GitHub: {why}")));
+        };
+        let (token, _, _) = self.token_of_user(github, &access_token).await?;
+        Ok((token, LOGIN_TTL))
     }
 }
 
@@ -179,26 +276,7 @@ impl LoginService for LoginServer {
                 return Err(Status::unavailable(format!("GitHub: {why}")));
             }
         };
-        let user: User = self
-            .http
-            .get(format!("{}/user", github.api))
-            .bearer_auth(access_token)
-            .header(reqwest::header::ACCEPT, "application/vnd.github+json")
-            .send()
-            .await
-            .and_then(reqwest::Response::error_for_status)
-            .map_err(unavailable)?
-            .json()
-            .await
-            .map_err(unavailable)?;
-        let principal = format!("github:{}", user.login);
-        check_principal(&principal)
-            .map_err(|e| Status::unavailable(format!("GitHub sent a bad login: {e}")))?;
-        let expiry = SystemTime::now() + LOGIN_TTL;
-        let token = self
-            .key
-            .issue(&principal, expiry)
-            .map_err(|e| Status::internal(e.to_string()))?;
+        let (token, principal, expiry) = self.token_of_user(github, &access_token).await?;
         Ok(Response::new(FinishLoginResponse {
             token,
             principal,

@@ -10,11 +10,15 @@
 //! where `mac = blake3_keyed(key, everything before it)`. On the wire the
 //! token is those bytes in lowercase hex.
 
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use scion_types::canonical::{Reader, Writer};
 
 const TOKEN_VERSION: u8 = 1;
+
+/// First byte of what [`TokenKey::nonce`] signs; never a token's version.
+const NONCE_DOMAIN: u8 = 0;
 
 /// The server's MAC key, read from `SCION_TOKEN_KEY` as 64 hex digits.
 #[derive(Clone)]
@@ -45,6 +49,25 @@ impl TokenKey {
         let mac = blake3::keyed_hash(&self.0, &bytes);
         bytes.extend_from_slice(mac.as_bytes());
         Ok(hex::encode(bytes))
+    }
+
+    /// A value nobody without the key can guess, different on every call:
+    /// the MAC of a counter and the time, which no two calls share, even
+    /// across restarts. It is no token: what it signs starts with a byte no
+    /// token version takes.
+    pub fn nonce(&self) -> String {
+        static COUNTER: AtomicU64 = AtomicU64::new(0);
+        let mut w = Writer::new();
+        w.u8(NONCE_DOMAIN);
+        w.u64(COUNTER.fetch_add(1, Ordering::Relaxed));
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or(Duration::ZERO)
+            .as_nanos();
+        w.u64(u64::try_from(nanos).unwrap_or(u64::MAX));
+        blake3::keyed_hash(&self.0, &w.into_vec())
+            .to_hex()
+            .to_string()
     }
 
     /// Check `token` and return the principal it names and its expiry.
@@ -198,5 +221,15 @@ mod tests {
                 "{p}"
             );
         }
+    }
+
+    #[test]
+    fn nonces_differ_and_are_no_tokens() {
+        let key = TokenKey::from_hex(KEY).unwrap();
+        let (a, b) = (key.nonce(), key.nonce());
+        assert_ne!(a, b);
+        assert_eq!(a.len(), 64);
+        assert_ne!(TokenKey::from_hex(OTHER).unwrap().nonce(), a);
+        assert_eq!(key.verify(&a, at(0)), Err(TokenError::Malformed));
     }
 }

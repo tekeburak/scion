@@ -208,7 +208,8 @@ enum Command {
 enum AccessAction {
     /// Give a principal a role, replacing its role on the same directory.
     Grant {
-        /// `github:<login>` or `sp:<name>`.
+        /// `github:<login>`, `sp:<name>`, or `anyone` (`reader` only), which
+        /// makes the repository, or the directory, public on the web.
         principal: String,
         /// `reader`, `writer` or `admin`.
         role: String,
