@@ -480,6 +480,9 @@ fn resource(uri: &str) -> Option<(&str, &str, &str)> {
     Some((repo, path.trim_end_matches('/'), at))
 }
 
+// The macro writes `async fn list_tools` without an await; the lint is new in
+// clippy 1.99, so older toolchains do not know its name.
+#[allow(unknown_lints, clippy::unused_async_trait_impl)]
 #[tool_handler]
 impl ServerHandler for Scion {
     fn get_info(&self) -> ServerConfig {
@@ -497,17 +500,17 @@ impl ServerHandler for Scion {
             )
     }
 
-    async fn list_resource_templates(
+    fn list_resource_templates(
         &self,
         _request: Option<PaginatedRequestParams>,
         _context: RequestContext<RoleServer>,
-    ) -> Result<ListResourceTemplatesResult, ErrorData> {
+    ) -> impl Future<Output = Result<ListResourceTemplatesResult, ErrorData>> {
         let file = ResourceTemplate::new("scion://{repo}/{+path}@{revision}", "file")
             .with_description(
                 "A file's text, or a directory's entries as JSON, at a revision (`main`, \
                  `release/<x>` or a changeset id).",
             );
-        Ok(ListResourceTemplatesResult::with_all_items(vec![file]))
+        std::future::ready(Ok(ListResourceTemplatesResult::with_all_items(vec![file])))
     }
 
     async fn read_resource(
