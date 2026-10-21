@@ -19,6 +19,18 @@ fn seeds_keep_the_invariants() {
     eprintln!("ran in {:?}", start.elapsed());
 }
 
+/// Seeds that landed a merge head's stack on `main` twice after a land
+/// stopped between moving `main` and finishing the request (#148): 40 with
+/// the store calls of the Phase 10.3 branch, the others on `main`.
+#[test]
+fn a_merge_head_lands_its_stack_once() {
+    for seed in [40, 753, 1084, 1089, 1271, 1328] {
+        if let Err(why) = scion_sim::run(seed) {
+            panic!("{}: seed {seed}: {why}", scion_sim::reproduce(seed));
+        }
+    }
+}
+
 #[test]
 fn a_seed_replays_the_same_history() {
     for seed in [7, 64, 199] {
