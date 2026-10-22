@@ -81,7 +81,10 @@ What works today:
   (the server merges a revision such as a `release/*` fix into your head; blame credits the
   fix to the changeset that wrote it), `revert` (the server undoes a changeset on your head,
   refusing if its files changed since; blame keeps crediting the restored lines to their
-  authors) and `checkout` of any changeset. Two clones landing
+  authors) and `checkout` of any changeset. A clone fetches objects in batches, every tree of
+  a directory it takes whole in one request and blobs 256 at a time, so a 2,330-file clone is
+  12 requests; `commit` asks the server which contents it already holds and uploads only the
+  rest, in one stream. Two clones landing
   at the same time, with no `update` in between, is the CI end-to-end test. An `https://`
   server address is checked against the public certificate authorities, plus the
   certificates in `SSL_CERT_FILE` for a private one; the server itself speaks plain HTTP/2
@@ -438,12 +441,13 @@ Read these numbers with their limits:
 
 - **Import** writes one immutable object per blob, tree and history page to a remote object
   store, where git writes a local packfile; parity with git's push is not a goal. The figure to
-  quote is the cold row, 9.0× git: into an empty bucket the object store's write rate is the
+  quote is the cold row, 8.7× git: into an empty bucket the object store's write rate is the
   bound. Warm, with the objects already stored, it is 1.9× git.
 - **Cold `log` and `blame`**, the first call after import with nothing cached on the server,
-  take 5.6× and 3.8× git. Warm, `blame` is 0.20× git and a path log 1.0×.
+  take 7.1× and 3.7× git. Warm, `blame` is 0.20× git and a path log 1.0×. Clone is 0.49× git
+  and a sparse clone 0.11×.
 - **A single commit + land** goes through a change request and the serial land worker, so on
-  its own it takes 1.0× git's local commit and push. The worker pays off under contention: 16
+  its own it takes 1.2× git's local commit and push. The worker pays off under contention: 16
   writers landing at once finish in 0.12× git's time, because no writer repeats another's
   fetch, rebase and push.
 - One machine, three runs, shared cloud VM: medians move by several milliseconds between
@@ -465,9 +469,11 @@ Read these numbers with their limits:
 
 A performance pass is under way, aimed at every benchmark row being a multiple faster than git:
 a path log already reads all of its changesets in one batch, the server's memos keep their
-hot entries, trees and history pages live in the metadata database, and import reads git on
-two threads; next, import derives trees concurrently and uploads blobs in fewer requests, the
-object plane gains streaming batch requests, and landing becomes one round trip. The web
+hot entries and are invalidated across processes, trees and history pages live in the
+metadata database, import reads git on two threads, and clone and commit move objects in
+batches; next, landing becomes one round trip, cold `log` and `blame` read history in larger
+steps, `status` walks the working copy on several threads, and the land worker prepares the
+next request while the previous one lands. The web
 interface, HTTP/JSON API, MCP server and `scn --json` are in, every binary reports one version,
 a tag builds static Linux binaries, macOS `scn` and the server image, and an install script
 fetches the binaries, `scn` talks to `https://` servers, and a production compose profile runs
