@@ -454,10 +454,11 @@ accounting. Backup and restore of the metadata database is the managed platform'
   both archives and `scn --version` from the `x86_64` archive runs in a bare `debian:stable-slim`
   container.
 - **9.3 macOS binaries.** The same workflow cross-compiles `aarch64-apple-darwin` and
-  `x86_64-apple-darwin` on the Linux runners with `cargo-zigbuild`; if a dependency makes that
-  impossible, the step asks before using any other runner. *Accepted when* a dry run adds both
-  archives to `SHA256SUMS` and `file` reports a Mach-O executable of the right architecture for
-  each binary.
+  `x86_64-apple-darwin` on the Linux runners with `cargo-zigbuild`. The macOS archives carry
+  `scn` only: `scion-server`, `scion-ingest` and `scion-mcp` link Apple frameworks that exist
+  only in Apple's SDK, and the server tier runs on Linux (#174). *Accepted when* a dry run adds
+  both archives to `SHA256SUMS` and `file` reports a Mach-O executable of the right architecture
+  for each binary in them.
 - **9.4 Install script.** `scripts/install.sh` (POSIX `sh`) picks the archive for the
   machine's OS and architecture from the latest release or `SCION_VERSION`, checks it against
   `SHA256SUMS`, and installs the binaries into `~/.local/bin` or `SCION_INSTALL_DIR`.
