@@ -269,6 +269,7 @@ async fn file_blame(
     path: &RepoPath,
     entry: TreeEntry,
     copy_from: Option<&(RepoPath, ChangesetId)>,
+    read_ahead: usize,
 ) -> Result<Option<FileBlame>> {
     let TreeEntry::Blob { id: content, .. } = entry else {
         unreachable!("a tracked change is a file")
@@ -351,7 +352,7 @@ async fn file_blame(
     let mut previous = current.as_ref().map(|(_, bytes)| bytes.clone());
     let mut scripts = stream::iter(ids)
         .map(|id| get_blob(ctx.objects, id))
-        .buffered(READ_AHEAD)
+        .buffered(read_ahead)
         .map_ok(move |new| {
             let old = previous.replace(new.clone());
             async move {
@@ -363,7 +364,7 @@ async fn file_blame(
                 Ok::<_, DeriveError>((new, script))
             }
         })
-        .try_buffered(READ_AHEAD);
+        .try_buffered(read_ahead);
     let mut versions = chain.iter().rev();
     while let Some((new, script)) = scripts.try_next().await? {
         let version = versions.next().expect("one content per version");
@@ -378,6 +379,43 @@ async fn file_blame(
     Ok(current.map(|(file, _)| file))
 }
 
+/// The node of `cs`: each file it changed attributed along its own version
+/// chain, `read_ahead` files at once and `read_ahead` versions of each.
+async fn node(ctx: &Deriver<'_>, cs: &Changeset, read_ahead: usize) -> Result<BlameNode> {
+    let changed: Vec<_> = cs
+        .file_changes
+        .iter()
+        .filter_map(|(path, change)| match change {
+            FileChange::Tracked {
+                content,
+                kind,
+                size,
+                copy_from,
+            } => Some((
+                path.clone(),
+                TreeEntry::Blob {
+                    id: *content,
+                    kind: *kind,
+                    size: *size,
+                },
+                copy_from.clone(),
+            )),
+            FileChange::Deleted => None,
+        })
+        .collect();
+    let files: Vec<_> = stream::iter(changed)
+        .map(|(path, entry, copy_from)| async move {
+            let file = file_blame(ctx, cs, &path, entry, copy_from.as_ref(), read_ahead).await?;
+            Ok::<_, DeriveError>(file.map(|f| (path, f)))
+        })
+        .buffered(read_ahead)
+        .try_collect()
+        .await?;
+    Ok(BlameNode {
+        files: files.into_iter().flatten().collect(),
+    })
+}
+
 #[async_trait]
 impl Derivable for Blame {
     const NAME: &'static str = "blame";
@@ -388,41 +426,7 @@ impl Derivable for Blame {
     const READS_PARENTS: bool = false;
 
     async fn derive(ctx: &Deriver<'_>, cs: &Changeset, _parents: &[Self]) -> Result<Self> {
-        let changed: Vec<_> = cs
-            .file_changes
-            .iter()
-            .filter_map(|(path, change)| match change {
-                FileChange::Tracked {
-                    content,
-                    kind,
-                    size,
-                    copy_from,
-                } => Some((
-                    path.clone(),
-                    TreeEntry::Blob {
-                        id: *content,
-                        kind: *kind,
-                        size: *size,
-                    },
-                    copy_from.clone(),
-                )),
-                FileChange::Deleted => None,
-            })
-            .collect();
-        let files: Vec<_> = stream::iter(changed)
-            .map(|(path, entry, copy_from)| async move {
-                let file = file_blame(ctx, cs, &path, entry, copy_from.as_ref()).await?;
-                Ok::<_, DeriveError>(file.map(|f| (path, f)))
-            })
-            .buffered(READ_AHEAD)
-            .try_collect()
-            .await?;
-        let node = BlameNode {
-            files: files.into_iter().flatten().collect(),
-        };
-        Ok(Self(
-            ctx.objects.put_blob(Bytes::from(node.encode())).await?,
-        ))
+        Self::put(ctx, node(ctx, cs, READ_AHEAD).await?).await
     }
 
     fn to_pointer(&self) -> Vec<u8> {
@@ -441,19 +445,111 @@ impl Blame {
         cs: ChangesetId,
         path: &RepoPath,
     ) -> Result<Option<FileBlame>> {
-        let history = ctx.derive::<PathHistory>(cs).await?;
-        let Some(HistoryEntry::File(Change { last_changed, .. })) =
-            history.lookup(ctx, path).await?
-        else {
+        let Some(last_changed) = Self::last_changed(ctx, cs, path).await? else {
             return Ok(None);
         };
         let blame = ctx.derive::<Blame>(last_changed).await?;
-        let node = BlameNode::load(ctx.objects, blame.0).await?;
+        blame.file(ctx, path).await.map(Some)
+    }
+
+    /// The attribution of `path` in the stored node of `last_changed`, the
+    /// changeset that last changed it, or `None` if that node is not stored.
+    pub async fn stored_file(
+        ctx: &Deriver<'_>,
+        last_changed: ChangesetId,
+        path: &RepoPath,
+    ) -> Result<Option<FileBlame>> {
+        match ctx.fetch::<Blame>(last_changed).await? {
+            Some(blame) => blame.file(ctx, path).await.map(Some),
+            None => Ok(None),
+        }
+    }
+
+    /// The attribution of `path` as `last_changed`, the changeset that last
+    /// changed it, left it: what its node holds for `path`, attributed along
+    /// the file's own version chain without deriving or storing the node,
+    /// so without waiting on the other files that changeset changed.
+    pub async fn file_alone(
+        ctx: &Deriver<'_>,
+        last_changed: ChangesetId,
+        path: &RepoPath,
+    ) -> Result<FileBlame> {
+        let changeset = ctx
+            .meta
+            .get_changeset(ctx.repo, last_changed)
+            .await?
+            .ok_or(DeriveError::MissingChangeset(last_changed))?;
+        let corrupt = DeriveError::CorruptPointer {
+            ty: PathHistory::NAME,
+            cs: last_changed,
+        };
+        let Some(FileChange::Tracked {
+            content,
+            kind,
+            size,
+            copy_from,
+        }) = changeset.file_changes.get(path)
+        else {
+            return Err(corrupt);
+        };
+        let entry = TreeEntry::Blob {
+            id: *content,
+            kind: *kind,
+            size: *size,
+        };
+        file_blame(ctx, &changeset, path, entry, copy_from.as_ref(), READ_AHEAD)
+            .await?
+            .ok_or(corrupt)
+    }
+
+    /// Derive and store the node of `cs` unless it is stored, as
+    /// [`Deriver::derive`] does, but one file and one version at a time: for
+    /// a node nothing waits on, so that deriving it keeps to about one core
+    /// beside the requests being served.
+    pub async fn store_gently(ctx: &Deriver<'_>, cs: ChangesetId) -> Result<Self> {
+        if let Some(blame) = ctx.fetch::<Blame>(cs).await? {
+            return Ok(blame);
+        }
+        let changeset = ctx
+            .meta
+            .get_changeset(ctx.repo, cs)
+            .await?
+            .ok_or(DeriveError::MissingChangeset(cs))?;
+        let blame = Self::put(ctx, node(ctx, &changeset, 1).await?).await?;
+        ctx.meta
+            .put_derived(ctx.repo, Self::NAME, Self::VERSION, cs, blame.to_pointer())
+            .await?;
+        Ok(blame)
+    }
+
+    /// Store `node` in the object store.
+    async fn put(ctx: &Deriver<'_>, node: BlameNode) -> Result<Self> {
+        Ok(Self(
+            ctx.objects.put_blob(Bytes::from(node.encode())).await?,
+        ))
+    }
+
+    /// The changeset that last changed the file `path` at `cs`, if there is
+    /// one.
+    pub async fn last_changed(
+        ctx: &Deriver<'_>,
+        cs: ChangesetId,
+        path: &RepoPath,
+    ) -> Result<Option<ChangesetId>> {
+        let history = ctx.derive::<PathHistory>(cs).await?;
+        Ok(match history.lookup(ctx, path).await? {
+            Some(HistoryEntry::File(Change { last_changed, .. })) => Some(last_changed),
+            _ => None,
+        })
+    }
+
+    /// The attribution of `path` in this node.
+    async fn file(self, ctx: &Deriver<'_>, path: &RepoPath) -> Result<FileBlame> {
+        let node = BlameNode::load(ctx.objects, self.0).await?;
         node.files
             .get(path)
             .cloned()
-            .map(Some)
-            .ok_or(DeriveError::CorruptObject(blame.0))
+            .ok_or(DeriveError::CorruptObject(self.0))
     }
 }
 
@@ -787,6 +883,82 @@ mod tests {
         assert_eq!(mid.lines().collect::<Vec<_>>(), versions[..=k / 2]);
     }
 
+    /// Phase 10.7: a file's attribution alone reads that file's versions,
+    /// not those of the other files its changeset changed, and stores
+    /// nothing; the node, stored gently afterwards, holds the same
+    /// attribution.
+    #[tokio::test]
+    async fn file_alone_reads_only_its_own_versions() {
+        const N: usize = 400;
+        let store = MemoryStore::with_repo(REPO);
+        let (hot, busy) = (
+            RepoPath::new("hot.rs").unwrap(),
+            RepoPath::new("busy.rs").unwrap(),
+        );
+        let mut ids: Vec<ChangesetId> = Vec::new();
+        let mut versions = Vec::new();
+        let (mut hot_text, mut busy_text) = (String::new(), String::new());
+        for i in 0..N {
+            // `busy.rs` changes every time, `hot.rs` every 50th time; the
+            // last changeset changes both.
+            let mut ch = BTreeMap::new();
+            busy_text += &(i.to_string() + "\n");
+            ch.insert(
+                busy.clone(),
+                tracked_bytes(&store, busy_text.as_bytes(), FileType::Regular, None).await,
+            );
+            if i % 50 == 0 || i == N - 1 {
+                hot_text += &(i.to_string() + "\n");
+                ch.insert(
+                    hot.clone(),
+                    tracked_bytes(&store, hot_text.as_bytes(), FileType::Regular, None).await,
+                );
+            }
+            let id = store
+                .put_changeset(&changeset(
+                    ids.last().copied().into_iter().collect(),
+                    ch,
+                    &i.to_string(),
+                ))
+                .await
+                .unwrap();
+            if i % 50 == 0 || i == N - 1 {
+                versions.push(id);
+            }
+            ids.push(id);
+        }
+        let head = ids[N - 1];
+        Deriver::new(REPO, &store, &store)
+            .derive::<PathHistory>(head)
+            .await
+            .unwrap();
+
+        let meta = CountingMeta::new(&store);
+        let d = Deriver::new(REPO, &meta, &store);
+        let alone = Blame::file_alone(&d, head, &hot).await.unwrap();
+        assert_eq!(alone.lines().collect::<Vec<_>>(), versions);
+        let k = versions.len();
+        assert!(
+            meta.changeset_reads() <= k + 1,
+            "changesets read: {} for {k} versions",
+            meta.changeset_reads()
+        );
+        assert_eq!(d.fetch::<Blame>(head).await.unwrap(), None);
+        assert_eq!(Blame::stored_file(&d, head, &hot).await.unwrap(), None);
+
+        let node = Blame::store_gently(&d, head).await.unwrap();
+        assert!(meta.changeset_reads() >= N, "the node walks busy.rs too");
+        assert_eq!(d.fetch::<Blame>(head).await.unwrap(), Some(node));
+        // Gently or not, the node is the same.
+        let cs = store.get_changeset(REPO, head).await.unwrap().unwrap();
+        let full = Blame::put(&d, super::node(&d, &cs, READ_AHEAD).await.unwrap());
+        assert_eq!(full.await.unwrap(), node);
+        assert_eq!(
+            Blame::stored_file(&d, head, &hot).await.unwrap(),
+            Some(alone)
+        );
+    }
+
     // ---- property test: diff attribution ≡ tagged-line model ------------
 
     #[derive(Debug, Clone)]
@@ -894,6 +1066,9 @@ mod tests {
                     if !step.check && i + 1 != steps.len() {
                         continue;
                     }
+                    let last = Blame::last_changed(&d, id, &path).await.unwrap().expect("file exists");
+                    let alone = Blame::file_alone(&d, last, &path).await.unwrap();
+                    prop_assert_eq!(alone.lines().collect::<Vec<_>>(), model.tags(), "file alone at step {}", i);
                     let got = Blame::for_path(&d, id, &path).await.unwrap().expect("file exists");
                     prop_assert_eq!(got.line_count(), line_count(&content), "line count at step {}", i);
                     prop_assert_eq!(got.lines().collect::<Vec<_>>(), model.tags(), "attribution at step {}", i);

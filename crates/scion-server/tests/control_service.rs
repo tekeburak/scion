@@ -9,7 +9,7 @@ use std::sync::atomic::Ordering;
 
 use bytes::Bytes;
 use scion_derived::test_util::{CountingMeta, REPO, changeset, tracked};
-use scion_derived::{Deriver, PathHistory};
+use scion_derived::{Blame, Deriver, PathHistory};
 use scion_proto::v1::{
     BlameRequest, BlameRun, DiffRequest, GetRefRequest, LogRequest, MergeBaseRequest,
     PathLogRequest,
@@ -255,6 +255,63 @@ async fn blame_attributes_each_line() {
     }
 }
 
+/// Phase 10.7: a cold `Blame` replies from the file's own versions; the
+/// node of the changeset that last changed it, which holds every file that
+/// changeset changed, is stored after the reply and holds the same runs.
+#[tokio::test]
+async fn cold_blame_replies_before_its_node_is_stored() {
+    let store = Arc::new(MemoryStore::with_repo(REPO));
+    let root = commit(&store, vec![], &[("a.txt", b"1\n"), ("b.txt", b"0\n")], "0").await;
+    let mut head = root;
+    let mut busy = String::from("0\n");
+    for i in 1..40 {
+        busy += &(i.to_string() + "\n");
+        head = commit(&store, vec![head], &[("b.txt", busy.as_bytes())], "busy").await;
+    }
+    let both = commit(
+        &store,
+        vec![head],
+        &[("a.txt", b"1\n2\n"), ("b.txt", b"b\n")],
+        "both",
+    )
+    .await;
+    let shared: &'static MemoryStore = Box::leak(Box::new(store.clone()));
+    let d = Deriver::new(REPO, shared, shared);
+    d.derive::<PathHistory>(both).await.unwrap();
+
+    let mut client = common::control(common::serve(store.clone(), store.clone()).await);
+    let blame = BlameRequest {
+        repo: REPO.into(),
+        changeset: bytes(both),
+        path: "a.txt".into(),
+    };
+    let runs = client.blame(blame.clone()).await.unwrap().into_inner().runs;
+    let run = |cs, lines| BlameRun {
+        changeset: bytes(cs),
+        lines,
+    };
+    assert_eq!(runs, vec![run(root, 1), run(both, 1)]);
+
+    let mut stored = None;
+    for _ in 0..500 {
+        stored = d.fetch::<Blame>(both).await.unwrap();
+        if stored.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(stored.is_some(), "the node is stored after the reply");
+    assert_eq!(
+        Blame::stored_file(&d, both, &path("a.txt"))
+            .await
+            .unwrap()
+            .unwrap()
+            .runs,
+        vec![(root, 1), (both, 1)]
+    );
+    assert_eq!(client.blame(blame).await.unwrap().into_inner().runs, runs);
+}
+
 #[tokio::test]
 async fn bad_input_and_unknown_changesets_are_rejected() {
     let mut r = start().await;
@@ -309,7 +366,8 @@ async fn bad_input_and_unknown_changesets_are_rejected() {
 /// Phase 10.2: a 428-result path log on a cold server costs the grants
 /// query, the `PathHistory` pointer at the head and one `get_changesets`,
 /// besides its history-page reads (Phase 10.3 moved those from the object
-/// store to the metadata store): one per change and one per anchor.
+/// store to the metadata store): one page per change and one per anchor,
+/// read in one query per step of the walk (Phase 10.7).
 #[tokio::test]
 async fn path_log_of_428_changesets_makes_three_metadata_queries() {
     let shared = Arc::new(MemoryStore::with_repo(REPO));
@@ -340,9 +398,14 @@ async fn path_log_of_428_changesets_makes_three_metadata_queries() {
     assert_eq!(log.changesets.len(), 428);
     let pages = counting.page_gets();
     assert!(pages <= 2 + 428 + 428 / 16, "{pages} page reads");
+    // Phase 10.7: the chain is walked one step at a time, each step one
+    // read of every page it needs: the lookup, then about 428 / 16 anchors
+    // and the 16 entries below the last.
+    let steps = 1 + 428 / 16 + 16 + 1;
     assert!(
-        counting.queries() <= 3 + pages,
-        "{} queries besides {pages} page reads",
-        counting.queries() - pages
+        counting.queries() <= 3 + steps,
+        "{} queries, at most {} besides {steps} page reads",
+        counting.queries(),
+        3
     );
 }

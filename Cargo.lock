@@ -3512,6 +3512,7 @@ dependencies = [
  "bytes",
  "futures-util",
  "hex",
+ "moka",
  "object_store",
  "proptest",
  "reqwest",

@@ -28,10 +28,11 @@
 //! Those reads need not wait on each other: an entry also counts the changes
 //! before it on its chain (its height) and names the node holding the change
 //! at the last multiple of [`ANCHOR_STEP`] below it. [`HistoryEntry::chain`]
-//! follows the anchors and walks the segments between them concurrently, so
-//! `n` changes cost about `n / ANCHOR_STEP + ANCHOR_STEP` reads in sequence.
+//! follows the anchors and walks the segments between them in lockstep, so
+//! `n` changes cost about `n / ANCHOR_STEP + ANCHOR_STEP` metadata reads, each
+//! of every page that step needs.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, VecDeque};
 
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -52,7 +53,7 @@ const PAGE_BYTES: usize = 16 << 10;
 pub const ANCHOR_STEP: u64 = 16;
 
 /// Segments of a chain walked at once by [`HistoryEntry::chain`].
-const SEGMENTS: usize = 32;
+const SEGMENTS: usize = 64;
 
 /// A stored history node: the page (blob) holding it and its index there.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -155,75 +156,163 @@ impl HistoryEntry {
         HistoryNode::entry(ctx, at, name).await
     }
 
-    /// The entry `name` has at its anchor, checked to be at the anchor's
-    /// height; `None` at height 0. One node read.
-    async fn anchored(&self, ctx: &Deriver<'_>, name: &PathComponent) -> Result<Option<Self>> {
-        let (Some(at), Some(height)) = (self.change().anchor, self.change().anchor_height()) else {
-            return Ok(None);
-        };
-        match HistoryNode::entry(ctx, at, name).await? {
-            Some(entry) if entry.change().height == height => Ok(Some(entry)),
-            _ => Err(DeriveError::CorruptObject(at.page)),
-        }
-    }
-
     /// This entry and the earlier changes to it, newest first: the entries
     /// at heights `self.height` down to `lowest`, each `previous` of the one
     /// before. The anchors are read one after another, and the segment below
-    /// each is walked as soon as the anchor is known.
+    /// each is walked as soon as the anchor is known. Every segment in
+    /// progress and the next anchor advance together, so each step of the
+    /// walk is one metadata read of every page it needs.
     pub fn chain<'a>(
         self,
         ctx: &'a Deriver<'a>,
         name: &'a PathComponent,
         lowest: u64,
     ) -> impl Stream<Item = Result<Self>> + Send + 'a {
-        let starts = stream::try_unfold(Some(self), move |start| async move {
-            let Some(start) = start else {
-                return Ok(None);
-            };
-            let next = match start.change().anchor_height() {
-                Some(height) if height >= lowest => start.anchored(ctx, name).await?,
-                _ => None,
-            };
-            Ok(Some((start, next)))
-        });
-        starts
-            .map_ok(move |start| start.segment(ctx, name, lowest))
-            .try_buffered(SEGMENTS)
-            .map_ok(|segment| stream::iter(segment.into_iter().map(Ok)))
-            .try_flatten()
+        let walk = Walk {
+            ctx,
+            name,
+            lowest,
+            next_anchor: Some(self),
+            segments: VecDeque::from([Segment::new(self, lowest)]),
+        };
+        stream::try_unfold(walk, |mut walk| async move {
+            Ok::<_, DeriveError>(walk.next_segment().await?.map(|segment| (segment, walk)))
+        })
+        .map_ok(|segment| stream::iter(segment.into_iter().map(Ok)))
+        .try_flatten()
     }
+}
 
-    /// This entry and the ones before it down to its anchor (exclusive) or
-    /// `lowest` (inclusive), newest first.
-    async fn segment(
-        self,
-        ctx: &Deriver<'_>,
-        name: &PathComponent,
-        lowest: u64,
-    ) -> Result<Vec<Self>> {
-        let stop = self
+/// The entries of one stretch of a chain read so far, newest first, from
+/// an anchor (or the chain's head) down to just above the next anchor, or
+/// to `stop`.
+struct Segment {
+    entries: Vec<HistoryEntry>,
+    stop: u64,
+}
+
+impl Segment {
+    fn new(start: HistoryEntry, lowest: u64) -> Self {
+        let stop = start
             .change()
             .anchor_height()
             .map_or(0, |height| height + 1)
             .max(lowest);
-        let mut out = vec![self];
-        let mut entry = self;
-        while entry.change().height > stop {
-            match entry.previous(ctx, name).await? {
-                Some(before) if before.change().height + 1 == entry.change().height => {
-                    out.push(before);
-                    entry = before;
+        Self {
+            entries: vec![start],
+            stop,
+        }
+    }
+
+    fn last(&self) -> HistoryEntry {
+        *self.entries.last().expect("a segment starts with an entry")
+    }
+
+    /// The node holding the segment's next entry, or `None` once it is
+    /// complete.
+    fn wants(&self) -> Result<Option<NodeAt>> {
+        let last = self.last();
+        if last.change().height <= self.stop {
+            return Ok(None);
+        }
+        last.replaced()
+            .map(Some)
+            .ok_or(DeriveError::CorruptPointer {
+                ty: PathHistory::NAME,
+                cs: last.last_changed(),
+            })
+    }
+}
+
+/// A [`HistoryEntry::chain`] in progress: the segments being walked, oldest
+/// last, and the entry whose anchor is read next.
+struct Walk<'a> {
+    ctx: &'a Deriver<'a>,
+    name: &'a PathComponent,
+    lowest: u64,
+    next_anchor: Option<HistoryEntry>,
+    segments: VecDeque<Segment>,
+}
+
+impl Walk<'_> {
+    /// The newest segment not yet returned, once complete; `None` at the
+    /// end of the chain.
+    async fn next_segment(&mut self) -> Result<Option<Vec<HistoryEntry>>> {
+        loop {
+            match self.segments.front() {
+                None if self.next_anchor.is_none() => return Ok(None),
+                Some(front) if front.wants()?.is_none() => {
+                    return Ok(self.segments.pop_front().map(|s| s.entries));
+                }
+                None | Some(_) => {}
+            }
+            self.step().await?;
+        }
+    }
+
+    /// Read the next entry of every incomplete segment and the next anchor,
+    /// in one metadata read.
+    async fn step(&mut self) -> Result<()> {
+        let anchor = match self.next_anchor {
+            Some(start) if self.segments.len() < SEGMENTS => {
+                match (start.change().anchor, start.change().anchor_height()) {
+                    (Some(at), Some(height)) if height >= self.lowest => Some((at, height)),
+                    _ => {
+                        self.next_anchor = None;
+                        None
+                    }
+                }
+            }
+            _ => None,
+        };
+        let wanted: Vec<Option<NodeAt>> = self
+            .segments
+            .iter()
+            .map(Segment::wants)
+            .collect::<Result<_>>()?;
+        let mut ids: Vec<BlobId> = wanted
+            .iter()
+            .flatten()
+            .chain(anchor.as_ref().map(|(at, _)| at))
+            .map(|at| at.page)
+            .collect();
+        if ids.is_empty() {
+            return Ok(());
+        }
+        ids.sort_unstable();
+        ids.dedup();
+        let pages: HashMap<BlobId, Bytes> = ids
+            .iter()
+            .copied()
+            .zip(self.ctx.pages(&ids).await?)
+            .collect();
+        let entry = |at: NodeAt| entry_in(&pages[&at.page], at, self.name);
+
+        for (segment, at) in self.segments.iter_mut().zip(wanted) {
+            let Some(at) = at else { continue };
+            let last = segment.last();
+            match entry(at)? {
+                Some(before) if before.change().height + 1 == last.change().height => {
+                    segment.entries.push(before);
                 }
                 _ => {
                     return Err(DeriveError::CorruptPointer {
                         ty: PathHistory::NAME,
-                        cs: entry.last_changed(),
+                        cs: last.last_changed(),
                     });
                 }
             }
         }
-        Ok(out)
+        if let Some((at, height)) = anchor {
+            match entry(at)? {
+                Some(start) if start.change().height == height => {
+                    self.segments.push_back(Segment::new(start, self.lowest));
+                    self.next_anchor = Some(start);
+                }
+                _ => return Err(DeriveError::CorruptObject(at.page)),
+            }
+        }
+        Ok(())
     }
 }
 
@@ -367,6 +456,21 @@ pub(crate) fn decode_node(bytes: &[u8], page: BlobId, index: u32) -> Option<Hist
     valid.then_some(node)
 }
 
+/// The entry `name` of the node at `at`, whose page's bytes are `bytes`,
+/// without decoding the rest.
+fn entry_in(bytes: &[u8], at: NodeAt, name: &PathComponent) -> Result<Option<HistoryEntry>> {
+    let mut found = None;
+    walk_node(bytes, at.page, at.index, |n, entry| {
+        let hit = n == name.as_str().as_bytes();
+        if hit {
+            found = Some(entry);
+        }
+        hit
+    })
+    .ok_or(DeriveError::CorruptObject(at.page))?;
+    Ok(found)
+}
+
 impl HistoryNode {
     async fn page(ctx: &Deriver<'_>, at: NodeAt) -> Result<Bytes> {
         ctx.page(at.page).await
@@ -378,17 +482,7 @@ impl HistoryNode {
         at: NodeAt,
         name: &PathComponent,
     ) -> Result<Option<HistoryEntry>> {
-        let bytes = Self::page(ctx, at).await?;
-        let mut found = None;
-        walk_node(&bytes, at.page, at.index, |n, entry| {
-            let hit = n == name.as_str().as_bytes();
-            if hit {
-                found = Some(entry);
-            }
-            hit
-        })
-        .ok_or(DeriveError::CorruptObject(at.page))?;
-        Ok(found)
+        entry_in(&Self::page(ctx, at).await?, at, name)
     }
 
     async fn load(ctx: &Deriver<'_>, at: NodeAt) -> Result<Self> {
@@ -889,6 +983,83 @@ mod tests {
         assert_eq!(last("d0_7/d1_9").await, Some(child));
         assert_eq!(last("d0_7/d1_8/d2/d3/f_7_8.txt").await, Some(root));
         assert_eq!(last("d0_8").await, Some(root));
+    }
+
+    /// Phase 10.7: a chain of `n` changes is walked in about
+    /// `n / ANCHOR_STEP + ANCHOR_STEP` metadata reads, each of every page its
+    /// step needs, and yields what following `previous` one entry at a time
+    /// does, from any head and down to any height.
+    #[tokio::test]
+    async fn chain_reads_one_query_per_step() {
+        const N: u64 = 428;
+        let store = MemoryStore::with_repo(REPO);
+        let p = RepoPath::new("d/f").unwrap();
+        let mut heads = Vec::new();
+        for i in 0..N {
+            let mut c = BTreeMap::new();
+            c.insert(p.clone(), tracked(format!("v{i}").as_bytes()));
+            let parents = heads.last().copied().into_iter().collect();
+            heads.push(
+                store
+                    .put_changeset(&changeset(parents, c, &i.to_string()))
+                    .await
+                    .unwrap(),
+            );
+        }
+        let d = Deriver::new(REPO, &store, &store);
+        let name = p.file_name();
+        for n in [
+            1,
+            2,
+            3,
+            ANCHOR_STEP,
+            ANCHOR_STEP + 1,
+            2 * ANCHOR_STEP + 2,
+            N,
+        ] {
+            let head = heads[usize::try_from(n - 1).unwrap()];
+            let history = d.derive::<PathHistory>(head).await.unwrap();
+            let top = history.lookup(&d, &p).await.unwrap().unwrap();
+            let mut one_by_one = vec![top];
+            while let Some(before) = one_by_one
+                .last()
+                .unwrap()
+                .previous(&d, &name)
+                .await
+                .unwrap()
+            {
+                one_by_one.push(before);
+            }
+            assert_eq!(one_by_one.len() as u64, n);
+
+            for lowest in [
+                0,
+                1,
+                ANCHOR_STEP - 1,
+                ANCHOR_STEP,
+                100,
+                n.saturating_sub(2),
+                n - 1,
+            ] {
+                let Some(len) = n.checked_sub(lowest).filter(|&len| len > 0) else {
+                    continue;
+                };
+                let counting = CountingMeta::new(&store);
+                let d = Deriver::new(REPO, &counting, &store);
+                let walked: Vec<_> = top.chain(&d, &name, lowest).try_collect().await.unwrap();
+                assert_eq!(
+                    walked,
+                    one_by_one[..usize::try_from(len).unwrap()],
+                    "n {n}, lowest {lowest}"
+                );
+                let steps = len / ANCHOR_STEP + ANCHOR_STEP + 1;
+                assert!(
+                    counting.queries() as u64 <= steps,
+                    "n {n}, lowest {lowest}: {} queries, at most {steps}",
+                    counting.queries()
+                );
+            }
+        }
     }
 
     // ---- property test: incremental ≡ naive scan ------------------------

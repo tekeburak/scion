@@ -10,7 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use futures_util::{StreamExt, TryStreamExt, stream};
 
-use scion_derived::{Blame, DeriveError, Deriver, PathHistory, RootTree, SkipList};
+use scion_derived::{Blame, DeriveError, Deriver, FileBlame, PathHistory, RootTree, SkipList};
 use scion_proto::trace::{span, timed};
 use scion_proto::v1::control_service_server::ControlService;
 use scion_proto::v1::{
@@ -47,12 +47,23 @@ pub const MAX_LOG_LIMIT: u32 = 1000;
 /// Tree lookups a `Revert` runs at once.
 const READ_CONCURRENCY: usize = 32;
 
+/// Blame runs remembered while their nodes are derived; about 8 MiB.
+const BLAME_MEMO_RUNS: u64 = 200_000;
+
+/// A file's attribution as the changeset that last changed it left it, keyed
+/// by repository, that changeset and the path.
+type BlameMemo = moka::sync::Cache<(String, ChangesetId, RepoPath), FileBlame>;
+
 /// Serves the control plane from the metadata and object stores.
 #[derive(Clone)]
 pub(crate) struct ControlServer {
     meta: Arc<dyn MetadataStore>,
     objects: Arc<dyn ObjectStore>,
     workers: Arc<LandWorkers>,
+    /// Attributions `Blame` answered before the node holding them was
+    /// stored, so a repeated request does not attribute the file again
+    /// while that node is derived. They are immutable, like the node.
+    blames: BlameMemo,
 }
 
 impl std::fmt::Debug for ControlServer {
@@ -71,6 +82,10 @@ impl ControlServer {
             meta,
             objects,
             workers,
+            blames: moka::sync::Cache::builder()
+                .max_capacity(BLAME_MEMO_RUNS)
+                .weigher(|_, file: &FileBlame| u32::try_from(file.runs.len()).unwrap_or(u32::MAX))
+                .build(),
         }
     }
 
@@ -93,6 +108,48 @@ impl ControlServer {
                     .ok_or_else(|| Status::data_loss(format!("indexed changeset {id} is missing")))
             })
             .collect()
+    }
+}
+
+impl ControlServer {
+    /// The attribution of `path` at `cs`. When the node of the changeset
+    /// that last changed it is not stored, the reply waits on this file's
+    /// versions only: the node, which holds every file that changeset
+    /// changed, is derived and stored by a task, gently, since nothing
+    /// waits on it.
+    async fn attribute(
+        &self,
+        repo: &str,
+        cs: ChangesetId,
+        path: &RepoPath,
+    ) -> Result<FileBlame, Status> {
+        let deriver = self.deriver(repo);
+        let last_changed = Blame::last_changed(&deriver, cs, path)
+            .await
+            .map_err(derive_status)?
+            .ok_or_else(|| Status::not_found(format!("no file {path} in {cs}")))?;
+        let key = (repo.to_owned(), last_changed, path.clone());
+        if let Some(file) = self.blames.get(&key) {
+            return Ok(file);
+        }
+        if let Some(file) = Blame::stored_file(&deriver, last_changed, path)
+            .await
+            .map_err(derive_status)?
+        {
+            return Ok(file);
+        }
+        let file = Blame::file_alone(&deriver, last_changed, path)
+            .await
+            .map_err(derive_status)?;
+        self.blames.insert(key, file.clone());
+        let (meta, objects, repo) = (self.meta.clone(), self.objects.clone(), repo.to_owned());
+        tokio::spawn(async move {
+            let deriver = Deriver::new(&repo, &*meta, &*objects);
+            if let Err(e) = timed("blame", Blame::store_gently(&deriver, last_changed)).await {
+                eprintln!("scion-server: blame of {last_changed} in {repo:?}: {e}");
+            }
+        });
+        Ok(file)
     }
 }
 
@@ -1065,10 +1122,7 @@ impl ControlService for ControlServer {
         let cs = changeset_id(&req.changeset, "changeset")?;
         let path = repo_path(&req.path)?;
         scope.check("read", [&path])?;
-        let file = Blame::for_path(&self.deriver(&req.repo), cs, &path)
-            .await
-            .map_err(derive_status)?
-            .ok_or_else(|| Status::not_found(format!("no file {path} in {cs}")))?;
+        let file = timed("attribute", self.attribute(&req.repo, cs, &path)).await?;
         Ok(Response::new(BlameResponse {
             runs: file
                 .runs
