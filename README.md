@@ -443,11 +443,12 @@ Read these numbers with their limits:
 
 - **Import** writes one immutable object per blob, tree and history page to a remote object
   store, where git writes a local packfile; parity with git's push is not a goal. The figure to
-  quote is the cold row, 8.6× git: into an empty bucket the object store's write rate is the
-  bound. Warm, with the objects already stored, it is 2.2× git.
+  quote is the cold row, 8.0× git: into an empty bucket the object store's write rate is the
+  bound. Warm, with the objects already stored, it is 2.1× git.
 - **Cold `log` and `blame`**, the first call after import with nothing cached on the server,
-  take 6.0× and 3.2× git. Warm, `blame` is 0.24× git and a path log 0.86×. Clone is 0.37× git
-  and a sparse clone 0.07×.
+  take 3.6× and 1.0× git: a path's history is walked in lockstep, one read per step, and blame
+  answers from the file's own history. Warm, `blame` is 0.19× git and a path log 1.0×. Clone is
+  0.47× git and a sparse clone 0.11×.
 - **A single commit + land** (`scn commit --land`, one round trip to land) still goes through a
   change request and the serial land worker, so on its own it takes 1.2× git's local commit and
   push. The worker pays off under contention: 16 writers landing at once finish in 0.12× git's
@@ -473,9 +474,10 @@ A performance pass is under way, aimed at every benchmark row being a multiple f
 a path log already reads all of its changesets in one batch, the server's memos keep their
 hot entries and are invalidated across processes, trees and history pages live in the
 metadata database, import reads git on two threads, clone and commit move objects in
-batches, and `scn commit --land` lands in one round trip; next, cold `log` and `blame` read
-history in larger steps, `status` walks the working copy on several threads, and the land
-worker prepares the next request while the previous one lands. The web
+batches, `scn commit --land` lands in one round trip, and a cold path log or blame walks
+history in lockstep and answers from the file's own history; next, warm `log` and `blame`
+answered from memory, `status` walking the working copy on several threads, and a land
+worker that prepares the next request while the previous one lands. The web
 interface, HTTP/JSON API, MCP server and `scn --json` are in, every binary reports one version,
 a tag builds static Linux binaries, macOS `scn` and the server image, and an install script
 fetches the binaries, `scn` talks to `https://` servers, and a production compose profile runs
