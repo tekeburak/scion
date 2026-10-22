@@ -22,6 +22,7 @@ tonic = { workspace = true, features = ["tls-ring", "tls-webpki-roots"] }
 
 [dev-dependencies]
 bytes.workspace = true
+proptest.workspace = true
 scion-derived = { workspace = true, features = ["test-util"] }
 scion-server.workspace = true
 scion-store.workspace = true

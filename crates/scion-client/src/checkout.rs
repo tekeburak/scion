@@ -31,8 +31,8 @@ pub(crate) const FETCH_CONCURRENCY: usize = 64;
 /// commit.
 pub(crate) const BATCHES_IN_FLIGHT: usize = 8;
 
-/// Most files of one batch being written at once.
-const WRITES_PER_BATCH: usize = 16;
+/// Most fetched blobs waiting for the checkout's writer.
+const BLOBS_QUEUED: usize = 256;
 
 /// Failure during clone or checkout.
 #[derive(Debug, thiserror::Error)]
@@ -151,39 +151,72 @@ pub(crate) fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
         .unwrap_or(0)
 }
 
-/// Write one file and return its index entry.
+/// Write one file and return its index entry, on the blocking pool.
 pub(crate) async fn write_file(
     root: &Path,
     file: &File,
     data: Vec<u8>,
 ) -> Result<IndexEntry, CheckoutError> {
     let dest = root.join(file.path.as_str());
-    let io_err = |e| CheckoutError::Io(dest.clone(), e);
+    let (id, kind, size) = (file.id, file.kind, file.size);
+    tokio::task::spawn_blocking(move || write_entry(&dest, id, kind, size, &data))
+        .await
+        .unwrap_or_else(|e| std::panic::resume_unwind(e.into_panic()))
+}
+
+/// Write `data` to `dest` as a file of `kind` and return its index entry.
+fn write_entry(
+    dest: &Path,
+    id: BlobId,
+    kind: FileType,
+    size: u64,
+    data: &[u8],
+) -> Result<IndexEntry, CheckoutError> {
+    let io_err = |e| CheckoutError::Io(dest.to_owned(), e);
     if let Some(parent) = dest.parent() {
-        tokio::fs::create_dir_all(parent).await.map_err(io_err)?;
+        std::fs::create_dir_all(parent).map_err(io_err)?;
     }
-    match file.kind {
+    match kind {
         FileType::Symlink => {
-            let target = String::from_utf8_lossy(&data).into_owned();
-            tokio::fs::symlink(target, &dest).await.map_err(io_err)?;
+            std::os::unix::fs::symlink(String::from_utf8_lossy(data).as_ref(), dest)
+                .map_err(io_err)?;
         }
         FileType::Regular | FileType::Executable => {
-            tokio::fs::write(&dest, &data).await.map_err(io_err)?;
-            if file.kind == FileType::Executable {
+            std::fs::write(dest, data).map_err(io_err)?;
+            if kind == FileType::Executable {
                 use std::os::unix::fs::PermissionsExt;
-                tokio::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o755))
-                    .await
+                std::fs::set_permissions(dest, std::fs::Permissions::from_mode(0o755))
                     .map_err(io_err)?;
             }
         }
     }
-    let meta = tokio::fs::symlink_metadata(&dest).await.map_err(io_err)?;
+    let meta = std::fs::symlink_metadata(dest).map_err(io_err)?;
     Ok(IndexEntry {
-        id: file.id,
-        kind: file.kind,
-        size: file.size,
+        id,
+        kind,
+        size,
         mtime_ns: mtime_ns(&meta),
     })
+}
+
+/// Write every blob received on `blobs` to the files in `by_id` that hold
+/// it, under `root`, on the calling thread. Creating files from one thread
+/// keeps the filesystem's per-CPU caches warm; spread over many threads,
+/// creating 2,330 files costs ten times the kernel time.
+fn write_files(
+    root: &Path,
+    by_id: &HashMap<BlobId, Vec<File>>,
+    mut blobs: tokio::sync::mpsc::Receiver<(BlobId, Vec<u8>)>,
+) -> Result<Vec<(RepoPath, IndexEntry)>, CheckoutError> {
+    let mut entries = Vec::new();
+    while let Some((id, data)) = blobs.blocking_recv() {
+        for file in by_id.get(&id).map_or(&[][..], Vec::as_slice) {
+            let dest = root.join(file.path.as_str());
+            let entry = write_entry(&dest, id, file.kind, file.size, &data)?;
+            entries.push((file.path.clone(), entry));
+        }
+    }
+    Ok(entries)
 }
 
 /// Materialize the part of `repo`'s tree `tree` that `sparse` includes under
@@ -203,41 +236,38 @@ pub async fn checkout(
         by_id.entry(file.id).or_default().push(file);
     }
     let ids: Vec<BlobId> = by_id.keys().copied().collect();
-    let by_id = &by_id;
-    let written: Vec<Vec<(RepoPath, IndexEntry)>> =
-        stream::iter(ids.chunks(MAX_IDS).map(|chunk| {
+    let expected = by_id.values().map(Vec::len).sum::<usize>();
+    let (send, blobs) = tokio::sync::mpsc::channel(BLOBS_QUEUED);
+    let dest = root.to_owned();
+    let writer = tokio::task::spawn_blocking(move || write_files(&dest, &by_id, blobs));
+    let fetched = stream::iter(ids.chunks(MAX_IDS))
+        .map(|chunk| {
             let mut remote = remote.clone();
-            async move {
-                remote
-                    .get_objects(repo, &[], &[], chunk)
-                    .await?
-                    .map_err(CheckoutError::from)
-                    .map_ok(|fetched| async move {
-                        let Fetched::Blob(id, mut data) = fetched else {
-                            return Err(RemoteError::Malformed("reply: a tree for a blob").into());
-                        };
-                        let files = by_id.get(&id).map_or(&[][..], Vec::as_slice);
-                        let mut entries = Vec::new();
-                        for (i, file) in files.iter().enumerate() {
-                            let data = if i + 1 == files.len() {
-                                std::mem::take(&mut data)
-                            } else {
-                                data.clone()
-                            };
-                            entries.push((file.path.clone(), write_file(root, file, data).await?));
-                        }
-                        Ok(entries)
-                    })
-                    .try_buffer_unordered(WRITES_PER_BATCH)
-                    .try_concat()
-                    .await
-            }
-        }))
+            async move { remote.get_objects(repo, &[], &[], chunk).await }
+        })
         .buffer_unordered(BATCHES_IN_FLIGHT)
-        .try_collect()
-        .await?;
-    let entries: BTreeMap<RepoPath, IndexEntry> = written.into_iter().flatten().collect();
-    if entries.len() != by_id.values().map(Vec::len).sum::<usize>() {
+        .try_flatten_unordered(None)
+        .map_err(CheckoutError::from)
+        .try_for_each(|fetched| {
+            let send = &send;
+            async move {
+                let Fetched::Blob(id, data) = fetched else {
+                    return Err(RemoteError::Malformed("reply: a tree for a blob").into());
+                };
+                // A closed channel means the writer failed; its error is
+                // the one reported below.
+                let _ = send.send((id, data)).await;
+                Ok(())
+            }
+        })
+        .await;
+    drop(send);
+    let written = writer
+        .await
+        .unwrap_or_else(|e| std::panic::resume_unwind(e.into_panic()))?;
+    fetched?;
+    let entries: BTreeMap<RepoPath, IndexEntry> = written.into_iter().collect();
+    if entries.len() != expected {
         return Err(RemoteError::Malformed("reply: a blob is missing").into());
     }
     Ok(Index { entries })

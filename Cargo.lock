@@ -3397,6 +3397,7 @@ version = "0.0.1"
 dependencies = [
  "bytes",
  "futures-util",
+ "proptest",
  "scion-derived",
  "scion-diff3",
  "scion-proto",
@@ -3558,6 +3559,7 @@ dependencies = [
  "futures",
  "moka",
  "object_store",
+ "proptest",
  "scion-types",
  "sqlx",
  "tempfile",

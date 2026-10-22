@@ -6,6 +6,7 @@
 //! verified against its id, so a corrupt or tampered object is reported
 //! rather than returned.
 
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -13,7 +14,7 @@ use bytes::Bytes;
 use futures::stream::{self, StreamExt, TryStreamExt};
 use object_store::path::Path;
 use object_store::{ObjectStore as Backend, ObjectStoreExt as _, PutMode, PutPayload};
-use scion_types::BlobId;
+use scion_types::{BlobId, MAX_BLOB_BYTES};
 
 use crate::recent::Recent;
 use crate::{ObjectStore, Result, StoreError};
@@ -59,12 +60,37 @@ fn blob_key(id: BlobId) -> Path {
     Path::from(format!("blobs/{id}"))
 }
 
+thread_local! {
+    /// Each thread's compression context: creating one per blob costs more
+    /// than compressing a small source file.
+    static COMPRESSOR: RefCell<zstd::bulk::Compressor<'static>> = RefCell::new(
+        zstd::bulk::Compressor::new(ZSTD_LEVEL).expect("a zstd context is allocated"),
+    );
+    /// Each thread's decompression context, for the same reason.
+    static DECOMPRESSOR: RefCell<zstd::bulk::Decompressor<'static>> = RefCell::new(
+        zstd::bulk::Decompressor::new().expect("a zstd context is allocated"),
+    );
+}
+
+/// One zstd frame that records its content size.
 fn compress(data: &[u8]) -> Result<Vec<u8>> {
-    zstd::encode_all(data, ZSTD_LEVEL).map_err(|e| StoreError::Backend(Box::new(e)))
+    COMPRESSOR
+        .with_borrow_mut(|c| c.compress(data))
+        .map_err(|e| StoreError::Backend(Box::new(e)))
 }
 
 fn decompress(data: &[u8]) -> Result<Vec<u8>> {
-    zstd::decode_all(data).map_err(|e| StoreError::Corrupt(format!("zstd: {e}")))
+    let corrupt = |e| StoreError::Corrupt(format!("zstd: {e}"));
+    match zstd::zstd_safe::get_frame_content_size(data) {
+        Ok(Some(len)) if len <= MAX_BLOB_BYTES as u64 => {
+            let len = usize::try_from(len).expect("at most MAX_BLOB_BYTES");
+            DECOMPRESSOR
+                .with_borrow_mut(|d| d.decompress(data, len))
+                .map_err(corrupt)
+        }
+        // Objects stored before the size was recorded.
+        _ => zstd::decode_all(data).map_err(corrupt),
+    }
 }
 
 /// The blob `id` from its stored (compressed) bytes, checked against its id.
@@ -217,5 +243,40 @@ mod tests {
             reader.get_blob(id).await,
             Err(StoreError::Corrupt(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn blobs_stored_without_a_recorded_size_still_read() {
+        let store = ObjectStorage::in_memory();
+        let data = b"written by the stream encoder".repeat(100);
+        let id = BlobId::hash(&data);
+        let legacy = zstd::encode_all(&data[..], ZSTD_LEVEL).unwrap();
+        assert_eq!(
+            zstd::zstd_safe::get_frame_content_size(&legacy).ok(),
+            Some(None)
+        );
+        store
+            .backend
+            .put(&blob_key(id), PutPayload::from(legacy))
+            .await
+            .unwrap();
+        let reader = ObjectStorage::new(store.backend().clone());
+        assert_eq!(reader.get_blob(id).await.unwrap().unwrap(), data);
+    }
+
+    proptest::proptest! {
+        /// Every stored frame records its size, so a read decompresses it in
+        /// one call on the thread's reused context, and gets the same bytes.
+        #[test]
+        fn frames_record_their_size_and_round_trip(
+            data in proptest::collection::vec(proptest::num::u8::ANY, 0..40_000),
+        ) {
+            let frame = compress(&data).unwrap();
+            proptest::prop_assert_eq!(
+                zstd::zstd_safe::get_frame_content_size(&frame).ok(),
+                Some(Some(data.len() as u64))
+            );
+            proptest::prop_assert_eq!(decompress(&frame).unwrap(), data);
+        }
     }
 }

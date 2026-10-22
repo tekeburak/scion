@@ -52,12 +52,21 @@ const FILES: &[(&str, &[u8], FileType)] = &[
 
 /// A server whose `main` holds [`FILES`]; returns its address and `main`.
 async fn serve() -> (String, ChangesetId) {
+    let files: Vec<_> = FILES
+        .iter()
+        .map(|(path, content, kind)| (RepoPath::new(*path).unwrap(), content.to_vec(), *kind))
+        .collect();
+    serve_files(&files).await
+}
+
+/// A server whose `main` holds `files`; returns its address and `main`.
+async fn serve_files(files: &[(RepoPath, Vec<u8>, FileType)]) -> (String, ChangesetId) {
     let store = Arc::new(MemoryStore::with_repo(REPO));
     let mut changes = BTreeMap::new();
-    for (path, content, kind) in FILES {
-        store.put_blob(Bytes::from_static(content)).await.unwrap();
+    for (path, content, kind) in files {
+        store.put_blob(Bytes::from(content.clone())).await.unwrap();
         changes.insert(
-            RepoPath::new(*path).unwrap(),
+            path.clone(),
             FileChange::Tracked {
                 content: BlobId::hash(content),
                 kind: *kind,
@@ -227,4 +236,55 @@ async fn refuses_non_empty_destinations_and_unknown_repos() {
         other => panic!("expected PERMISSION_DENIED, got {other:?}"),
     }
     assert!(!empty.path().join(".scn").exists(), "nothing written");
+}
+
+proptest::proptest! {
+    #![proptest_config(proptest::prelude::ProptestConfig::with_cases(12))]
+
+    /// Whatever the files, how many share a content and how many batches
+    /// their blobs take, a clone writes each file once, byte for byte, and
+    /// indexes it.
+    #[test]
+    fn a_clone_writes_every_file_of_any_tree(
+        files in proptest::collection::btree_map(
+            (0..6u8, 0..80u16),
+            (0..400u16, proptest::bool::ANY),
+            1..600,
+        ),
+    ) {
+        let files: Vec<(RepoPath, Vec<u8>, FileType)> = files
+            .into_iter()
+            .map(|((dir, name), (content, exec))| {
+                let path = RepoPath::new(format!("d{dir}/s{}/f{name}", name % 7)).unwrap();
+                let kind = if exec { FileType::Executable } else { FileType::Regular };
+                (path, format!("content {content}\n").repeat(usize::from(content % 9) + 1).into_bytes(), kind)
+            })
+            .collect();
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            let (server, _) = serve_files(&files).await;
+            let dir = tempfile::tempdir().unwrap();
+            let dest = dir.path().join("wc");
+            let ws = clone(remote(&server).await, &server, REPO, &dest, SparseProfile::full())
+                .await
+                .unwrap();
+            let index = ws.read_index().unwrap();
+            let mut expected: Vec<String> =
+                files.iter().map(|(p, ..)| p.as_str().to_owned()).collect();
+            expected.sort();
+            assert_eq!(listing(&dest), expected);
+            assert_eq!(index.entries.len(), files.len());
+            for (path, content, kind) in &files {
+                let on_disk = dest.join(path.as_str());
+                assert_eq!(&std::fs::read(&on_disk).unwrap(), content);
+                let exec = std::fs::metadata(&on_disk).unwrap().permissions().mode() & 0o111;
+                assert_eq!(exec != 0, *kind == FileType::Executable);
+                let e = &index.entries[path];
+                assert_eq!(
+                    (e.id, e.kind, e.size),
+                    (BlobId::hash(content), *kind, content.len() as u64)
+                );
+            }
+        });
+    }
 }

@@ -20,6 +20,7 @@ moka = { version = "0.12.16", default-features = false, features = ["sync"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
 
 [dev-dependencies]
+proptest.workspace = true
 tempfile = "3.27.0"
 
 [features]

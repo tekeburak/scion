@@ -513,7 +513,8 @@ impl Remote {
         trees: &[TreeId],
         subtrees: &[TreeId],
         blobs: &[BlobId],
-    ) -> Result<impl futures_util::Stream<Item = Result<Fetched, RemoteError>>, RemoteError> {
+    ) -> Result<impl futures_util::Stream<Item = Result<Fetched, RemoteError>> + use<>, RemoteError>
+    {
         use futures_util::StreamExt;
         let raw = |ids: &[TreeId]| ids.iter().map(|id| id.as_bytes().to_vec()).collect();
         let resp = self
