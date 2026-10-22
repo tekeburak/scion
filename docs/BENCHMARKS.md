@@ -25,9 +25,11 @@ run (mapper on two threads). Rows slower than git:
 | commit + land | 1.6× | `CreateChangeset`: 12 ms, then `SubmitChangeRequest`: 13 ms | Four client round trips (`PutBlob`, `CreateChangeset`, `SubmitChangeRequest`, then waiting on the request); inside the create, the derived objects' `store` (9.5 ms) and the skip list (9.2 ms) run alongside the row `insert` (7.5 ms). |
 
 Every other row is already faster than git. The traced run also shows where the next steps
-start: a clone's 2,878 RPCs each pay an `auth` grants query (22.5 s summed), which 10.2
-memoizes; 2,330 `GetBlob` and 547 `GetTree` calls, one per file and directory, which 10.5
-batches.
+start: a clone's 2,878 RPCs each paid an `auth` grants query (22.5 s summed). Since 10.2 a
+listening server memoizes each repository's grants and refs, and every write to them sends a
+Postgres notification that drops the entries, so a clone makes one grants query; clone went
+from 1,436 to 1,153 ms. What is left is 2,330 `GetBlob` and 547 `GetTree` calls, one per
+file and directory, which 10.5 batches.
 
 ## Synthetic workloads
 
