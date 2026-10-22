@@ -7,3 +7,4 @@
 /deploy/data/
 /.claude/worktrees/
 /dist/
+/prod.env

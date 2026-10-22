@@ -1,0 +1,70 @@
+# Production profile: the released scion-server image, Postgres on a volume, an
+# S3 bucket you already have, and Caddy terminating TLS on one address. Caddy
+# sends gRPC (`scn`, `scion-mcp`) to the server's :7420 and everything else
+# (the web interface, /api/v1) to its :8080; neither port is published.
+#
+# Usage:
+#   cp deploy/prod.env.example prod.env          # fill in every value
+#   docker compose -f deploy/compose.prod.yml --env-file prod.env up -d
+#   docker compose -f deploy/compose.prod.yml --env-file prod.env exec scion-server \
+#       scion-server grant '*' github:<you> admin  # may create repositories
+#   scn login https://<SCION_DOMAIN>
+#
+# Caddy gets a certificate for SCION_DOMAIN from Let's Encrypt, so the name must
+# resolve to this machine and ports 80 and 443 must reach it. For `localhost`
+# it issues one from its own authority instead; clients trust that one through
+# SSL_CERT_FILE (its root is /data/caddy/pki/authorities/local/root.crt in the
+# caddy container). Upgrade by changing SCION_VERSION and running `up -d` again.
+# A variable set in the shell wins over the same one in the env file.
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: scion
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: scion
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scion -d scion"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  scion-server:
+    image: ghcr.io/tekeburak/scion-server:${SCION_VERSION:?set SCION_VERSION}
+    restart: unless-stopped
+    command: ["--web", "0.0.0.0:8080"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://scion:${POSTGRES_PASSWORD}@postgres:5432/scion
+      AWS_ENDPOINT: ${AWS_ENDPOINT:?set AWS_ENDPOINT}
+      AWS_ALLOW_HTTP: ${AWS_ALLOW_HTTP:-false}
+      AWS_BUCKET: ${AWS_BUCKET:?set AWS_BUCKET}
+      AWS_REGION: ${AWS_REGION:?set AWS_REGION}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:?set AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:?set AWS_SECRET_ACCESS_KEY}
+      SCION_TOKEN_KEY: ${SCION_TOKEN_KEY:?set SCION_TOKEN_KEY}
+      SCION_GITHUB_CLIENT_ID: ${SCION_GITHUB_CLIENT_ID:-}
+      SCION_GITHUB_CLIENT_SECRET: ${SCION_GITHUB_CLIENT_SECRET:-}
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on: [scion-server]
+    environment:
+      SCION_DOMAIN: ${SCION_DOMAIN:?set SCION_DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+
+volumes:
+  pgdata:
+  caddydata:

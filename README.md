@@ -139,6 +139,13 @@ What works today:
   `scion-server` on a distroless base, running as a non-root user, configured by the
   environment variables listed in `crates/scion-server/src/main.rs`. No release has been
   tagged yet; until then, build from source as below.
+- **Production compose profile** ([`deploy/compose.prod.yml`](deploy/compose.prod.yml)): the
+  server image, Postgres on a volume, your own S3 bucket and Caddy terminating TLS on one
+  `https://` address with a Let's Encrypt certificate; `scn` and `scion-mcp` reach the gRPC
+  services and browsers the web interface through it. Every secret comes from one env file,
+  [`deploy/prod.env.example`](deploy/prod.env.example) lists them. The release workflow brings
+  the profile up with a local certificate authority and logs in, inits, clones, commits and
+  lands through it.
 - **Robustness checks**: a seeded, hermetic simulation runs many clients committing, landing,
   merging and reverting while land workers stop and the server restarts, and checks that
   `main` stays linear and nothing landed is lost or written twice; fuzz targets cover every
@@ -301,6 +308,24 @@ Run `import` again after new git commits and it imports only those and fast-forw
 an interrupted import resumes the same way. If the git history was rewritten under an import,
 `import` names the commit `main` is at and writes nothing.
 
+### Run your own server
+
+On a machine with Docker whose DNS name points at it and whose ports 80 and 443 are open,
+from a checkout of this repository:
+
+```sh
+cp deploy/prod.env.example prod.env   # fill in every value; keep it private
+docker compose -f deploy/compose.prod.yml --env-file prod.env up -d
+# the first admin: sign in with GitHub (needs the OAuth app in prod.env), then
+docker compose -f deploy/compose.prod.yml --env-file prod.env exec scion-server \
+    scion-server grant '*' github:<your login> admin
+scn login https://scion.example.com   # the SCION_DOMAIN from prod.env
+scn init https://scion.example.com demo
+```
+
+The bucket must already exist; Caddy obtains and renews the certificate itself. To upgrade,
+change `SCION_VERSION` in `prod.env` and run the same `up -d`; Postgres keeps its volume.
+
 ## Web interface
 
 `scion-server --web <addr>` serves server-rendered pages from the same process as the gRPC
@@ -443,7 +468,8 @@ two threads; next, import derives trees concurrently and uploads blobs in fewer 
 object plane gains streaming batch requests, and landing becomes one round trip. The web
 interface, HTTP/JSON API, MCP server and `scn --json` are in, every binary reports one version,
 a tag builds static Linux binaries, macOS `scn` and the server image, and an install script
-fetches the binaries, and `scn` talks to `https://` servers; next come a production compose profile and a hosted instance; the regional cache and per-node daemon tiers with
+fetches the binaries, `scn` talks to `https://` servers, and a production compose profile runs
+the server behind TLS; next come write limits at every surface and a hosted instance; the regional cache and per-node daemon tiers with
 manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan, with
 acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
@@ -475,6 +501,9 @@ acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
 #     --locked --target aarch64-apple-darwin -p scn
 # scripts/install.sh is checked with shellcheck (apt-get install shellcheck / brew install shellcheck):
 #   shellcheck -s sh scripts/install.sh scripts/install-test.sh && sh scripts/install-test.sh
+# the production compose profile, end to end through Caddy, against a server image tagged
+# ghcr.io/tekeburak/scion-server:<version> (needs Docker with compose 2.24+ and curl):
+#   shellcheck -s sh scripts/prod-profile-test.sh && sh scripts/prod-profile-test.sh <version> <scn>
 cargo test --workspace                     # includes 200 seeds of scion-sim
 SCION_SIM_SEED=42 cargo test -p scion-sim --test seeds   # replay one simulation seed
 cargo test -p scion-sim --test corpus      # replay the fuzz corpus on stable

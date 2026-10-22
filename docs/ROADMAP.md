@@ -482,7 +482,10 @@ accounting. Backup and restore of the metadata database is the managed platform'
 - **9.7 Production compose profile.** `deploy/compose.prod.yml`: the release image, Postgres
   with a volume, an external S3 bucket from environment variables, and Caddy terminating TLS on
   one address that sends gRPC (`application/grpc`) to `:7420` and everything else to the web
-  interface; secrets come from an `.env` file whose template lists each one. *Accepted when* a
+  interface; secrets come from an `.env` file whose template lists each one
+  (`deploy/prod.env.example`). The local certificate authority is Caddy's own, which it uses
+  for `localhost`; the check is `scripts/prod-profile-test.sh`, run by the release workflow's
+  image job on the image it just built. *Accepted when* a
   CI job brings the profile up with a local certificate authority, and `scn` logs in with a
   token, inits, clones, commits and lands through the one `https://` address.
 - **9.8 Write limits at every surface.** The per-blob size limit is one constant enforced on

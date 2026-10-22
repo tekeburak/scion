@@ -1,0 +1,20 @@
+# TLS for deploy/compose.prod.yml: one address, gRPC to the server's :7420
+# (HTTP/2 without TLS behind the proxy), everything else to the web interface.
+{
+	# The root of the local authority (used for `localhost`) stays in /data;
+	# there is no system trust store in the container to install it into.
+	skip_install_trust
+}
+
+{$SCION_DOMAIN} {
+	@grpc header Content-Type application/grpc*
+	handle @grpc {
+		reverse_proxy h2c://scion-server:7420 {
+			# Streams (blob upload and download) pass through as they come.
+			flush_interval -1
+		}
+	}
+	handle {
+		reverse_proxy scion-server:8080
+	}
+}

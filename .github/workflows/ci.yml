@@ -233,7 +233,7 @@ jobs:
       - name: shellcheck
         run: |
           docker run --rm -v "$GITHUB_WORKSPACE/scripts:/mnt:ro" koalaman/shellcheck:v0.10.0 \
-            -s sh /mnt/install.sh /mnt/install-test.sh
+            -s sh /mnt/install.sh /mnt/install-test.sh /mnt/prod-profile-test.sh
       - name: install from a release directory
         run: sh scripts/install-test.sh
 
