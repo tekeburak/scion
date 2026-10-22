@@ -58,8 +58,9 @@ signed by the server and a role in the repository it touches, optionally limited
 directory; people sign in with GitHub (`scn login`) and services use tokens from the operator. Landing goes through change requests and a serial
 land worker, and every request can be listed and traced to the changeset it landed;
 merges and reverts run on the server. A [web interface](#web-interface), an HTTP/JSON API and
-an MCP server serve people and agents. Released binaries, a hosted instance and the cache and
-daemon tiers follow (see [What's next](#whats-next)).
+an MCP server serve people and agents. A release workflow builds static Linux binaries; the
+first tagged release, a server image, a hosted instance and the cache and daemon tiers follow
+(see [What's next](#whats-next)).
 
 What works today:
 
@@ -126,6 +127,11 @@ What works today:
   `main`, the changesets on both sides that changed it since the merge base. Every binary
   prints its version and the commit it was built from with `--version`; `GET /api/v1/version`
   and the web interface's footer show the server's.
+- **Release binaries**: pushing a `v*` tag builds `scn`, `scion-server`, `scion-ingest`
+  and `scion-mcp` as static `x86_64` and `aarch64` musl executables, packs one archive per
+  target with a `SHA256SUMS` file and opens a draft GitHub release. `scripts/install.sh` picks
+  the archive for the machine, checks it against `SHA256SUMS` and installs the binaries into
+  `~/.local/bin`. No release has been tagged yet; until then, build from source as below.
 - **Robustness checks**: a seeded, hermetic simulation runs many clients committing, landing,
   merging and reverting while land workers stop and the server restarts, and checks that
   `main` stays linear and nothing landed is lost or written twice; fuzz targets cover every
@@ -425,11 +431,12 @@ Read these numbers with their limits:
 
 A performance pass is under way, aimed at every benchmark row being a multiple faster than git:
 a path log already reads all of its changesets in one batch, the server's memos keep their
-hot entries, and trees and history pages live in the metadata database; next, import derives
-trees concurrently, the object plane gains streaming batch requests, and landing becomes one
-round trip. The web interface's pages, browser sign-in, change-request actions, repository settings,
-HTTP/JSON API, MCP server and `scn --json` are in; next come released binaries, a server image,
-a production compose profile and a hosted instance; the regional cache and per-node daemon tiers with
+hot entries, trees and history pages live in the metadata database, and import reads git on
+two threads; next, import derives trees concurrently and uploads blobs in fewer requests, the
+object plane gains streaming batch requests, and landing becomes one round trip. The web
+interface, HTTP/JSON API, MCP server and `scn --json` are in, every binary reports one version,
+a tag builds static Linux binaries and an install script fetches them; next come macOS
+binaries, a server image, TLS from the clients, a production compose profile and a hosted instance; the regional cache and per-node daemon tiers with
 manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan, with
 acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
 

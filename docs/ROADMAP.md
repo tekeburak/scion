@@ -460,7 +460,8 @@ accounting. Backup and restore of the metadata database is the managed platform'
   each binary.
 - **9.4 Install script.** `scripts/install.sh` (POSIX `sh`) picks the archive for the
   machine's OS and architecture from the latest release or `SCION_VERSION`, checks it against
-  `SHA256SUMS`, and installs the binaries into `~/.local/bin` or `SCION_INSTALL_DIR`.
+  `SHA256SUMS`, and installs the binaries into `~/.local/bin` or `SCION_INSTALL_DIR`;
+  `SCION_RELEASE_URL` points it at another release directory, which is how the test serves one.
   *Accepted when* a CI test runs it against a release directory served from disk, a corrupted
   archive is refused with the file named, and `shellcheck` passes.
 - **9.5 Server image.** The release workflow builds `ghcr.io/<owner>/scion-server:<version>`
