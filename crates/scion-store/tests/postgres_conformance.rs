@@ -59,7 +59,101 @@ async fn fresh() -> PostgresStore {
     store
 }
 
+/// A [`fresh`] store that memoises refs and grants.
+async fn listening() -> PostgresStore {
+    let store = fresh().await;
+    store.listen().await.unwrap();
+    store
+}
+
 scion_store::metadata_conformance_tests!(postgres, fresh());
+scion_store::metadata_conformance_tests!(postgres_listening, listening());
+
+/// Wait up to five seconds for `check` to hold.
+async fn eventually<F: Future<Output = bool>>(mut check: impl FnMut() -> F) {
+    for _ in 0..100 {
+        if check().await {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    panic!("not observed within five seconds");
+}
+
+/// While listening, a repeated read of refs or grants makes no query: rows
+/// changed behind the store's back, without a notification, are not seen.
+/// A write through another store handle (another process, such as
+/// `scion-server revoke` or `scion-ingest import`) is seen once its
+/// notification arrives, a write through this one at once, and losing the
+/// listener's connection drops the memo.
+#[tokio::test]
+async fn refs_and_grants_memos_follow_notified_writes() {
+    use scion_store::{Grant, MetadataStore, RefState, Role};
+    use scion_types::ChangesetId;
+
+    let server = listening().await;
+    let operator = PostgresStore::from_pool(server.pool().clone());
+    let pool = server.pool().clone();
+    server.create_repo("r").await.unwrap();
+    let grant = |path_prefix: &str| Grant {
+        principal: "sp:a".into(),
+        path_prefix: path_prefix.into(),
+        role: Role::Reader,
+    };
+    let id = |n: u8| ChangesetId::from_bytes([n; 32]);
+    let at = |n: u8, version: u64| RefState {
+        target: id(n),
+        version,
+    };
+    // A write that sends no notification.
+    let silently = |sql: String| {
+        let pool = pool.clone();
+        async move { sqlx::query(&sql).execute(&pool).await.unwrap() }
+    };
+    let add_grant = |prefix: &str| {
+        format!(
+            "INSERT INTO grants (repo, principal, path_prefix, role) \
+             SELECT id, 'sp:a', '{prefix}', 'reader' FROM repos"
+        )
+    };
+    let set_main = |n: u8, version: u64| {
+        format!(
+            "INSERT INTO refs (repo, name, target, version) \
+             SELECT id, 'main', '\\x{}', {version} FROM repos \
+             ON CONFLICT (repo, name) DO UPDATE SET target = EXCLUDED.target, \
+             version = EXCLUDED.version",
+            id(n)
+        )
+    };
+
+    silently(add_grant("")).await;
+    silently(set_main(1, 0)).await;
+    assert_eq!(server.grants_for("r", "sp:a").await.unwrap(), [grant("")]);
+    assert_eq!(server.get_ref("r", "main").await.unwrap(), Some(at(1, 0)));
+
+    silently(add_grant("x")).await;
+    silently(set_main(2, 1)).await;
+    assert_eq!(server.grants_for("r", "sp:a").await.unwrap(), [grant("")]);
+    assert_eq!(server.get_ref("r", "main").await.unwrap(), Some(at(1, 0)));
+
+    assert!(operator.delete_grant("r", "sp:a", "").await.unwrap());
+    operator.move_ref("r", "main", 1, id(3)).await.unwrap();
+    eventually(|| async { server.grants_for("r", "sp:a").await.unwrap() == [grant("x")] }).await;
+    eventually(|| async { server.get_ref("r", "main").await.unwrap() == Some(at(3, 2)) }).await;
+
+    server.move_ref("r", "main", 2, id(4)).await.unwrap();
+    assert_eq!(server.get_ref("r", "main").await.unwrap(), Some(at(4, 3)));
+
+    sqlx::query(
+        "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \
+         WHERE datname = current_database() AND query LIKE 'LISTEN%'",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    silently(set_main(1, 9)).await;
+    eventually(|| async { server.get_ref("r", "main").await.unwrap() == Some(at(1, 9)) }).await;
+}
 
 /// Trees and pages read back through a fresh memo come from the tables,
 /// checked against their ids.

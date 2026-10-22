@@ -7,13 +7,13 @@
 //! exist for querying.
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, UNIX_EPOCH};
 
 use async_trait::async_trait;
 use bytes::Bytes;
 use scion_types::{BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, Tree, TreeId};
-use sqlx::postgres::{PgConnectOptions, PgPool, PgPoolOptions};
+use sqlx::postgres::{PgConnectOptions, PgListener, PgPool, PgPoolOptions};
 use sqlx::{Executor, Postgres};
 
 use crate::recent::Recent;
@@ -37,14 +37,24 @@ const TREE_MEMO_BYTES: usize = 64 << 20;
 /// Bytes of recently read or written path-history pages kept in memory.
 const PAGE_MEMO_BYTES: usize = 64 << 20;
 
+/// Bytes of repositories' refs kept in memory while listening.
+const REF_MEMO_BYTES: usize = 1 << 20;
+/// Bytes of repositories' grants kept in memory while listening.
+const GRANT_MEMO_BYTES: usize = 4 << 20;
+/// The channel on which every write to `refs` or `grants` names its
+/// repository, in the writing transaction.
+const INVALIDATE_CHANNEL: &str = "scion_invalidate";
+/// Pause before reconnecting a listener whose connection was lost.
+const RELISTEN_DELAY: Duration = Duration::from_secs(1);
+
 type DerivedKey = (String, String, u32, ChangesetId);
 
 /// A [`MetadataStore`] backed by Postgres.
 ///
 /// Changesets, derived pointers, trees, pages and repository ids are
 /// write-once, so the recently read or written ones are memoised in a bounded
-/// amount of memory; refs are always read from the database. Clones share
-/// the memo.
+/// amount of memory. Refs and grants are memoised per repository only while
+/// [`listen`](Self::listen)ing. Clones share the memo.
 #[derive(Debug, Clone)]
 pub struct PostgresStore {
     pool: PgPool,
@@ -53,6 +63,88 @@ pub struct PostgresStore {
     derived: Arc<Recent<DerivedKey, Vec<u8>>>,
     trees: Arc<Recent<(String, TreeId), Tree>>,
     pages: Arc<Recent<(String, BlobId), Bytes>>,
+    mutable: Arc<Mutable>,
+}
+
+/// Memos of each repository's refs and grants, which other processes write
+/// too. They serve reads only while a listener receives the notifications
+/// those writes send; each notification drops its repository's entries.
+#[derive(Debug)]
+struct Mutable {
+    refs: Recent<String, Arc<Vec<(String, RefState)>>>,
+    grants: Recent<String, Arc<Vec<Grant>>>,
+    /// Bumped by every invalidation, and whether a listener is connected.
+    /// A read remembers its result only if no invalidation happened since
+    /// it started, so a result older than a write is never kept after it.
+    epoch: Mutex<(u64, bool)>,
+}
+
+impl Mutable {
+    fn new() -> Self {
+        Self {
+            refs: Recent::new(REF_MEMO_BYTES),
+            grants: Recent::new(GRANT_MEMO_BYTES),
+            epoch: Mutex::new((0, false)),
+        }
+    }
+
+    fn state(&self) -> std::sync::MutexGuard<'_, (u64, bool)> {
+        self.epoch
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// The current epoch, if the memos are in use.
+    fn epoch(&self) -> Option<u64> {
+        let (epoch, listening) = *self.state();
+        listening.then_some(epoch)
+    }
+
+    /// Run `remember` unless an invalidation happened since `epoch`.
+    fn remember(&self, epoch: u64, remember: impl FnOnce()) {
+        let state = self.state();
+        if *state == (epoch, true) {
+            remember();
+        }
+    }
+
+    /// Drop `repo`'s entries.
+    fn forget(&self, repo: &str) {
+        let mut state = self.state();
+        state.0 += 1;
+        self.refs.remove(&repo.to_owned());
+        self.grants.remove(&repo.to_owned());
+    }
+
+    /// Drop every entry, and use the memos from now on only if `listening`.
+    fn reset(&self, listening: bool) {
+        let mut state = self.state();
+        *state = (state.0 + 1, listening);
+        self.refs.clear();
+        self.grants.clear();
+    }
+}
+
+/// `repo`'s memoised value in `memo`, or `read` and remember it, weighed by
+/// `weight`, while the memos are in use.
+async fn memoized<V: Clone + Send + Sync + 'static>(
+    mutable: &Mutable,
+    memo: &Recent<String, V>,
+    repo: &str,
+    weight: impl FnOnce(&V) -> usize,
+    read: impl Future<Output = Result<V>>,
+) -> Result<V> {
+    let Some(epoch) = mutable.epoch() else {
+        return read.await;
+    };
+    if let Some(hit) = memo.get(&repo.to_owned()).await {
+        return Ok(hit);
+    }
+    let value = read.await?;
+    mutable.remember(epoch, || {
+        memo.insert(repo.to_owned(), value.clone(), repo.len() + weight(&value));
+    });
+    Ok(value)
 }
 
 impl From<sqlx::Error> for StoreError {
@@ -101,7 +193,47 @@ impl PostgresStore {
             derived: Arc::new(Recent::new(DERIVED_MEMO_BYTES)),
             trees: Arc::new(Recent::new(TREE_MEMO_BYTES)),
             pages: Arc::new(Recent::new(PAGE_MEMO_BYTES)),
+            mutable: Arc::new(Mutable::new()),
         }
+    }
+
+    /// Memoise refs and grants from now on, on a connection of its own that
+    /// listens for the notifications every write to them sends, from any
+    /// process. A notification drops its repository's entries. While that
+    /// connection is lost, reads go to the database and the memo is empty;
+    /// it is reconnected in the background.
+    pub async fn listen(&self) -> Result<()> {
+        let listener = self.listener().await?;
+        let store = self.clone();
+        tokio::spawn(async move {
+            let mut listener = Some(listener);
+            loop {
+                if let Some(mut l) = listener.take() {
+                    // `Ok(None)` and `Err` both mean the connection is gone,
+                    // with whatever was sent meanwhile.
+                    while let Ok(Some(n)) = l.try_recv().await {
+                        store.mutable.forget(n.payload());
+                    }
+                    store.mutable.reset(false);
+                }
+                tokio::time::sleep(RELISTEN_DELAY).await;
+                listener = store.listener().await.ok();
+            }
+        });
+        Ok(())
+    }
+
+    /// A connection listening on [`INVALIDATE_CHANNEL`], outside the pool,
+    /// after which the memos start out empty.
+    async fn listener(&self) -> Result<PgListener> {
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect_lazy_with((*self.pool.connect_options()).clone());
+        let mut listener = PgListener::connect_with(&pool).await?;
+        listener.eager_reconnect(false);
+        listener.listen(INVALIDATE_CHANNEL).await?;
+        self.mutable.reset(true);
+        Ok(listener)
     }
 
     /// Apply pending migrations.
@@ -365,6 +497,75 @@ fn decode_tree(id: TreeId, bytes: &[u8]) -> Result<Tree> {
 }
 
 impl PostgresStore {
+    /// Every ref of `repo`, by name, memoised while listening.
+    async fn refs(&self, repo: &str) -> Result<Arc<Vec<(String, RefState)>>> {
+        let weight = |refs: &Arc<Vec<(String, RefState)>>| {
+            refs.iter().map(|(name, _)| name.len() + 48).sum()
+        };
+        memoized(&self.mutable, &self.mutable.refs, repo, weight, async {
+            Ok(Arc::new(self.select_refs(repo).await?))
+        })
+        .await
+    }
+
+    async fn select_refs(&self, repo: &str) -> Result<Vec<(String, RefState)>> {
+        let rows: Vec<(String, Vec<u8>, i64)> = sqlx::query_as(
+            "SELECT f.name, f.target, f.version FROM refs f JOIN repos r ON r.id = f.repo \
+             WHERE r.name = $1 ORDER BY f.name",
+        )
+        .bind(repo)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|(n, t, v)| {
+                Ok((
+                    n,
+                    RefState {
+                        target: ChangesetId::try_from_slice(&t)
+                            .map_err(|e| StoreError::Corrupt(e.to_string()))?,
+                        version: to_u64(v)?,
+                    },
+                ))
+            })
+            .collect()
+    }
+
+    /// Every grant of `repo`, by principal and path prefix, memoised while
+    /// listening.
+    async fn repo_grants(&self, repo: &str) -> Result<Arc<Vec<Grant>>> {
+        let weight = |grants: &Arc<Vec<Grant>>| {
+            grants
+                .iter()
+                .map(|g| g.principal.len() + g.path_prefix.len() + 8)
+                .sum()
+        };
+        memoized(&self.mutable, &self.mutable.grants, repo, weight, async {
+            Ok(Arc::new(self.select_grants(repo).await?))
+        })
+        .await
+    }
+
+    async fn select_grants(&self, repo: &str) -> Result<Vec<Grant>> {
+        let rows: Vec<(String, String, String)> = sqlx::query_as(
+            "SELECT g.principal, g.path_prefix, g.role FROM grants g JOIN repos r ON r.id = g.repo \
+             WHERE r.name = $1 ORDER BY g.principal COLLATE \"C\", g.path_prefix COLLATE \"C\"",
+        )
+        .bind(repo)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|(principal, path_prefix, role)| {
+                let role = Role::parse(&role)
+                    .ok_or_else(|| StoreError::Corrupt(format!("grant role {role:?}")))?;
+                Ok(Grant {
+                    principal,
+                    path_prefix,
+                    role,
+                })
+            })
+            .collect()
+    }
+
     /// Insert `(id, bytes)` rows of `repo` into `table` (`trees` or `pages`)
     /// in one statement; rows already stored are kept.
     async fn insert_objects(
@@ -688,38 +889,32 @@ impl MetadataStore for PostgresStore {
             return Err(StoreError::RefNameNotAllowed(name.to_owned()));
         }
         let repo_id = self.repo(repo).await?;
-        let inserted = sqlx::query(
-            "INSERT INTO refs (repo, name, target, version) VALUES ($1, $2, $3, 0) \
-             ON CONFLICT (repo, name) DO NOTHING",
+        let inserted: Option<(String,)> = sqlx::query_as(
+            "WITH i AS (INSERT INTO refs (repo, name, target, version) VALUES ($1, $2, $3, 0) \
+             ON CONFLICT (repo, name) DO NOTHING RETURNING 1) \
+             SELECT pg_notify($4, $5)::text FROM i",
         )
         .bind(repo_id)
         .bind(name)
         .bind(target.as_bytes().as_slice())
-        .execute(&self.pool)
+        .bind(INVALIDATE_CHANNEL)
+        .bind(repo)
+        .fetch_optional(&self.pool)
         .await?;
-        if inserted.rows_affected() == 0 {
+        if inserted.is_none() {
             return Err(StoreError::RefExists(name.to_owned()));
         }
+        self.mutable.forget(repo);
         Ok(RefState { target, version: 0 })
     }
 
     async fn get_ref(&self, repo: &str, name: &str) -> Result<Option<RefState>> {
-        let row: Option<(Vec<u8>, i64)> = sqlx::query_as(
-            "SELECT f.target, f.version FROM refs f JOIN repos r ON r.id = f.repo \
-             WHERE r.name = $1 AND f.name = $2",
-        )
-        .bind(repo)
-        .bind(name)
-        .fetch_optional(&self.pool)
-        .await?;
-        row.map(|(t, v)| {
-            Ok(RefState {
-                target: ChangesetId::try_from_slice(&t)
-                    .map_err(|e| StoreError::Corrupt(e.to_string()))?,
-                version: to_u64(v)?,
-            })
-        })
-        .transpose()
+        Ok(self
+            .refs(repo)
+            .await?
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, state)| *state))
     }
 
     async fn move_ref(
@@ -731,18 +926,23 @@ impl MetadataStore for PostgresStore {
     ) -> Result<RefState> {
         let expected = to_i64(expected_version)?;
         // Single-statement compare-and-swap.
-        let updated: Option<(i64,)> = sqlx::query_as(
-            "UPDATE refs f SET target = $3, version = f.version + 1, updated_at = now() \
-             FROM repos r WHERE r.id = f.repo AND r.name = $1 AND f.name = $2 AND f.version = $4 \
-             RETURNING f.version",
+        let updated: Option<(i64, String)> = sqlx::query_as(
+            "WITH u AS (UPDATE refs f SET target = $3, version = f.version + 1, \
+             updated_at = now() FROM repos r \
+             WHERE r.id = f.repo AND r.name = $1 AND f.name = $2 AND f.version = $4 \
+             RETURNING f.version) \
+             SELECT version, pg_notify($5, $1)::text FROM u",
         )
         .bind(repo)
         .bind(name)
         .bind(new_target.as_bytes().as_slice())
         .bind(expected)
+        .bind(INVALIDATE_CHANNEL)
         .fetch_optional(&self.pool)
         .await?;
-        if let Some((version,)) = updated {
+        // On a mismatch the memo may predate the write that won.
+        self.mutable.forget(repo);
+        if let Some((version, _)) = updated {
             return Ok(RefState {
                 target: new_target,
                 version: to_u64(version)?,
@@ -761,25 +961,7 @@ impl MetadataStore for PostgresStore {
     }
 
     async fn list_refs(&self, repo: &str) -> Result<Vec<(String, RefState)>> {
-        let rows: Vec<(String, Vec<u8>, i64)> = sqlx::query_as(
-            "SELECT f.name, f.target, f.version FROM refs f JOIN repos r ON r.id = f.repo \
-             WHERE r.name = $1 ORDER BY f.name",
-        )
-        .bind(repo)
-        .fetch_all(&self.pool)
-        .await?;
-        rows.into_iter()
-            .map(|(n, t, v)| {
-                Ok((
-                    n,
-                    RefState {
-                        target: ChangesetId::try_from_slice(&t)
-                            .map_err(|e| StoreError::Corrupt(e.to_string()))?,
-                        version: to_u64(v)?,
-                    },
-                ))
-            })
-            .collect()
+        Ok(self.refs(repo).await?.to_vec())
     }
 
     async fn put_derived_many(&self, repo: &str, pointers: Vec<DerivedPointer>) -> Result<()> {
@@ -1144,72 +1326,53 @@ impl MetadataStore for PostgresStore {
     async fn put_grant(&self, repo: &str, grant: &Grant) -> Result<()> {
         let repo_id = self.grant_repo(repo).await?;
         sqlx::query(
-            "INSERT INTO grants (repo, principal, path_prefix, role) VALUES ($1, $2, $3, $4) \
-             ON CONFLICT (repo, principal, path_prefix) DO UPDATE SET role = EXCLUDED.role",
+            "WITH i AS (INSERT INTO grants (repo, principal, path_prefix, role) \
+             VALUES ($1, $2, $3, $4) ON CONFLICT (repo, principal, path_prefix) \
+             DO UPDATE SET role = EXCLUDED.role RETURNING 1) \
+             SELECT pg_notify($5, $6)::text FROM i",
         )
         .bind(repo_id)
         .bind(&grant.principal)
         .bind(&grant.path_prefix)
         .bind(grant.role.as_str())
+        .bind(INVALIDATE_CHANNEL)
+        .bind(repo)
         .execute(&self.pool)
         .await?;
+        self.mutable.forget(repo);
         Ok(())
     }
 
     async fn delete_grant(&self, repo: &str, principal: &str, path_prefix: &str) -> Result<bool> {
         let repo_id = self.grant_repo(repo).await?;
-        let done = sqlx::query(
-            "DELETE FROM grants WHERE repo = $1 AND principal = $2 AND path_prefix = $3",
+        let done: Option<(String,)> = sqlx::query_as(
+            "WITH d AS (DELETE FROM grants WHERE repo = $1 AND principal = $2 \
+             AND path_prefix = $3 RETURNING 1) \
+             SELECT pg_notify($4, $5)::text FROM d",
         )
         .bind(repo_id)
         .bind(principal)
         .bind(path_prefix)
-        .execute(&self.pool)
+        .bind(INVALIDATE_CHANNEL)
+        .bind(repo)
+        .fetch_optional(&self.pool)
         .await?;
-        Ok(done.rows_affected() > 0)
+        self.mutable.forget(repo);
+        Ok(done.is_some())
     }
 
     async fn grants_for(&self, repo: &str, principal: &str) -> Result<Vec<Grant>> {
-        let rows: Vec<(String, String)> = sqlx::query_as(
-            "SELECT g.path_prefix, g.role FROM grants g JOIN repos r ON r.id = g.repo \
-             WHERE r.name = $1 AND g.principal = $2 ORDER BY g.path_prefix",
-        )
-        .bind(repo)
-        .bind(principal)
-        .fetch_all(&self.pool)
-        .await?;
-        rows.into_iter()
-            .map(|(path_prefix, role)| {
-                let role = Role::parse(&role)
-                    .ok_or_else(|| StoreError::Corrupt(format!("grant role {role:?}")))?;
-                Ok(Grant {
-                    principal: principal.to_owned(),
-                    path_prefix,
-                    role,
-                })
-            })
-            .collect()
+        Ok(self
+            .repo_grants(repo)
+            .await?
+            .iter()
+            .filter(|g| g.principal == principal)
+            .cloned()
+            .collect())
     }
 
     async fn grants(&self, repo: &str) -> Result<Vec<Grant>> {
-        let rows: Vec<(String, String, String)> = sqlx::query_as(
-            "SELECT g.principal, g.path_prefix, g.role FROM grants g JOIN repos r ON r.id = g.repo \
-             WHERE r.name = $1 ORDER BY g.principal COLLATE \"C\", g.path_prefix COLLATE \"C\"",
-        )
-        .bind(repo)
-        .fetch_all(&self.pool)
-        .await?;
-        rows.into_iter()
-            .map(|(principal, path_prefix, role)| {
-                let role = Role::parse(&role)
-                    .ok_or_else(|| StoreError::Corrupt(format!("grant role {role:?}")))?;
-                Ok(Grant {
-                    principal,
-                    path_prefix,
-                    role,
-                })
-            })
-            .collect()
+        Ok(self.repo_grants(repo).await?.to_vec())
     }
 
     async fn repos_of(&self, principal: &str) -> Result<Vec<String>> {

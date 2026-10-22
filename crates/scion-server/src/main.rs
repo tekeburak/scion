@@ -83,6 +83,7 @@ async fn run(args: &[String]) -> Result<(), Box<dyn std::error::Error + Send + S
                     _ => app,
                 });
             let meta = metadata().await?;
+            meta.listen().await?;
             let objects = ObjectStorage::new(Arc::new(AmazonS3Builder::from_env().build()?));
             let listener = TcpListener::bind(&listen).await?;
             eprintln!("scion-server listening on {}", listener.local_addr()?);

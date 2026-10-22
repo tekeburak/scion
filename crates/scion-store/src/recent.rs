@@ -1,9 +1,10 @@
 //! A bounded in-process memo of immutable values.
 //!
-//! Objects are content-addressed and every metadata row cached here
-//! (changesets, derived pointers, repository ids) is write-once, so an entry
-//! can never go stale: no invalidation exists or is needed. Refs are mutable
-//! and are never cached.
+//! Objects are content-addressed and most metadata rows cached here
+//! (changesets, derived pointers, repository ids) are write-once, so their
+//! entries can never go stale. The memos of refs and grants are the
+//! exception: the Postgres store drops their entries when a write announces
+//! itself (see [`PostgresStore::listen`](crate::PostgresStore::listen)).
 
 use std::hash::Hash;
 
@@ -50,6 +51,16 @@ where
     pub(crate) fn insert(&self, key: K, value: V, weight: usize) {
         let weight = u32::try_from(weight).unwrap_or(u32::MAX);
         self.inner.insert(key, (value, weight));
+    }
+
+    /// Forget `key`.
+    pub(crate) fn remove(&self, key: &K) {
+        self.inner.invalidate(key);
+    }
+
+    /// Forget everything.
+    pub(crate) fn clear(&self) {
+        self.inner.invalidate_all();
     }
 }
 
