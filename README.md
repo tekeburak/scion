@@ -73,7 +73,7 @@ What works today:
   moved in with a single compare-and-swap. A conflict leaves `main` untouched and reports the
   conflicting paths; a request interrupted by a server restart resumes and lands exactly once.
 - **`scn`**, the CLI: `init` a repository, `clone --sparse`, `status`, `log`, `diff`, `blame`,
-  `add`, `commit` (an anonymous head), `land` (submits the head as a change request; the
+  `add`, `commit` (an anonymous head; `--land` also lands it, in the same round trip), `land` (submits the head as a change request; the
   server rebases it onto `main` and lands it, or names the conflicting paths), `update` (the
   server rebases your head onto `main`; `--conflicts` writes conflict markers to resolve and
   commit instead of refusing), `requests` (the repository's change requests, newest
@@ -441,13 +441,14 @@ Read these numbers with their limits:
 
 - **Import** writes one immutable object per blob, tree and history page to a remote object
   store, where git writes a local packfile; parity with git's push is not a goal. The figure to
-  quote is the cold row, 8.7× git: into an empty bucket the object store's write rate is the
-  bound. Warm, with the objects already stored, it is 1.9× git.
+  quote is the cold row, 8.6× git: into an empty bucket the object store's write rate is the
+  bound. Warm, with the objects already stored, it is 2.2× git.
 - **Cold `log` and `blame`**, the first call after import with nothing cached on the server,
-  take 7.1× and 3.7× git. Warm, `blame` is 0.20× git and a path log 1.0×. Clone is 0.49× git
-  and a sparse clone 0.11×.
-- **A single commit + land** goes through a change request and the serial land worker, so on
-  its own it takes 1.2× git's local commit and push. The worker pays off under contention: 16
+  take 6.0× and 3.2× git. Warm, `blame` is 0.24× git and a path log 0.86×. Clone is 0.37× git
+  and a sparse clone 0.07×.
+- **A single commit + land** (`scn commit --land`, one round trip to land) still goes through a
+  change request and the serial land worker, so on its own it takes 1.2× git's local commit and
+  push. The worker pays off under contention: 16
   writers landing at once finish in 0.12× git's time, because no writer repeats another's
   fetch, rebase and push.
 - One machine, three runs, shared cloud VM: medians move by several milliseconds between
@@ -470,9 +471,9 @@ Read these numbers with their limits:
 A performance pass is under way, aimed at every benchmark row being a multiple faster than git:
 a path log already reads all of its changesets in one batch, the server's memos keep their
 hot entries and are invalidated across processes, trees and history pages live in the
-metadata database, import reads git on two threads, and clone and commit move objects in
-batches; next, landing becomes one round trip, cold `log` and `blame` read history in larger
-steps, `status` walks the working copy on several threads, and the land worker prepares the
+metadata database, import reads git on two threads, clone and commit move objects in
+batches, and `scn commit --land` lands in one round trip; next, cold `log` and `blame` read
+history in larger steps, `status` walks the working copy on several threads, and the land worker prepares the
 next request while the previous one lands. The web
 interface, HTTP/JSON API, MCP server and `scn --json` are in, every binary reports one version,
 a tag builds static Linux binaries, macOS `scn` and the server image, and an install script
