@@ -6,3 +6,4 @@
 .scn/
 /deploy/data/
 /.claude/worktrees/
+/dist/

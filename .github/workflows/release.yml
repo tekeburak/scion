@@ -1,0 +1,139 @@
+# A `v*` tag the owner pushes is the only thing that publishes a release: this
+# workflow builds the four binaries as static musl executables for x86_64 and
+# aarch64, packs one `scion-<version>-<target>.tar.gz` per target with a
+# `SHA256SUMS` file, and opens a draft GitHub release the owner then publishes.
+# `workflow_dispatch`, and a pull request that changes this file, run the same
+# build as a dry run that publishes nothing; the archives stay on the run as an
+# artifact. Both targets are cross-compiled on one Linux runner with
+# cargo-zigbuild (zig is the C compiler and linker for the native dependencies),
+# so no other kind of machine is needed. The runners behave as the header of
+# ci.yml says.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+  pull_request:
+    paths: [".github/workflows/release.yml"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
+  TARGETS: x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+  BINARIES: scn scion-server scion-ingest scion-mcp
+
+jobs:
+  build:
+    name: build archives
+    runs-on: [self-hosted, linux, konuq-ci]
+    timeout-minutes: 60
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: free disk
+        run: |
+          df -h / | tail -1
+          if [ "$(df --output=avail -BG / | tail -1 | tr -dc 0-9)" -lt 8 ]; then
+            echo "under 8 GB free: dropping target/, stopped containers and dangling images"
+            rm -rf "$GITHUB_WORKSPACE/target"
+            # Not -a: the runner has already built this job's action images.
+            docker system prune -f >/dev/null 2>&1 || true
+            df -h / | tail -1
+          fi
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl, aarch64-unknown-linux-musl
+      - uses: arduino/setup-protoc@v3  # scion-proto's build script runs protoc
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.17.0
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-zigbuild@0.24.0
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release
+      - name: version
+        id: version
+        # The workspace version is the release's version; a tag that names
+        # another one is a mistake, not a release.
+        run: |
+          version="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"/\1/p' Cargo.toml)"
+          if [ "$GITHUB_REF_TYPE" = tag ] && [ "$GITHUB_REF_NAME" != "v$version" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match the workspace version $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: build
+        env:
+          SCION_COMMIT: ${{ github.sha }}
+          CARGO_PROFILE_RELEASE_STRIP: symbols
+        run: |
+          for target in $TARGETS; do
+            cargo zigbuild --release --locked --target "$target" $(printf -- '-p %s ' $BINARIES)
+          done
+      - name: pack
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        # Sorted names, fixed owner and the commit's time keep an archive the
+        # same bytes when the binaries are.
+        run: |
+          rm -rf dist && mkdir dist
+          mtime="@$(git show -s --format=%ct HEAD)"
+          for target in $TARGETS; do
+            name="scion-$VERSION-$target"
+            mkdir "dist/$name"
+            for bin in $BINARIES; do cp "target/$target/release/$bin" "dist/$name/"; done
+            cp LICENSE NOTICE "dist/$name/"
+            tar -C dist --sort=name --mtime="$mtime" --owner=0 --group=0 --numeric-owner \
+              -cf - "$name" | gzip -n > "dist/$name.tar.gz"
+            rm -r "dist/$name"
+          done
+          (cd dist && sha256sum -- *.tar.gz > SHA256SUMS && cat SHA256SUMS)
+      - name: x86_64 scn runs in a bare debian container
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          (cd dist && sha256sum -c SHA256SUMS)
+          rm -rf "$RUNNER_TEMP/smoke" && mkdir "$RUNNER_TEMP/smoke"
+          tar -C "$RUNNER_TEMP/smoke" -xzf "dist/scion-$VERSION-x86_64-unknown-linux-musl.tar.gz"
+          out="$(docker run --rm -v "$RUNNER_TEMP/smoke:/opt/scion:ro" debian:stable-slim \
+            "/opt/scion/scion-$VERSION-x86_64-unknown-linux-musl/scn" --version)"
+          echo "$out"
+          case "$out" in "scn $VERSION ("*) ;; *) echo "::error::unexpected version: $out"; exit 1 ;; esac
+      - uses: actions/upload-artifact@v4
+        with:
+          name: scion-${{ steps.version.outputs.version }}
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: draft release
+    if: github.ref_type == 'tag'
+    needs: build
+    runs-on: [self-hosted, linux, konuq-ci]
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: scion-${{ needs.build.outputs.version }}
+          path: dist
+      - uses: softprops/action-gh-release@v2
+        with:
+          draft: true
+          name: ${{ github.ref_name }}
+          files: dist/*
+          fail_on_unmatched_files: true

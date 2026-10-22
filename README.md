@@ -453,6 +453,10 @@ acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
 # toolchain is pinned by rust-toolchain.toml; scion-proto also needs `protoc` on PATH
 # scion-ingest's tests also need `git` on PATH (apt-get install git / brew install git)
 # scripts/bench-real also needs openssl and curl (apt-get install openssl curl / brew install openssl curl)
+# release archives (static musl binaries, as .github/workflows/release.yml builds them) need zig and
+# cargo-zigbuild: pip install ziglang (or brew install zig) && cargo install cargo-zigbuild --locked
+#   rustup target add x86_64-unknown-linux-musl && cargo zigbuild --release --locked \
+#     --target x86_64-unknown-linux-musl -p scn -p scion-server -p scion-ingest -p scion-mcp
 cargo test --workspace                     # includes 200 seeds of scion-sim
 SCION_SIM_SEED=42 cargo test -p scion-sim --test seeds   # replay one simulation seed
 cargo test -p scion-sim --test corpus      # replay the fuzz corpus on stable
