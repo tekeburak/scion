@@ -46,8 +46,15 @@ through `scn login`, admins manage roles with `scn access`, and a hermetic simul
 fuzz targets check the server. But nothing is released yet: every binary reports one version
 (`--version`, Phase 9.1) and a `v*` tag builds static `x86_64` and `aarch64` Linux binaries
 into a draft release (Phase 9.2) along with macOS `scn` (9.3) and the server image
-`ghcr.io/tekeburak/scion-server` (9.5), but no tag has been pushed, and there is no hosted
-instance (Phase 9) or cache tier (Phase 4) yet.
+`ghcr.io/tekeburak/scion-server` (9.5), and `scripts/install.sh` (9.4) installs the binaries
+for the machine after checking them against the release's `SHA256SUMS`; but no tag has been
+pushed, and there is no hosted instance (Phase 9) or cache tier (Phase 4) yet. Running your
+own server is possible: `scn` reaches `https://` servers, checked against the public
+certificate authorities plus any in `SSL_CERT_FILE` (9.6), and `deploy/compose.prod.yml` runs
+the server image, Postgres and Caddy terminating TLS on one address with a Let's Encrypt
+certificate (9.7); the README's "Run your own server" section has the commands. Every write
+path (gRPC, `/api/v1` and the MCP tools) refuses an anonymous write and a blob over the
+64 MiB per-blob limit with an error that names it (9.8).
 The web interface and the agent API are in (Phase 11): `scion-server --web <addr>` (on
 `127.0.0.1:8080` in the compose stack) serves server-rendered pages for files, log, blame,
 changesets and change requests under the same roles and directory grants as `scn`; writers
@@ -151,9 +158,10 @@ the roadmap step that closes it:
 
 ## Why Postgres and S3?
 
-They are the two pieces most teams already run and know how to operate. Postgres holds small,
-mutable-by-CAS metadata (changesets, refs, derived-data pointers); the object store holds the
-bulk immutable bytes (blobs, trees, snapshot manifests). Neither needs repository maintenance,
+They are the two pieces most teams already run and know how to operate. Postgres holds the
+metadata: changesets, refs (moved by compare-and-swap), grants, change requests, derived-data
+pointers, and the immutable trees and history pages (since Phase 10.3); the object store holds
+the bulk immutable bytes, the blobs. Neither needs repository maintenance,
 and both have managed, horizontally scalable equivalents (the store is plain SQL so that
 CockroachDB stays a drop-in target, though CI does not test it yet; any S3-compatible service works for objects).
 
@@ -163,7 +171,7 @@ CockroachDB stays a drop-in target, though CI does not test it yet; any S3-compa
   always-online clients and an agent-driven commit rate.
 - Offline work: clients are assumed to be online (non-goal).
 - Windows clients (non-goal for now).
-- Large binary files: there is a per-blob size limit and no chunking (non-goal).
+- Large binary files: there is a 64 MiB per-blob limit and no chunking (non-goal).
 - Workflows built on many long-lived branches or forks: there are no server branches.
 - Reclaiming storage: objects are append-only and garbage collection is a non-goal.
 - Code review beyond change requests: the web interface shows change requests with their
