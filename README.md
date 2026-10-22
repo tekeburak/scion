@@ -411,13 +411,13 @@ Read these numbers with their limits:
 
 - **Import** writes one immutable object per blob, tree and history page to a remote object
   store, where git writes a local packfile; parity with git's push is not a goal. The figure to
-  quote is the cold row, 10.4× git: into an empty bucket the object store's write rate is the
-  bound. Warm, with the objects already stored, it is 4.3× git.
+  quote is the cold row, 9.0× git: into an empty bucket the object store's write rate is the
+  bound. Warm, with the objects already stored, it is 1.9× git.
 - **Cold `log` and `blame`**, the first call after import with nothing cached on the server,
-  take 5.8× and 3.9× git. Warm, `blame` is 0.21× git and a path log 1.2×.
+  take 5.6× and 3.8× git. Warm, `blame` is 0.20× git and a path log 1.0×.
 - **A single commit + land** goes through a change request and the serial land worker, so on
-  its own it takes 1.3× git's local commit and push. The worker pays off under contention: 16
-  writers landing at once finish in 0.13× git's time, because no writer repeats another's
+  its own it takes 1.0× git's local commit and push. The worker pays off under contention: 16
+  writers landing at once finish in 0.12× git's time, because no writer repeats another's
   fetch, rebase and push.
 - One machine, three runs, shared cloud VM: medians move by several milliseconds between
   runs. The CSV with every sample is [docs/bench-real.csv](docs/bench-real.csv); render it with
