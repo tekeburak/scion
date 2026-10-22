@@ -9,10 +9,11 @@ use scion_proto::v1::login_service_client::LoginServiceClient;
 use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_proto::v1::{
     BlameRequest, CreateChangesetRequest, DiffRequest, FindLandingRequest, FinishLoginRequest,
-    GetBlobRequest, GetChangeRequestRequest, GetRefRequest, GetTreeRequest, GrantRequest,
-    InitRepoRequest, ListChangeRequestsRequest, ListGrantsRequest, LogRequest, LogResponse,
-    MergeBaseRequest, MergeRequest, MoveRefRequest, PathLogRequest, PutBlobRequest, RebaseRequest,
-    RevertRequest, RevokeRequest, StartLoginRequest, SubmitChangeRequestRequest, WhoAmIRequest,
+    GetBlobRequest, GetChangeRequestRequest, GetObjectsRequest, GetRefRequest, GetTreeRequest,
+    GrantRequest, HasBlobsRequest, InitRepoRequest, ListChangeRequestsRequest, ListGrantsRequest,
+    LogRequest, LogResponse, MergeBaseRequest, MergeRequest, MoveRefRequest, PathLogRequest,
+    PutBlobRequest, PutBlobsRequest, RebaseRequest, RevertRequest, RevokeRequest,
+    StartLoginRequest, SubmitChangeRequestRequest, WhoAmIRequest, object,
 };
 use scion_types::{
     BlobId, Changeset, ChangesetId, Decode, Encode, FileType, Identity, RepoPath, Timestamp, Tree,
@@ -52,6 +53,13 @@ pub enum RemoteError {
     Token(String, #[source] std::io::Error),
     #[error("the token for {0} (from {1}) is not a token")]
     BadToken(String, String),
+}
+
+/// One object of a [`Remote::get_objects`] reply.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Fetched {
+    Tree(TreeId, Tree),
+    Blob(BlobId, Vec<u8>),
 }
 
 /// A ref as the server reports it.
@@ -493,6 +501,78 @@ impl Remote {
             .await?
             .into_inner()
             .data)
+    }
+
+    /// Fetch `trees`, `subtrees` with every tree beneath them, and `blobs`
+    /// of `repo` in one call, at most [`scion_proto::MAX_IDS`] ids in all.
+    /// Objects arrive in no particular order, except that a tree beneath
+    /// one of `subtrees` comes after its parent.
+    pub async fn get_objects(
+        &mut self,
+        repo: &str,
+        trees: &[TreeId],
+        subtrees: &[TreeId],
+        blobs: &[BlobId],
+    ) -> Result<impl futures_util::Stream<Item = Result<Fetched, RemoteError>>, RemoteError> {
+        use futures_util::StreamExt;
+        let raw = |ids: &[TreeId]| ids.iter().map(|id| id.as_bytes().to_vec()).collect();
+        let resp = self
+            .objects
+            .get_objects(GetObjectsRequest {
+                repo: repo.to_owned(),
+                trees: raw(trees),
+                subtrees: raw(subtrees),
+                blobs: blobs.iter().map(|id| id.as_bytes().to_vec()).collect(),
+            })
+            .await?
+            .into_inner();
+        Ok(resp.map(|o| {
+            let o = o?;
+            match o.object {
+                Some(object::Object::Tree(bytes)) => Ok(Fetched::Tree(
+                    TreeId::try_from_slice(&o.id).map_err(|_| RemoteError::Malformed("tree id"))?,
+                    Tree::decode(&bytes).map_err(|_| RemoteError::Malformed("tree"))?,
+                )),
+                Some(object::Object::Blob(data)) => Ok(Fetched::Blob(
+                    BlobId::try_from_slice(&o.id).map_err(|_| RemoteError::Malformed("blob id"))?,
+                    data,
+                )),
+                None => Err(RemoteError::Malformed("object")),
+            }
+        }))
+    }
+
+    /// Whether each of `ids` is stored, at most [`scion_proto::MAX_IDS`].
+    pub async fn has_blobs(
+        &mut self,
+        repo: &str,
+        ids: &[BlobId],
+    ) -> Result<Vec<bool>, RemoteError> {
+        let present = self
+            .objects
+            .has_blobs(HasBlobsRequest {
+                repo: repo.to_owned(),
+                ids: ids.iter().map(|id| id.as_bytes().to_vec()).collect(),
+            })
+            .await?
+            .into_inner()
+            .present;
+        if present.len() != ids.len() {
+            return Err(RemoteError::Malformed("blob presence"));
+        }
+        Ok(present)
+    }
+
+    /// Upload `blobs` for `repo` in one call.
+    pub async fn put_blobs(&mut self, repo: &str, blobs: Vec<Vec<u8>>) -> Result<(), RemoteError> {
+        let repo = repo.to_owned();
+        let messages =
+            futures_util::stream::iter(blobs.into_iter().map(move |data| PutBlobsRequest {
+                repo: repo.clone(),
+                data,
+            }));
+        self.objects.put_blobs(messages).await?;
+        Ok(())
     }
 
     /// First-parent history of `head`, newest first, at most `limit` long.

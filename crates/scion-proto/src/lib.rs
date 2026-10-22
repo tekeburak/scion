@@ -14,6 +14,9 @@
 
 pub mod trace;
 
+/// Most object ids one `GetObjects` or `HasBlobs` request may name.
+pub const MAX_IDS: usize = 256;
+
 /// Version 1 of the protocol, generated from `proto/scion/v1/scion.proto`.
 #[allow(
     missing_debug_implementations,

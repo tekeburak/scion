@@ -412,25 +412,25 @@ from the first start to the last finish, and the p50 and p99 of the writers' own
 <!-- bench-real:start (scripts/render-assets.py writes this table) -->
 | Workload | git, ms | scion, ms | scion / git |
 | --- | ---: | ---: | ---: |
-| import, cold | 1,368 | 12,273 | 9.0× |
-| import, warm | 1,474 | 2,728 | 1.9× |
-| clone | 1,893 | 1,201 | 0.63× |
-| sparse clone | 606 | 123 | 0.20× |
-| status | 153 | 9 | 0.06× |
-| path log, cold | 24 | 135 | 5.6× |
-| path log, warm | 23 | 23 | 1.0× |
-| blame, cold | 56 | 213 | 3.8× |
-| blame, warm | 59 | 12 | 0.20× |
-| path log, server warm, client cold | 25 | 24 | 0.96× |
-| blame, server warm, client cold | 58 | 14 | 0.24× |
-| commit + land | 45 | 47 | 1.0× |
-| land, 16 writers at once | 3,314 | 405 | 0.12× |
-| land, 16 writers: p50 per land | 2,218 | 279 | 0.13× |
-| land, 16 writers: p99 per land | 3,284 | 396 | 0.12× |
+| import, cold | 1,451 | 12,619 | 8.7× |
+| import, warm | 1,385 | 2,624 | 1.9× |
+| clone | 1,881 | 877 | 0.47× |
+| sparse clone | 622 | 92 | 0.15× |
+| status | 176 | 8 | 0.05× |
+| path log, cold | 23 | 157 | 6.8× |
+| path log, warm | 22 | 23 | 1.0× |
+| blame, cold | 59 | 214 | 3.6× |
+| blame, warm | 52 | 10 | 0.19× |
+| path log, server warm, client cold | 24 | 22 | 0.92× |
+| blame, server warm, client cold | 53 | 10 | 0.19× |
+| commit + land | 36 | 59 | 1.6× |
+| land, 16 writers at once | 3,388 | 442 | 0.13× |
+| land, 16 writers: p50 per land | 2,385 | 313 | 0.13× |
+| land, 16 writers: p99 per land | 3,379 | 424 | 0.13× |
 
 Repository: library/ of the public repository pinned in scripts/bench-real, first-parent commits since 2026-01-01 up to 91e9c2688eb23af9a5b77f056156e756550c7c99 (600 commits, 2330 files at the tip).  
 Machine: Linux 6.18.44-fc-v140 x86_64; Intel(R) Xeon(R) Processor @ 2.10GHz; 4 cpus; 15 GiB.  
-Run: git version 2.43.0; scion 34cbc1e; 3 runs; 2026-10-22T06:41:34Z.  
+Run: git version 2.43.0; scion b2d1b6d; 3 runs; 2026-10-22T10:51:06Z.  
 Other implementations of the design: not measured in this run.
 <!-- bench-real:end -->
 

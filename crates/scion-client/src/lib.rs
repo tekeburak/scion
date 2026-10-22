@@ -36,7 +36,7 @@ pub use checkout::{CheckoutError, MAIN_REF, checkout, clone};
 pub use commit::{CommitError, commit};
 pub use index::{Index, IndexEntry};
 pub use remote::{
-    AccessGrant, Bearer, BlameRun, ChangeRequestStatus, DiffEntry, FileEntry, LoginPoll,
+    AccessGrant, Bearer, BlameRun, ChangeRequestStatus, DiffEntry, Fetched, FileEntry, LoginPoll,
     LoginStart, Merged, RPC_DEADLINE, Rebased, Remote, RemoteChangeRequest, RemoteError, RemoteRef,
     RequestStatus, Reverted, WhoAmI, save_token, token_path,
 };

@@ -17,10 +17,11 @@ use scion_proto::v1::control_service_client::ControlServiceClient;
 use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_proto::v1::{
     BlameRequest, CreateChangesetRequest, DiffRequest, FindLandingRequest, GetBlobRequest,
-    GetChangeRequestRequest, GetRefRequest, GetTreeRequest, GrantRequest, InitRepoRequest,
-    ListChangeRequestsRequest, ListGrantsRequest, LogRequest, MergeBaseRequest, MergeRequest,
-    MoveRefRequest, PathLogRequest, PutBlobRequest, PutTreeRequest, RebaseRequest, RevertRequest,
-    RevokeRequest, SubmitChangeRequestRequest, WhoAmIRequest,
+    GetChangeRequestRequest, GetObjectsRequest, GetRefRequest, GetTreeRequest, GrantRequest,
+    HasBlobsRequest, InitRepoRequest, ListChangeRequestsRequest, ListGrantsRequest, LogRequest,
+    MergeBaseRequest, MergeRequest, MoveRefRequest, PathLogRequest, PutBlobRequest,
+    PutBlobsRequest, PutTreeRequest, RebaseRequest, RevertRequest, RevokeRequest,
+    SubmitChangeRequestRequest, WhoAmIRequest,
 };
 use scion_store::{MemoryStore, MetadataStore, Role, SERVER_GRANTS};
 use scion_types::{Encode, Tree};
@@ -40,6 +41,9 @@ const RPCS: &[(&str, Need)] = &[
     ("GetBlob", Need::Repo(Role::Reader)),
     ("PutBlob", Need::Repo(Role::Reader)),
     ("PutTree", Need::Repo(Role::Reader)),
+    ("GetObjects", Need::Repo(Role::Reader)),
+    ("HasBlobs", Need::Repo(Role::Reader)),
+    ("PutBlobs", Need::Repo(Role::Reader)),
     ("InitRepo", Need::ServerAdmin),
     ("GetRef", Need::Repo(Role::Reader)),
     ("CreateChangeset", Need::Repo(Role::Writer)),
@@ -98,6 +102,27 @@ async fn call(channel: &Channel, rpc: &str, bearer: Bearer, n: usize) -> Code {
                 tree: Tree::empty().encode_to_vec(),
                 repo: repo(),
             })
+            .await
+            .map(drop),
+        "GetObjects" => objects
+            .get_objects(GetObjectsRequest {
+                repo: repo(),
+                ..GetObjectsRequest::default()
+            })
+            .await
+            .map(drop),
+        "HasBlobs" => objects
+            .has_blobs(HasBlobsRequest {
+                repo: repo(),
+                ids: vec![id.clone()],
+            })
+            .await
+            .map(drop),
+        "PutBlobs" => objects
+            .put_blobs(futures_util::stream::iter([PutBlobsRequest {
+                repo: repo(),
+                data: b"x".to_vec(),
+            }]))
             .await
             .map(drop),
         "InitRepo" => control
@@ -312,6 +337,8 @@ async fn every_rpc_as_each_role() {
                 "InitRepo",
                 "PutBlob",
                 "PutTree",
+                "HasBlobs",
+                "PutBlobs",
                 "CreateChangeset",
                 "Grant",
                 "ListGrants",

@@ -79,7 +79,7 @@ async fn every_rpc_needs_a_valid_token() {
     let (login, rpcs): (Vec<_>, Vec<_>) = every_rpc()
         .into_iter()
         .partition(|rpc| rpc.starts_with("/scion.v1.LoginService/"));
-    assert_eq!(rpcs.len(), 24, "{rpcs:?}");
+    assert_eq!(rpcs.len(), 27, "{rpcs:?}");
     assert_eq!(login.len(), 2, "{login:?}");
     // Login is how a token is got; this server has no GitHub login.
     for rpc in &login {

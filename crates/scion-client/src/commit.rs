@@ -2,18 +2,20 @@
 //!
 //! The new changeset records the working copy's changes relative to its
 //! current head (the first and only parent): modified and added files are
-//! uploaded as blobs, files gone from disk are deleted. It becomes the
+//! uploaded as blobs, only those the server does not already have, and files
+//! gone from disk are deleted. It becomes the
 //! working copy's new anonymous head; no server ref moves.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::io;
 use std::path::PathBuf;
 
 use futures_util::{StreamExt, TryStreamExt, stream};
+use scion_proto::MAX_IDS;
 use scion_proto::trace::{span, timed};
-use scion_types::{Changeset, ChangesetId, FileChange, Identity, RepoPath, Timestamp};
+use scion_types::{BlobId, Changeset, ChangesetId, FileChange, Identity, RepoPath, Timestamp};
 
-use crate::checkout::{FETCH_CONCURRENCY, mtime_ns};
+use crate::checkout::{BATCHES_IN_FLIGHT, mtime_ns};
 use crate::index::IndexEntry;
 use crate::remote::{Remote, RemoteError};
 use crate::status::{FileStatus, StatusError, read_working_file, status};
@@ -62,27 +64,55 @@ fn has_markers(path: &std::path::Path) -> bool {
     })
 }
 
-/// Read the file at `path`, upload it, and return its new index entry. The
-/// metadata is taken before the read, so an edit racing the commit leaves a
-/// stale mtime and is rehashed by the next `status`.
+/// Read the files at `paths`, upload the blobs the server does not have yet,
+/// and return their new index entries: one `HasBlobs` and at most one
+/// `PutBlobs`, so at most [`MAX_IDS`] paths. Each file's metadata is taken
+/// before its read, so an edit racing the commit leaves a stale mtime and is
+/// rehashed by the next `status`.
 async fn upload(
     ws: &Workspace,
     remote: &Remote,
     repo: &str,
-    path: &RepoPath,
-) -> Result<IndexEntry, CommitError> {
-    let file = ws.root().join(path.as_str());
-    let io_err = |e| CommitError::Io(file.clone(), e);
-    let meta = std::fs::symlink_metadata(&file).map_err(io_err)?;
-    let (kind, data) = read_working_file(&file).map_err(io_err)?;
-    let size = data.len() as u64;
-    let id = remote.clone().put_blob(repo, data).await?;
-    Ok(IndexEntry {
-        id,
-        kind,
-        size,
-        mtime_ns: mtime_ns(&meta),
-    })
+    paths: &[RepoPath],
+) -> Result<Vec<(RepoPath, IndexEntry)>, CommitError> {
+    let mut read = Vec::with_capacity(paths.len());
+    for path in paths {
+        let file = ws.root().join(path.as_str());
+        let io_err = |e| CommitError::Io(file.clone(), e);
+        let meta = std::fs::symlink_metadata(&file).map_err(io_err)?;
+        let (kind, data) = read_working_file(&file).map_err(io_err)?;
+        let entry = IndexEntry {
+            id: BlobId::hash(&data),
+            kind,
+            size: data.len() as u64,
+            mtime_ns: mtime_ns(&meta),
+        };
+        read.push((path.clone(), entry, data));
+    }
+    let ids: Vec<BlobId> = read
+        .iter()
+        .map(|(_, e, _)| e.id)
+        .collect::<HashSet<_>>()
+        .into_iter()
+        .collect();
+    let present = remote.clone().has_blobs(repo, &ids).await?;
+    let mut missing: HashSet<BlobId> = ids
+        .into_iter()
+        .zip(present)
+        .filter_map(|(id, present)| (!present).then_some(id))
+        .collect();
+    let mut blobs = Vec::new();
+    let mut entries = Vec::with_capacity(read.len());
+    for (path, entry, data) in read {
+        if missing.remove(&entry.id) {
+            blobs.push(data);
+        }
+        entries.push((path, entry));
+    }
+    if !blobs.is_empty() {
+        remote.clone().put_blobs(repo, blobs).await?;
+    }
+    Ok(entries)
 }
 
 /// Commit every modified, added and deleted file in `ws` as a child of its
@@ -124,14 +154,14 @@ pub async fn commit(
     }
 
     let repo = config.repo.as_str();
-    let uploaded: Vec<(RepoPath, IndexEntry)> =
-        stream::iter(upload_paths.into_iter().map(|path| async move {
-            let entry = upload(ws, remote, repo, &path).await?;
-            Ok::<_, CommitError>((path, entry))
-        }))
-        .buffer_unordered(FETCH_CONCURRENCY)
-        .try_collect()
-        .await?;
+    let uploaded: Vec<(RepoPath, IndexEntry)> = stream::iter(
+        upload_paths
+            .chunks(MAX_IDS)
+            .map(|paths| upload(ws, remote, repo, paths)),
+    )
+    .buffer_unordered(BATCHES_IN_FLIGHT)
+    .try_concat()
+    .await?;
     drop(put);
 
     let mut file_changes = BTreeMap::new();

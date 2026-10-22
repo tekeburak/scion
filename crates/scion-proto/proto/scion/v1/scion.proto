@@ -23,6 +23,9 @@ service ObjectService {
   rpc GetBlob(GetBlobRequest) returns (GetBlobResponse);
   rpc PutBlob(PutBlobRequest) returns (PutBlobResponse);
   rpc PutTree(PutTreeRequest) returns (PutTreeResponse);
+  rpc GetObjects(GetObjectsRequest) returns (stream Object);
+  rpc HasBlobs(HasBlobsRequest) returns (HasBlobsResponse);
+  rpc PutBlobs(stream PutBlobsRequest) returns (PutBlobsResponse);
 }
 
 message GetTreeRequest {
@@ -63,6 +66,51 @@ message PutTreeRequest {
 message PutTreeResponse {
   bytes id = 1;
 }
+
+// Many objects in one call. At most 256 ids in all (INVALID_ARGUMENT
+// otherwise); every requested object must exist (NOT_FOUND otherwise, which
+// ends the stream).
+message GetObjectsRequest {
+  string repo = 1;
+  // Each of these trees.
+  repeated bytes trees = 2;
+  // Each of these trees and every tree beneath it, a parent before its
+  // children, each id once.
+  repeated bytes subtrees = 3;
+  repeated bytes blobs = 4;
+}
+
+// One object of a GetObjects reply, in no particular order except as
+// `subtrees` says.
+message Object {
+  bytes id = 1;
+  oneof object {
+    // Canonical encoding (`SCTR`); blake3 of these bytes is `id`.
+    bytes tree = 2;
+    // Raw file bytes; blake3 of these bytes is `id`.
+    bytes blob = 3;
+  }
+}
+
+// At most 256 ids (INVALID_ARGUMENT otherwise).
+message HasBlobsRequest {
+  string repo = 1;
+  repeated bytes ids = 2;
+}
+
+message HasBlobsResponse {
+  // Whether each requested blob is stored, in request order.
+  repeated bool present = 1;
+}
+
+// One blob per message; every message names the same repository.
+message PutBlobsRequest {
+  string repo = 1;
+  // Raw file bytes.
+  bytes data = 2;
+}
+
+message PutBlobsResponse {}
 
 // ---------------------------------------------------------------------------
 // Control plane: served only by scion-server. Every request names its

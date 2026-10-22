@@ -3,12 +3,13 @@
 use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_proto::v1::object_service_server::{ObjectService, ObjectServiceServer};
 use scion_proto::v1::{
-    GetBlobRequest, GetBlobResponse, GetTreeRequest, GetTreeResponse, PutBlobRequest,
-    PutBlobResponse, PutTreeRequest, PutTreeResponse,
+    GetBlobRequest, GetBlobResponse, GetObjectsRequest, GetTreeRequest, GetTreeResponse,
+    HasBlobsRequest, HasBlobsResponse, Object, PutBlobRequest, PutBlobResponse, PutBlobsRequest,
+    PutBlobsResponse, PutTreeRequest, PutTreeResponse,
 };
 use tokio::net::TcpListener;
 use tokio_stream::wrappers::TcpListenerStream;
-use tonic::{Request, Response, Status};
+use tonic::{Request, Response, Status, Streaming};
 
 /// Echoes blob bytes back as their "id"; enough to see bytes cross the wire.
 #[derive(Debug)]
@@ -45,6 +46,29 @@ impl ObjectService for Echo {
         &self,
         _: Request<PutTreeRequest>,
     ) -> Result<Response<PutTreeResponse>, Status> {
+        Err(Status::unimplemented("read-only"))
+    }
+
+    type GetObjectsStream = tokio_stream::Empty<Result<Object, Status>>;
+
+    async fn get_objects(
+        &self,
+        _: Request<GetObjectsRequest>,
+    ) -> Result<Response<Self::GetObjectsStream>, Status> {
+        Ok(Response::new(tokio_stream::empty()))
+    }
+
+    async fn has_blobs(
+        &self,
+        _: Request<HasBlobsRequest>,
+    ) -> Result<Response<HasBlobsResponse>, Status> {
+        Err(Status::unimplemented("read-only"))
+    }
+
+    async fn put_blobs(
+        &self,
+        _: Request<Streaming<PutBlobsRequest>>,
+    ) -> Result<Response<PutBlobsResponse>, Status> {
         Err(Status::unimplemented("read-only"))
     }
 }
