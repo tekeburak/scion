@@ -147,6 +147,44 @@ async fn memoized<V: Clone + Send + Sync + 'static>(
     Ok(value)
 }
 
+/// Rows of `changesets.canonical` one blocking task decodes: a larger read
+/// decodes on several cores at once, so a 1,000-result log does not decode
+/// on one.
+const DECODE_CHUNK: usize = 64;
+
+/// Decode `rows` of `changesets.canonical`, with each row's id and length.
+async fn decode_changesets(rows: Vec<Vec<u8>>) -> Result<Vec<(ChangesetId, Changeset, usize)>> {
+    fn decode(rows: Vec<Vec<u8>>) -> Result<Vec<(ChangesetId, Changeset, usize)>> {
+        rows.into_iter()
+            .map(|canonical| {
+                let cs = Changeset::decode(&canonical)
+                    .map_err(|e| StoreError::Corrupt(format!("changeset: {e}")))?;
+                // A value has exactly one canonical encoding, so the stored
+                // bytes hash to the id without encoding them again.
+                Ok((ChangesetId::hash(&canonical), cs, canonical.len()))
+            })
+            .collect()
+    }
+    if rows.len() <= DECODE_CHUNK {
+        return decode(rows);
+    }
+    let mut rows = rows.into_iter().peekable();
+    let mut chunks = Vec::new();
+    while rows.peek().is_some() {
+        let chunk: Vec<_> = rows.by_ref().take(DECODE_CHUNK).collect();
+        chunks.push(tokio::task::spawn_blocking(move || decode(chunk)));
+    }
+    let mut out = Vec::new();
+    for chunk in chunks {
+        out.extend(
+            chunk
+                .await
+                .unwrap_or_else(|e| std::panic::resume_unwind(e.into_panic()))?,
+        );
+    }
+    Ok(out)
+}
+
 impl From<sqlx::Error> for StoreError {
     fn from(e: sqlx::Error) -> Self {
         StoreError::Backend(Box::new(e))
@@ -856,14 +894,9 @@ impl MetadataStore for PostgresStore {
         .fetch_all(&self.pool)
         .await?;
         let mut found = HashMap::new();
-        for (canonical,) in rows {
-            let cs = Changeset::decode(&canonical)
-                .map_err(|e| StoreError::Corrupt(format!("changeset: {e}")))?;
-            // A value has exactly one canonical encoding, so the stored bytes
-            // hash to the id without encoding them again.
-            let id = ChangesetId::hash(&canonical);
+        for (id, cs, len) in decode_changesets(rows.into_iter().map(|(c,)| c).collect()).await? {
             self.changesets
-                .insert((repo.to_owned(), id), cs.clone(), canonical.len());
+                .insert((repo.to_owned(), id), cs.clone(), len);
             found.insert(id, cs);
         }
         for (slot, id) in out.iter_mut().zip(ids) {

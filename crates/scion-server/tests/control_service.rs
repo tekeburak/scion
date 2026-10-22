@@ -9,7 +9,7 @@ use std::sync::atomic::Ordering;
 
 use bytes::Bytes;
 use scion_derived::test_util::{CountingMeta, REPO, changeset, tracked};
-use scion_derived::{Deriver, PathHistory};
+use scion_derived::{Blame, Deriver, PathHistory};
 use scion_proto::v1::{
     BlameRequest, BlameRun, DiffRequest, GetRefRequest, LogRequest, MergeBaseRequest,
     PathLogRequest,
@@ -253,6 +253,63 @@ async fn blame_attributes_each_line() {
             .unwrap_err();
         assert_eq!(err.code(), Code::NotFound, "{missing}");
     }
+}
+
+/// Phase 10.7: a cold `Blame` replies from the file's own versions; the
+/// node of the changeset that last changed it, which holds every file that
+/// changeset changed, is stored after the reply and holds the same runs.
+#[tokio::test]
+async fn cold_blame_replies_before_its_node_is_stored() {
+    let store = Arc::new(MemoryStore::with_repo(REPO));
+    let root = commit(&store, vec![], &[("a.txt", b"1\n"), ("b.txt", b"0\n")], "0").await;
+    let mut head = root;
+    let mut busy = String::from("0\n");
+    for i in 1..40 {
+        busy += &(i.to_string() + "\n");
+        head = commit(&store, vec![head], &[("b.txt", busy.as_bytes())], "busy").await;
+    }
+    let both = commit(
+        &store,
+        vec![head],
+        &[("a.txt", b"1\n2\n"), ("b.txt", b"b\n")],
+        "both",
+    )
+    .await;
+    let shared: &'static MemoryStore = Box::leak(Box::new(store.clone()));
+    let d = Deriver::new(REPO, shared, shared);
+    d.derive::<PathHistory>(both).await.unwrap();
+
+    let mut client = common::control(common::serve(store.clone(), store.clone()).await);
+    let blame = BlameRequest {
+        repo: REPO.into(),
+        changeset: bytes(both),
+        path: "a.txt".into(),
+    };
+    let runs = client.blame(blame.clone()).await.unwrap().into_inner().runs;
+    let run = |cs, lines| BlameRun {
+        changeset: bytes(cs),
+        lines,
+    };
+    assert_eq!(runs, vec![run(root, 1), run(both, 1)]);
+
+    let mut stored = None;
+    for _ in 0..500 {
+        stored = d.fetch::<Blame>(both).await.unwrap();
+        if stored.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert!(stored.is_some(), "the node is stored after the reply");
+    assert_eq!(
+        Blame::stored_file(&d, both, &path("a.txt"))
+            .await
+            .unwrap()
+            .unwrap()
+            .runs,
+        vec![(root, 1), (both, 1)]
+    );
+    assert_eq!(client.blame(blame).await.unwrap().into_inner().runs, runs);
 }
 
 #[tokio::test]
