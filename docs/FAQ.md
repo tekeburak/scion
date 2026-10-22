@@ -67,8 +67,8 @@ has screenshots.
 The MVP (Phase 3) is done: `scion-server` serves the object and control gRPC services over
 Postgres + S3. `scn` can `init` a repository, `clone --sparse`, `status`, `log`, `diff`,
 `blame`, `add`, `commit` (an anonymous head; `--land` also lands it), `land` (a change
-request the server rebases onto `main` and lands), `update` (the server rebases the head onto `main`) and `checkout`
-any changeset. The README [Getting started](../README.md#getting-started) section runs that
+request the server rebases onto `main` and lands), `update` (the server rebases the head onto
+`main`) and `checkout` any changeset. The README [Getting started](../README.md#getting-started) section runs that
 loop on the compose stack with only Docker and the Rust toolchain installed. Change requests
 are done (Phase 5): `scn land` submits one (`SubmitChangeRequest`) and waits while the
 serial land worker of the repository rebases and lands it, so concurrent heads land from the
