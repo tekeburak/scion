@@ -16,10 +16,10 @@ use scion_derived::test_util::{REPO, changeset};
 use scion_proto::v1::control_service_client::ControlServiceClient;
 use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_proto::v1::{
-    BlameRequest, CreateChangesetRequest, DiffRequest, FindLandingRequest, GetBlobRequest,
-    GetChangeRequestRequest, GetObjectsRequest, GetRefRequest, GetTreeRequest, GrantRequest,
-    HasBlobsRequest, InitRepoRequest, ListChangeRequestsRequest, ListGrantsRequest, LogRequest,
-    MergeBaseRequest, MergeRequest, MoveRefRequest, PathLogRequest, PutBlobRequest,
+    BlameRequest, CommitAndLandRequest, CreateChangesetRequest, DiffRequest, FindLandingRequest,
+    GetBlobRequest, GetChangeRequestRequest, GetObjectsRequest, GetRefRequest, GetTreeRequest,
+    GrantRequest, HasBlobsRequest, InitRepoRequest, ListChangeRequestsRequest, ListGrantsRequest,
+    LogRequest, MergeBaseRequest, MergeRequest, MoveRefRequest, PathLogRequest, PutBlobRequest,
     PutBlobsRequest, PutTreeRequest, RebaseRequest, RevertRequest, RevokeRequest,
     SubmitChangeRequestRequest, WhoAmIRequest,
 };
@@ -57,6 +57,7 @@ const RPCS: &[(&str, Need)] = &[
     ("Revert", Need::Repo(Role::Writer)),
     ("Blame", Need::Repo(Role::Reader)),
     ("SubmitChangeRequest", Need::Repo(Role::Writer)),
+    ("CommitAndLand", Need::Repo(Role::Writer)),
     ("GetChangeRequest", Need::Repo(Role::Reader)),
     ("ListChangeRequests", Need::Repo(Role::Reader)),
     ("FindLanding", Need::Repo(Role::Reader)),
@@ -225,6 +226,12 @@ async fn call(channel: &Channel, rpc: &str, bearer: Bearer, n: usize) -> Code {
                 repo: repo(),
                 head: id.clone(),
                 wait: false,
+            })
+            .await
+            .map(drop),
+        "CommitAndLand" => control
+            .commit_and_land(CommitAndLandRequest {
+                changeset: child.encode_to_vec(),
             })
             .await
             .map(drop),

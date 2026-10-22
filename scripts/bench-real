@@ -51,12 +51,12 @@
 #                outside the timer, so the server has served them before but
 #                this client has not; git runs them in its full clone again
 #   land         edit one file, commit it and publish it: git commit -a + push;
-#                scn commit + land
+#                scn commit --land (one CommitAndLand round trip)
 #   land 16 writers
 #                WRITERS clones (made outside the timer) each edit a different
 #                file, then all commit and publish at once: git commit -a, then
 #                push, and on a rejected push pull --rebase and push again;
-#                scn commit + land. Recorded per run as the total (first start
+#                scn commit --land. Recorded per run as the total (first start
 #                to last finish) and the p50 and p99 of the writers' own times
 #                (`land 16 writers`, `... p50`, `... p99`); git and scion only.
 #
@@ -561,7 +561,7 @@ for run in $(seq 1 "$RUNS"); do
     echo "// bench-real run $run" >>"$dir/scn-sparse/$EDIT_FILE"
     time_it land git "$run" sh -c "git -C '$dir/git-full' commit -q -a -m 'bench edit' &&
         git -C '$dir/git-full' push -q origin HEAD:main"
-    time_it land scion "$run" sh -c "cd '$dir/scn-sparse' && '$BIN/scn' commit -m 'bench edit' && '$BIN/scn' land"
+    time_it land scion "$run" sh -c "cd '$dir/scn-sparse' && '$BIN/scn' commit --land -m 'bench edit'"
 
     # Each writer appends to its own file, so no edit overlaps another; the
     # clones start from the main both tools now have.
@@ -579,7 +579,7 @@ for run in $(seq 1 "$RUNS"); do
         done
         exit 1"
     time_writers "land 16 writers" scion "$run" "cd '$dir/scn-w'\$1 &&
-        '$BIN/scn' commit -m 'bench writer' && '$BIN/scn' land"
+        '$BIN/scn' commit --land -m 'bench writer'"
 
     kill "$server_pid" 2>/dev/null || true
     wait "$server_pid" 2>/dev/null || true

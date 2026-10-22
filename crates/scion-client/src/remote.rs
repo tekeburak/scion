@@ -8,11 +8,11 @@ use scion_proto::v1::control_service_client::ControlServiceClient;
 use scion_proto::v1::login_service_client::LoginServiceClient;
 use scion_proto::v1::object_service_client::ObjectServiceClient;
 use scion_proto::v1::{
-    BlameRequest, CreateChangesetRequest, DiffRequest, FindLandingRequest, FinishLoginRequest,
-    GetBlobRequest, GetChangeRequestRequest, GetObjectsRequest, GetRefRequest, GetTreeRequest,
-    GrantRequest, HasBlobsRequest, InitRepoRequest, ListChangeRequestsRequest, ListGrantsRequest,
-    LogRequest, LogResponse, MergeBaseRequest, MergeRequest, MoveRefRequest, PathLogRequest,
-    PutBlobRequest, PutBlobsRequest, RebaseRequest, RevertRequest, RevokeRequest,
+    BlameRequest, CommitAndLandRequest, CreateChangesetRequest, DiffRequest, FindLandingRequest,
+    FinishLoginRequest, GetBlobRequest, GetChangeRequestRequest, GetObjectsRequest, GetRefRequest,
+    GetTreeRequest, GrantRequest, HasBlobsRequest, InitRepoRequest, ListChangeRequestsRequest,
+    ListGrantsRequest, LogRequest, LogResponse, MergeBaseRequest, MergeRequest, MoveRefRequest,
+    PathLogRequest, PutBlobRequest, PutBlobsRequest, RebaseRequest, RevertRequest, RevokeRequest,
     StartLoginRequest, SubmitChangeRequestRequest, WhoAmIRequest, object,
 };
 use scion_types::{
@@ -898,6 +898,24 @@ impl Remote {
                 repo: repo.to_owned(),
                 head: head.as_bytes().to_vec(),
                 wait,
+            })
+            .await?
+            .into_inner();
+        change_request(resp)
+    }
+
+    /// Create `cs` and ask the server to land it on `main`, in one round
+    /// trip; its blobs must be uploaded first. The reply comes as from
+    /// [`submit_change_request`](Self::submit_change_request) with `wait`;
+    /// the request's `head` is `cs`.
+    pub async fn commit_and_land(
+        &mut self,
+        cs: &Changeset,
+    ) -> Result<RemoteChangeRequest, RemoteError> {
+        let resp = self
+            .control
+            .commit_and_land(CommitAndLandRequest {
+                changeset: cs.encode_to_vec(),
             })
             .await?
             .into_inner();

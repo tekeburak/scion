@@ -4,7 +4,8 @@
 //! current head (the first and only parent): modified and added files are
 //! uploaded as blobs, only those the server does not already have, and files
 //! gone from disk are deleted. It becomes the
-//! working copy's new anonymous head; no server ref moves.
+//! working copy's new anonymous head; no server ref moves, unless
+//! [`commit_and_land`] lands it on `main` in the same round trip.
 
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::io;
@@ -16,10 +17,10 @@ use scion_proto::trace::{span, timed};
 use scion_types::{BlobId, Changeset, ChangesetId, FileChange, Identity, RepoPath, Timestamp};
 
 use crate::checkout::{BATCHES_IN_FLIGHT, mtime_ns};
-use crate::index::IndexEntry;
-use crate::remote::{Remote, RemoteError};
+use crate::index::{Index, IndexEntry};
+use crate::remote::{Remote, RemoteChangeRequest, RemoteError};
 use crate::status::{FileStatus, StatusError, read_working_file, status};
-use crate::workspace::{Workspace, WorkspaceError};
+use crate::workspace::{State, Workspace, WorkspaceError};
 
 /// Failure during commit.
 #[derive(Debug, thiserror::Error)]
@@ -126,9 +127,50 @@ pub async fn commit(
     date: Timestamp,
     message: &str,
 ) -> Result<ChangesetId, CommitError> {
+    let pending = prepare(ws, remote, author, date, message).await?;
+    let id = timed("create", remote.clone().create_changeset(&pending.cs)).await?;
+    pending.record(ws, id)?;
+    Ok(id)
+}
+
+/// [`commit`], and ask the server to land the new head on `main` in the same
+/// round trip (`CommitAndLand`). Returns the change request, finished unless
+/// the server's longest wait ran out first; its `head` is the new current
+/// head.
+pub async fn commit_and_land(
+    ws: &Workspace,
+    remote: &Remote,
+    author: Identity,
+    date: Timestamp,
+    message: &str,
+) -> Result<RemoteChangeRequest, CommitError> {
+    let pending = prepare(ws, remote, author, date, message).await?;
+    let cr = timed("land", remote.clone().commit_and_land(&pending.cs)).await?;
+    pending.record(ws, cr.head)?;
+    Ok(cr)
+}
+
+/// A changeset whose blobs are uploaded, and what the working copy records
+/// once it is created.
+struct Pending {
+    cs: Changeset,
+    state: State,
+    index: Index,
+    deleted: Vec<RepoPath>,
+    uploaded: Vec<(RepoPath, IndexEntry)>,
+}
+
+/// Upload what `commit` commits and build its changeset.
+async fn prepare(
+    ws: &Workspace,
+    remote: &Remote,
+    author: Identity,
+    date: Timestamp,
+    message: &str,
+) -> Result<Pending, CommitError> {
     let config = ws.read_config()?;
-    let mut state = ws.read_state()?;
-    let mut index = ws.read_index()?;
+    let state = ws.read_state()?;
+    let index = ws.read_index()?;
     let unresolved: Vec<RepoPath> = ws
         .read_conflicts()?
         .into_iter()
@@ -190,20 +232,31 @@ pub async fn commit(
         file_changes,
         extra: BTreeMap::new(),
     };
-    let id = timed("create", remote.clone().create_changeset(&cs)).await?;
+    Ok(Pending {
+        cs,
+        state,
+        index,
+        deleted,
+        uploaded,
+    })
+}
 
-    // Index before state: if we stop in between, status still compares the
-    // files with what was committed.
-    for path in &deleted {
-        index.entries.remove(path);
+impl Pending {
+    /// Make `id`, the created changeset, the current head.
+    fn record(mut self, ws: &Workspace, id: ChangesetId) -> Result<(), CommitError> {
+        // Index before state: if we stop in between, status still compares
+        // the files with what was committed.
+        for path in &self.deleted {
+            self.index.entries.remove(path);
+        }
+        self.index.entries.extend(self.uploaded);
+        ws.write_index(&self.index)?;
+        self.state.current_head = id;
+        ws.write_state(&self.state)?;
+        ws.write_added(&BTreeSet::new())?;
+        ws.write_conflicts(&BTreeSet::new())?;
+        Ok(())
     }
-    index.entries.extend(uploaded);
-    ws.write_index(&index)?;
-    state.current_head = id;
-    ws.write_state(&state)?;
-    ws.write_added(&BTreeSet::new())?;
-    ws.write_conflicts(&BTreeSet::new())?;
-    Ok(id)
 }
 
 #[cfg(test)]

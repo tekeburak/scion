@@ -1,7 +1,8 @@
 //! `ControlService`: thin wrappers over `scion-core` and `scion-derived`.
 //! Requests come from clients, so ids, paths and limits are validated here.
-//! `CreateChangeset` derives what clone, log and diff need eagerly; anything
-//! else is derived on first request. Each RPC first checks the caller's role
+//! `CreateChangeset` derives what clone, log and diff need eagerly
+//! (`CommitAndLand` the path history just after its reply); anything else is
+//! derived on first request. Each RPC first checks the caller's role
 //! in the repository it names.
 
 use std::sync::Arc;
@@ -14,14 +15,14 @@ use scion_proto::trace::{span, timed};
 use scion_proto::v1::control_service_server::ControlService;
 use scion_proto::v1::{
     BlameRequest, BlameResponse, BlameRun, ChangeRequest, ChangeRequestStatus,
-    CreateChangesetRequest, CreateChangesetResponse, DiffEntry, DiffRequest, DiffResponse,
-    FileEntry, FileType, FindLandingRequest, FindLandingResponse, GetChangeRequestRequest,
-    GetRefRequest, GetRefResponse, GrantRequest, GrantResponse, InitRepoRequest, InitRepoResponse,
-    Landing, ListChangeRequestsRequest, ListChangeRequestsResponse, ListGrantsRequest,
-    ListGrantsResponse, LogRequest, LogResponse, MergeBaseRequest, MergeBaseResponse, MergeRequest,
-    MergeResponse, MoveRefRequest, MoveRefResponse, PathLogRequest, RebaseRequest, RebaseResponse,
-    RevertRequest, RevertResponse, RevokeRequest, RevokeResponse, SubmitChangeRequestRequest,
-    WhoAmIRequest, WhoAmIResponse,
+    CommitAndLandRequest, CreateChangesetRequest, CreateChangesetResponse, DiffEntry, DiffRequest,
+    DiffResponse, FileEntry, FileType, FindLandingRequest, FindLandingResponse,
+    GetChangeRequestRequest, GetRefRequest, GetRefResponse, GrantRequest, GrantResponse,
+    InitRepoRequest, InitRepoResponse, Landing, ListChangeRequestsRequest,
+    ListChangeRequestsResponse, ListGrantsRequest, ListGrantsResponse, LogRequest, LogResponse,
+    MergeBaseRequest, MergeBaseResponse, MergeRequest, MergeResponse, MoveRefRequest,
+    MoveRefResponse, PathLogRequest, RebaseRequest, RebaseResponse, RevertRequest, RevertResponse,
+    RevokeRequest, RevokeResponse, SubmitChangeRequestRequest, WhoAmIRequest, WhoAmIResponse,
 };
 use scion_store::{
     Grant, MetadataStore, ObjectStore, Role, SERVER_GRANTS, StoreError, is_allowed_ref_name,
@@ -202,6 +203,17 @@ pub async fn create_changesets(
     objects: &dyn ObjectStore,
     batch: &[Changeset],
 ) -> Result<Vec<(ChangesetId, TreeId)>, Status> {
+    create(meta, objects, batch, true).await
+}
+
+/// [`create_changesets`], deriving path history too only if `history`:
+/// landing waits on the root tree and the skip list, not on it.
+async fn create(
+    meta: &dyn MetadataStore,
+    objects: &dyn ObjectStore,
+    batch: &[Changeset],
+    history: bool,
+) -> Result<Vec<(ChangesetId, TreeId)>, Status> {
     let _create = span("create");
     let Some(repo) = batch.first().map(|cs| cs.repo.as_str()) else {
         return Ok(Vec::new());
@@ -263,7 +275,9 @@ pub async fn create_changesets(
         for cs in batch {
             let id = cs.id();
             let root = ctx.derive::<RootTree>(id).await.map_err(derive_status)?;
-            ctx.derive::<PathHistory>(id).await.map_err(derive_status)?;
+            if history {
+                ctx.derive::<PathHistory>(id).await.map_err(derive_status)?;
+            }
             created.push((id, root.0));
         }
         drop(derive);
@@ -296,6 +310,23 @@ pub async fn create_changesets(
         .await
         .map_err(store_status)?;
     Ok(created)
+}
+
+/// Derive the path history of `cs`, which is stored, and store it in one
+/// write of its pages and one of its pointer, as [`create_changesets`] does.
+async fn store_history(
+    meta: &dyn MetadataStore,
+    objects: &dyn ObjectStore,
+    cs: &Changeset,
+) -> Result<(), Status> {
+    let batch = std::slice::from_ref(cs);
+    let staged = Staged::new(&cs.repo, meta, objects, batch);
+    Deriver::new(&cs.repo, &staged, &staged)
+        .derive::<PathHistory>(cs.id())
+        .await
+        .map_err(derive_status)?;
+    staged.store_objects().await.map_err(store_status)?;
+    staged.store_pointers().await.map_err(store_status)
 }
 
 /// Create server ref `name` at `target` (`expected` absent) or move it there
@@ -1097,6 +1128,63 @@ impl ControlService for ControlServer {
                 .map_err(store_status)?
                 .ok_or_else(|| Status::internal(format!("change request {} vanished", cr.id)))?;
         }
+        Ok(Response::new(change_request(cr)))
+    }
+
+    async fn commit_and_land(
+        &self,
+        request: Request<CommitAndLandRequest>,
+    ) -> Result<Response<ChangeRequest>, Status> {
+        let _rpc = span("CommitAndLand");
+        let cs = Changeset::decode(&request.get_ref().changeset)
+            .map_err(|e| Status::invalid_argument(format!("changeset: {e}")))?;
+        timed(
+            "auth",
+            authorize(&*self.meta, &request, &cs.repo, Role::Writer),
+        )
+        .await?
+        .check("change", cs.file_changes.keys())?;
+        if cs == Changeset::repository_root(&cs.repo) {
+            return Err(Status::invalid_argument(
+                "a repository's root changeset is created by InitRepo (`scn init`)",
+            ));
+        }
+        let submitter = principal(&request)?.to_owned();
+        let repo = cs.repo.clone();
+        // `main` is the request's base, read while the changeset is stored.
+        let (created, main) = tokio::join!(
+            create(
+                &*self.meta,
+                &*self.objects,
+                std::slice::from_ref(&cs),
+                false
+            ),
+            self.meta.get_ref(&repo, "main"),
+        );
+        let [(id, _)] = created?.try_into().expect("one changeset in, one out");
+        let main = main
+            .map_err(store_status)?
+            .ok_or_else(|| Status::not_found(format!("ref \"main\" in {repo:?}")))?;
+        let cr = self
+            .meta
+            .submit_change_request(&repo, id, main.target, &submitter)
+            .await
+            .map_err(store_status)?;
+        self.workers.wake(&repo);
+        let cr = self
+            .workers
+            .wait(&repo, cr.id)
+            .await
+            .map_err(store_status)?
+            .ok_or_else(|| Status::internal(format!("change request {} vanished", cr.id)))?;
+        // Nothing above waited on the path history; until this task stores
+        // it, `PathLog` and `Blame` derive it on first use.
+        let (meta, objects) = (self.meta.clone(), self.objects.clone());
+        tokio::spawn(async move {
+            if let Err(e) = timed("history", store_history(&*meta, &*objects, &cs)).await {
+                eprintln!("scion-server: path history of {id} in {repo:?}: {e}");
+            }
+        });
         Ok(Response::new(change_request(cr)))
     }
 

@@ -2,11 +2,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/tekeburak/scion/schemas/v1/commit.json",
   "title": "scn commit --json",
-  "description": "The changeset created; it is the working copy's head.",
+  "description": "The changeset created; it is the working copy's head. With `--land`, also the change request, and `head` is where the working copy is, as `scn land --json` prints them.",
   "type": "object",
   "properties": {
     "head": {
       "$ref": "defs.json#/$defs/id"
+    },
+    "request": {
+      "$ref": "defs.json#/$defs/change_request"
     }
   },
   "required": [

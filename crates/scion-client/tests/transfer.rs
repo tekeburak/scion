@@ -7,7 +7,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use bytes::Bytes;
-use scion_client::{Remote, SparseProfile, clone, commit};
+use scion_client::{Remote, RequestStatus, SparseProfile, clone, commit, commit_and_land};
 use scion_derived::test_util::{REPO, changeset};
 use scion_store::{Grant, MemoryStore, MetadataStore, ObjectStore, Role, SERVER_GRANTS};
 use scion_types::{BlobId, FileChange, FileType, Identity, RepoPath, Timestamp};
@@ -173,4 +173,38 @@ async fn commit_uploads_only_the_blobs_the_server_lacks() {
         let blob = f.new.unwrap().id;
         assert!(remote.clone().has_blobs(REPO, &[blob]).await.unwrap()[0]);
     }
+}
+
+/// Phase 10.6: a one-file commit that lands is `HasBlobs`, `PutBlobs` and
+/// `CommitAndLand`, three RPCs, where `commit` and `land` made four.
+#[tokio::test]
+async fn commit_and_land_makes_three_rpcs() {
+    let (server, calls) = serve(10).await;
+    let dir = tempfile::tempdir().unwrap();
+    let remote = Remote::with_token(&server, &token()).await.unwrap();
+    let ws = clone(
+        remote.clone(),
+        &server,
+        REPO,
+        dir.path(),
+        SparseProfile::full(),
+    )
+    .await
+    .unwrap();
+    std::fs::write(dir.path().join(path(3).as_str()), "edited\n").unwrap();
+    calls.store(0, Ordering::Relaxed);
+    let cr = commit_and_land(
+        &ws,
+        &remote,
+        Identity::new("a", "a@x"),
+        Timestamp::new(1, 0),
+        "edit",
+    )
+    .await
+    .unwrap();
+    assert_eq!(calls.load(Ordering::Relaxed), 3);
+    assert_eq!(cr.status, RequestStatus::Landed(cr.head));
+    assert_eq!(ws.read_state().unwrap().current_head, cr.head);
+    let main = remote.clone().get_ref(REPO, "main").await.unwrap();
+    assert_eq!(main.target, cr.head);
 }
