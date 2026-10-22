@@ -222,6 +222,21 @@ jobs:
           path: crates/scion-sim/fuzz/artifacts/
           if-no-files-found: ignore
 
+  install:
+    # The install script against release directories served from disk; the
+    # shellcheck image pins the linter so the runner needs nothing installed.
+    name: install script
+    runs-on: [self-hosted, linux, konuq-ci]
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - name: shellcheck
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE/scripts:/mnt:ro" koalaman/shellcheck:v0.10.0 \
+            -s sh /mnt/install.sh /mnt/install-test.sh
+      - name: install from a release directory
+        run: sh scripts/install-test.sh
+
   deny:
     name: cargo-deny
     runs-on: [self-hosted, linux, konuq-ci]

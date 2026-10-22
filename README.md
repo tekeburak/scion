@@ -457,6 +457,8 @@ acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
 # cargo-zigbuild: pip install ziglang (or brew install zig) && cargo install cargo-zigbuild --locked
 #   rustup target add x86_64-unknown-linux-musl && cargo zigbuild --release --locked \
 #     --target x86_64-unknown-linux-musl -p scn -p scion-server -p scion-ingest -p scion-mcp
+# scripts/install.sh is checked with shellcheck (apt-get install shellcheck / brew install shellcheck):
+#   shellcheck -s sh scripts/install.sh scripts/install-test.sh && sh scripts/install-test.sh
 cargo test --workspace                     # includes 200 seeds of scion-sim
 SCION_SIM_SEED=42 cargo test -p scion-sim --test seeds   # replay one simulation seed
 cargo test -p scion-sim --test corpus      # replay the fuzz corpus on stable
