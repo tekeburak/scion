@@ -415,25 +415,25 @@ from the first start to the last finish, and the p50 and p99 of the writers' own
 <!-- bench-real:start (scripts/render-assets.py writes this table) -->
 | Workload | git, ms | scion, ms | scion / git |
 | --- | ---: | ---: | ---: |
-| import, cold | 1,521 | 13,266 | 8.7× |
-| import, warm | 1,738 | 3,259 | 1.9× |
-| clone | 1,966 | 954 | 0.49× |
-| sparse clone | 631 | 70 | 0.11× |
-| status | 213 | 10 | 0.05× |
-| path log, cold | 24 | 171 | 7.1× |
-| path log, warm | 24 | 25 | 1.0× |
-| blame, cold | 56 | 208 | 3.7× |
-| blame, warm | 55 | 11 | 0.20× |
-| path log, server warm, client cold | 26 | 26 | 1.0× |
-| blame, server warm, client cold | 66 | 12 | 0.18× |
+| import, cold | 1,512 | 12,934 | 8.6× |
+| import, warm | 1,419 | 3,174 | 2.2× |
+| clone | 1,660 | 617 | 0.37× |
+| sparse clone | 580 | 39 | 0.07× |
+| status | 204 | 9 | 0.04× |
+| path log, cold | 26 | 156 | 6.0× |
+| path log, warm | 29 | 25 | 0.86× |
+| blame, cold | 56 | 181 | 3.2× |
+| blame, warm | 49 | 12 | 0.24× |
+| path log, server warm, client cold | 21 | 25 | 1.2× |
+| blame, server warm, client cold | 48 | 12 | 0.25× |
 | commit + land | 45 | 53 | 1.2× |
-| land, 16 writers at once | 3,797 | 446 | 0.12× |
-| land, 16 writers: p50 per land | 2,494 | 314 | 0.13× |
-| land, 16 writers: p99 per land | 3,789 | 419 | 0.11× |
+| land, 16 writers at once | 3,681 | 450 | 0.12× |
+| land, 16 writers: p50 per land | 2,488 | 278 | 0.11× |
+| land, 16 writers: p99 per land | 3,667 | 436 | 0.12× |
 
 Repository: library/ of the public repository pinned in scripts/bench-real, first-parent commits since 2026-01-01 up to 91e9c2688eb23af9a5b77f056156e756550c7c99 (600 commits, 2330 files at the tip).  
 Machine: Linux 6.18.44-fc-v140 x86_64; Intel(R) Xeon(R) Processor @ 2.10GHz; 4 cpus; 15 GiB.  
-Run: git version 2.43.0; scion 7d1473f; 3 runs; 2026-10-22T13:07:27Z.  
+Run: git version 2.43.0; scion cd36ea0; 3 runs; 2026-10-22T14:26:22Z.  
 Other implementations of the design: not measured in this run.
 <!-- bench-real:end -->
 

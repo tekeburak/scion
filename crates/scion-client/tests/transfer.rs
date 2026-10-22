@@ -176,7 +176,7 @@ async fn commit_uploads_only_the_blobs_the_server_lacks() {
 }
 
 /// Phase 10.6: a one-file commit that lands is `HasBlobs`, `PutBlobs` and
-/// `CommitAndLand`, three RPCs, where `commit` and `land` made five.
+/// `CommitAndLand`, three RPCs, where `commit` and `land` made four.
 #[tokio::test]
 async fn commit_and_land_makes_three_rpcs() {
     let (server, calls) = serve(10).await;
