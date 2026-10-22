@@ -309,7 +309,8 @@ async fn bad_input_and_unknown_changesets_are_rejected() {
 /// Phase 10.2: a 428-result path log on a cold server costs the grants
 /// query, the `PathHistory` pointer at the head and one `get_changesets`,
 /// besides its history-page reads (Phase 10.3 moved those from the object
-/// store to the metadata store): one per change and one per anchor.
+/// store to the metadata store): one page per change and one per anchor,
+/// read in one query per step of the walk (Phase 10.7).
 #[tokio::test]
 async fn path_log_of_428_changesets_makes_three_metadata_queries() {
     let shared = Arc::new(MemoryStore::with_repo(REPO));
@@ -340,9 +341,14 @@ async fn path_log_of_428_changesets_makes_three_metadata_queries() {
     assert_eq!(log.changesets.len(), 428);
     let pages = counting.page_gets();
     assert!(pages <= 2 + 428 + 428 / 16, "{pages} page reads");
+    // Phase 10.7: the chain is walked one step at a time, each step one
+    // read of every page it needs: the lookup, then about 428 / 16 anchors
+    // and the 16 entries below the last.
+    let steps = 1 + 428 / 16 + 16 + 1;
     assert!(
-        counting.queries() <= 3 + pages,
-        "{} queries besides {pages} page reads",
-        counting.queries() - pages
+        counting.queries() <= 3 + steps,
+        "{} queries, at most {} besides {steps} page reads",
+        counting.queries(),
+        3
     );
 }

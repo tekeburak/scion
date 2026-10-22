@@ -77,12 +77,17 @@ impl<'a> Deriver<'a> {
 
     /// The path-history page `id` of this repository, which must exist.
     pub(crate) async fn page(&self, id: BlobId) -> Result<Bytes> {
-        self.meta
-            .get_pages(self.repo, &[id])
-            .await?
-            .pop()
-            .flatten()
-            .ok_or(DeriveError::MissingObject(id))
+        Ok(self.pages(&[id]).await?.remove(0))
+    }
+
+    /// The path-history pages `ids` of this repository, all of which must
+    /// exist, in one metadata read.
+    pub(crate) async fn pages(&self, ids: &[BlobId]) -> Result<Vec<Bytes>> {
+        let found = self.meta.get_pages(self.repo, ids).await?;
+        ids.iter()
+            .zip(found)
+            .map(|(id, page)| page.ok_or(DeriveError::MissingObject(*id)))
+            .collect()
     }
 
     /// Read a previously derived value without deriving.

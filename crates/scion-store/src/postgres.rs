@@ -859,7 +859,9 @@ impl MetadataStore for PostgresStore {
         for (canonical,) in rows {
             let cs = Changeset::decode(&canonical)
                 .map_err(|e| StoreError::Corrupt(format!("changeset: {e}")))?;
-            let id = cs.id();
+            // A value has exactly one canonical encoding, so the stored bytes
+            // hash to the id without encoding them again.
+            let id = ChangesetId::hash(&canonical);
             self.changesets
                 .insert((repo.to_owned(), id), cs.clone(), canonical.len());
             found.insert(id, cs);
