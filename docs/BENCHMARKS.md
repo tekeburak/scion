@@ -25,7 +25,11 @@ than git:
 | blame, cold | 1.03× | `attribute`: about 60 ms, the requested file's own version chain | Until 10.7 the reply waited on the blame node of the changeset that last touched `alloc/src/vec/mod.rs`, which holds every file that changeset changed: 272 versions along 13 chains, each version one object-store `GET` and one diff, with every query waiting behind RustFS. The reply now waits on that file's chain only; a task stores the node afterwards, one file and one version at a time, and the server remembers the reply meanwhile. |
 | commit + land | 1.2× | `CommitAndLand`: 23 ms, then `PutBlobs`: 7 ms | Since 10.6 `scn commit --land` is one process and three RPCs (`HasBlobs`, `PutBlobs`, `CommitAndLand`) where `commit` + `land` were two processes and four. Inside `CommitAndLand`, the create is 8 ms (the skip list's 7 ms of ancestor reads on a memo the importer, not the server, filled), then about six Postgres commits in a row (insert, pointers, submit, claim, `main`'s CAS, finish; 1–1.5 ms each); the path history is stored after the reply. `PutBlobs` is RustFS's `PUT` of one small blob. On a warm server and a small repository the whole command is about 25 ms. |
 
-Every other row is already faster than git. The traced run also shows where the next steps
+Every other row is already faster than git. Warm path log became one of them in 10.7: a head's history never
+changes, so the server remembers each `PathLog` reply (64 MiB, `moka`) and a repeated one
+reads nothing from Postgres; what is left of the 18 ms is the `scn` process, which decodes,
+hashes and prints 428 changesets (about 1 MB). The object store now also keeps blobs up to
+256 KiB in its memo, so a warm `blame` no longer fetches a long source file from S3. The traced run also shows where the next steps
 start: a clone's 2,878 RPCs each paid an `auth` grants query (22.5 s summed). Since 10.2 a
 listening server memoizes each repository's grants and refs, and every write to them sends a
 Postgres notification that drops the entries, so a clone makes one grants query; clone went
