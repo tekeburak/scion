@@ -1,5 +1,5 @@
 # scion-server for the local compose stack (deploy/docker-compose.yml), built
-# from this checkout. The release image is Phase 9's.
+# from this checkout. The released image is deploy/release.Dockerfile.
 
 FROM rust:1-bookworm AS build
 RUN apt-get update && apt-get install -y --no-install-recommends protobuf-compiler \
