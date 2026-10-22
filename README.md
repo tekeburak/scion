@@ -100,7 +100,9 @@ What works today:
   <server>`, device flow, the token kept per server with mode 0600); CI and agents use
   service-principal tokens from `scion-server token`. A repository's admins grant, revoke and
   list its roles from a working copy (`scn access grant|revoke|list`), and `scn whoami` shows
-  who a token names, until when, and its roles in the repository.
+  who a token names, until when, and its roles in the repository. Nothing writes without a
+  token, over gRPC, the HTTP API or the MCP tools alike, and each of them refuses a blob over
+  the 64 MiB per-blob limit with an error that names it.
 - **Web interface** (`scion-server --web <addr>`): server-rendered pages for the repositories a
   visitor can read: repository home with its README, directories and files at any ref or
   changeset, log and per-path history, blame, changesets with their line diffs, and change
@@ -469,7 +471,7 @@ object plane gains streaming batch requests, and landing becomes one round trip.
 interface, HTTP/JSON API, MCP server and `scn --json` are in, every binary reports one version,
 a tag builds static Linux binaries, macOS `scn` and the server image, and an install script
 fetches the binaries, `scn` talks to `https://` servers, and a production compose profile runs
-the server behind TLS; next come write limits at every surface and a hosted instance; the regional cache and per-node daemon tiers with
+the server behind TLS; next comes a hosted instance; the regional cache and per-node daemon tiers with
 manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan, with
 acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
 

@@ -492,7 +492,10 @@ accounting. Backup and restore of the metadata database is the managed platform'
   every write path (gRPC, `/api/v1`, MCP) with an error that names the limit, and every write
   route on the three surfaces refuses a request without a principal. *Accepted when* a
   table-driven test sends an oversized blob and an anonymous write to every write route and
-  gets the named refusal from each.
+  gets the named refusal from each. The constant is `scion_types::MAX_BLOB_BYTES`; gRPC and the
+  HTTP body take a little more, so a blob just over it reaches `PutBlob` and is refused there
+  by name, and the MCP transports take twice it (JSON escapes) for the same reason. The test is
+  `crates/scion-mcp/tests/write_limits.rs`, the one crate that reaches all three surfaces.
 - **9.9 Hosted instance infrastructure.** `infra/` holds one script for a managed container
   platform (HTTP/2 to the container, so gRPC and HTTP share one address; managed Postgres; an
   S3-compatible bucket) that creates or updates the instance from the release image, and

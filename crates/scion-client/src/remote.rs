@@ -33,8 +33,9 @@ pub use scion_proto::v1::AccessGrant;
 /// Deadline the client attaches to every RPC.
 pub const RPC_DEADLINE: Duration = Duration::from_secs(30);
 
-/// Largest message the client accepts; matches the server's per-blob limit.
-const MAX_MESSAGE_BYTES: usize = 64 << 20;
+/// Largest message the client sends or accepts, as the server's: a blob at
+/// the per-blob limit and the rest of its request.
+const MAX_MESSAGE_BYTES: usize = scion_types::MAX_BLOB_BYTES + (1 << 20);
 
 /// Failure talking to the server.
 #[derive(Debug, thiserror::Error)]

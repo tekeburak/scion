@@ -43,7 +43,7 @@ use scion_types::{
 };
 
 /// Largest blob a changeset may reference: the server's per-blob limit.
-pub const MAX_BLOB_BYTES: usize = scion_server::MAX_MESSAGE_BYTES;
+pub const MAX_BLOB_BYTES: usize = scion_types::MAX_BLOB_BYTES;
 
 /// Key of the commit's sha in [`Changeset::extra`].
 pub const GIT_SHA: &str = "git-sha";

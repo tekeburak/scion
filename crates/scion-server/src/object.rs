@@ -1,6 +1,7 @@
 //! `ObjectService` over an [`ObjectStore`]. Requests come from clients, so ids
 //! and tree bytes are validated here; the store verifies what it reads back.
-//! Every request needs `reader` in the repository it names.
+//! Every request needs `reader` in the repository it names; a blob over
+//! [`MAX_BLOB_BYTES`] is refused with `RESOURCE_EXHAUSTED`.
 
 use std::sync::Arc;
 
@@ -12,7 +13,7 @@ use scion_proto::v1::{
     PutBlobResponse, PutTreeRequest, PutTreeResponse,
 };
 use scion_store::{MetadataStore, ObjectStore, Role};
-use scion_types::{BlobId, Decode, Encode, Tree, TreeId};
+use scion_types::{BlobId, Decode, Encode, MAX_BLOB_BYTES, Tree, TreeId, blob_too_large};
 use tonic::{Request, Response, Status};
 
 use crate::auth::authorize;
@@ -103,6 +104,9 @@ impl ObjectService for ObjectServer {
         )
         .await?;
         let data = Bytes::from(request.into_inner().data);
+        if data.len() > MAX_BLOB_BYTES {
+            return Err(Status::resource_exhausted(blob_too_large(data.len())));
+        }
         let id = self.objects.put_blob(data).await.map_err(store_status)?;
         Ok(Response::new(PutBlobResponse {
             id: id.as_bytes().to_vec(),

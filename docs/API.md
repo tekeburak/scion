@@ -17,7 +17,9 @@ land worker are the same; this document only says how each one is spelled over H
 - **Ids** are 64 lowercase hex digits (the 32-byte BLAKE3 digest). Paths are repository paths
   as in `docs/DATA_MODEL.md` (no leading `/`, no `.` or `..`).
 - **Bodies** are JSON, except blob bytes, which travel raw (`application/octet-stream`). A
-  body may be up to 64 MiB, the per-blob limit.
+  blob may be up to 64 MiB (67108864 bytes), the per-blob limit `scion_types::MAX_BLOB_BYTES`
+  that gRPC and the MCP tools enforce too; a larger one is refused with 413
+  `resource_exhausted`, naming the limit.
 - **Changesets** travel as JSON (below). The server builds the changeset from it and hashes
   only its canonical encoding, so the id is the same as over gRPC; the JSON is never hashed.
   The repository is the one in the URL.
@@ -32,6 +34,7 @@ land worker are the same; this document only says how each one is spelled over H
   | 403 | `permission_denied`: the caller lacks the role, or the path is outside its directories |
   | 404 | `not_found` |
   | 409 | `already_exists`, `failed_precondition` (a lost compare-and-swap, not a fast-forward) |
+  | 413 | `resource_exhausted`: a blob over the per-blob limit |
   | 503 | `unavailable` |
   | 504 | `deadline_exceeded` |
   | 500 | `internal`, `data_loss` |

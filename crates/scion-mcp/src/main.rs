@@ -8,7 +8,6 @@
 use std::process::ExitCode;
 
 use clap::Parser;
-use rmcp::ServiceExt;
 use scion_mcp::Scion;
 
 #[derive(Parser)]
@@ -41,16 +40,12 @@ async fn main() -> ExitCode {
     }
 }
 
-async fn stdio(scion: Scion) -> Result<(), Box<dyn std::error::Error>> {
-    scion
-        .serve(rmcp::transport::stdio())
-        .await?
-        .waiting()
-        .await?;
-    Ok(())
+async fn stdio(scion: Scion) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let (stdin, stdout) = rmcp::transport::stdio();
+    scion.serve_stream(stdin, stdout).await
 }
 
-async fn http(scion: Scion, addr: &str) -> Result<(), Box<dyn std::error::Error>> {
+async fn http(scion: Scion, addr: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let listener = tokio::net::TcpListener::bind(addr).await?;
     eprintln!("scion-mcp: serving http://{}/mcp", listener.local_addr()?);
     scion.serve_http(listener).await?;

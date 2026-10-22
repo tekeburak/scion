@@ -24,7 +24,8 @@ scion-mcp --api http://127.0.0.1:8080/api/v1 --http 127.0.0.1:7421
 ```
 
 `--api` may also come from `SCION_API`. Without `SCN_TOKEN` only public repositories read and
-nothing writes. The HTTP transport accepts loopback `Host` headers only, so it serves the
+nothing writes. A file over the server's per-blob limit (64 MiB) is refused by
+`write_files_and_commit`, naming the limit, before anything is uploaded. The HTTP transport accepts loopback `Host` headers only, so it serves the
 machine it runs on; every caller shares the one token.
 
 An agent that takes a command, Claude Code for one:

@@ -35,6 +35,20 @@ pub fn version() -> &'static str {
         None => env!("CARGO_PKG_VERSION").to_owned(),
     })
 }
+
+/// The per-blob size limit, in bytes (64 MiB): the largest blob any write
+/// path accepts, whether it arrives over gRPC, the HTTP API or the MCP tools,
+/// or from an import. A blob travels whole in one request; large-file
+/// chunking is a non-goal.
+pub const MAX_BLOB_BYTES: usize = 64 << 20;
+
+/// The refusal of a blob of `len` bytes, over [`MAX_BLOB_BYTES`]; every write
+/// path says the same.
+#[must_use]
+pub fn blob_too_large(len: usize) -> String {
+    format!("a blob of {len} bytes is over the per-blob limit of {MAX_BLOB_BYTES} bytes (64 MiB)")
+}
+
 pub use changeset::{Changeset, FileChange, FileType, Identity, Timestamp};
 pub use id::{BlobId, ChangesetId, IdParseError, TreeId};
 pub use path::{PathComponent, PathError, RepoPath};

@@ -12,6 +12,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::error::Error;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -22,16 +23,25 @@ use rmcp::model::{
     ServerCapabilities, ServerConfig,
 };
 use rmcp::service::RequestContext;
+use rmcp::transport::async_rw::AsyncRwTransport;
 use rmcp::transport::streamable_http_server::session::local::LocalSessionManager;
 use rmcp::transport::streamable_http_server::{StreamableHttpServerConfig, StreamableHttpService};
-use rmcp::{ErrorData, RoleServer, ServerHandler, tool, tool_handler, tool_router};
+use rmcp::{ErrorData, RoleServer, ServerHandler, ServiceExt, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
+use tokio::io::{AsyncRead, AsyncWrite};
 
 /// Every API call gets at most this long, the server's own per-request
 /// deadline; a land that waits answers within it.
 const DEADLINE: Duration = Duration::from_secs(30);
+
+/// Largest message either transport takes: a file at the per-blob limit
+/// written as JSON text, whose escapes (`\n`, `\"`) can double it. A file
+/// over the limit still arrives, and `write_files_and_commit` refuses it by
+/// name; the transports' own defaults (16 MiB on stdio, 4 MiB over HTTP)
+/// would drop it unread.
+const MAX_MESSAGE_BYTES: usize = 2 * scion_types::MAX_BLOB_BYTES + (1 << 20);
 
 /// What a tool answers with when it fails: the server's refusal, as text the
 /// agent reads.
@@ -270,12 +280,28 @@ impl Scion {
         }
     }
 
+    /// Serve one client on a byte stream (stdin and stdout, for an agent
+    /// that starts this process) until it leaves.
+    pub async fn serve_stream<R, W>(
+        self,
+        read: R,
+        write: W,
+    ) -> Result<(), Box<dyn Error + Send + Sync>>
+    where
+        R: AsyncRead + Send + Unpin + 'static,
+        W: AsyncWrite + Send + Unpin + 'static,
+    {
+        let transport = AsyncRwTransport::new(read, write).with_max_line_length(MAX_MESSAGE_BYTES);
+        self.serve(transport).await?.waiting().await?;
+        Ok(())
+    }
+
     /// Serve streamable HTTP at `/mcp` on `listener` until it fails.
     pub async fn serve_http(self, listener: tokio::net::TcpListener) -> std::io::Result<()> {
         let service = StreamableHttpService::new(
             move || Ok(self.clone()),
             Arc::new(LocalSessionManager::default()),
-            StreamableHttpServerConfig::default(),
+            StreamableHttpServerConfig::default().with_max_request_body_bytes(MAX_MESSAGE_BYTES),
         );
         axum::serve(listener, axum::Router::new().nest_service("/mcp", service)).await
     }
@@ -408,6 +434,9 @@ impl Scion {
                 None => json!({"change": "deleted"}),
                 Some(content) => {
                     let size = content.len();
+                    if size > scion_types::MAX_BLOB_BYTES {
+                        return Err(format!("{}: {}", f.path, scion_types::blob_too_large(size)));
+                    }
                     let id = self.api.put_blob(&p.repo, content.into_bytes()).await?;
                     let kind = if f.executable {
                         "executable"

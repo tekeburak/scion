@@ -18,6 +18,7 @@ use std::time::SystemTime;
 use axum::Json;
 use axum::Router;
 use axum::body::Bytes;
+use axum::extract::rejection::BytesRejection;
 use axum::extract::{DefaultBodyLimit, FromRequestParts, Path, Query, State};
 use axum::http::request::Parts;
 use axum::http::{Method, StatusCode, header};
@@ -35,8 +36,8 @@ use scion_proto::v1::{
 };
 use scion_store::{MetadataStore, ObjectStore};
 use scion_types::{
-    BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, FileType, Identity, RepoPath,
-    Timestamp, Tree, TreeEntry,
+    BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, FileType, Identity, MAX_BLOB_BYTES,
+    RepoPath, Timestamp, Tree, TreeEntry,
 };
 use scion_web::{ANYONE, Act, Acted, Action, Task};
 use serde::{Deserialize, Serialize};
@@ -92,7 +93,8 @@ pub(crate) fn router(
         )
         .route("/whoami", get(who_am_i))
         .route("/version", get(server_version))
-        // A blob travels in one body, as in one gRPC message.
+        // A blob travels in one body, as in one gRPC message; one just over
+        // the per-blob limit reaches `PutBlob`, which refuses it by name.
         .layer(DefaultBodyLimit::max(MAX_MESSAGE_BYTES))
         .with_state(Api {
             meta,
@@ -323,6 +325,7 @@ impl Caller {
                 (StatusCode::BAD_REQUEST, "invalid_argument")
             }
             Code::NotFound => (StatusCode::NOT_FOUND, "not_found"),
+            Code::ResourceExhausted => (StatusCode::PAYLOAD_TOO_LARGE, "resource_exhausted"),
             Code::AlreadyExists => (StatusCode::CONFLICT, "already_exists"),
             Code::FailedPrecondition | Code::Aborted => {
                 (StatusCode::CONFLICT, "failed_precondition")
@@ -848,8 +851,18 @@ async fn put_blob(
     State(api): State<Api>,
     caller: Caller,
     Path(repo): Path<String>,
-    body: Bytes,
+    body: Result<Bytes, BytesRejection>,
 ) -> Result<(StatusCode, Json<Id>), Error> {
+    // A body over the transport's limit never reaches `PutBlob`; it is still
+    // a blob over the per-blob limit.
+    let body = body.map_err(|e| match e.status() {
+        StatusCode::PAYLOAD_TOO_LARGE => Error(
+            StatusCode::PAYLOAD_TOO_LARGE,
+            "resource_exhausted",
+            format!("the body is over the per-blob limit of {MAX_BLOB_BYTES} bytes (64 MiB)"),
+        ),
+        status => Error(status, "invalid_argument", e.body_text()),
+    })?;
     let request = PutBlobRequest {
         data: body.to_vec(),
         repo,

@@ -50,9 +50,10 @@ pub use token::{TokenError, TokenKey};
 /// it cannot get more.
 pub const RPC_DEADLINE: Duration = Duration::from_secs(30);
 
-/// Largest message either side may send. This is also the per-blob size
-/// limit: blobs travel in one message and large-file chunking is a non-goal.
-pub const MAX_MESSAGE_BYTES: usize = 64 << 20;
+/// Largest message either side may send: a blob at
+/// [`scion_types::MAX_BLOB_BYTES`] and the rest of its request, so a blob
+/// just over the limit reaches `PutBlob` and is refused there by name.
+pub const MAX_MESSAGE_BYTES: usize = scion_types::MAX_BLOB_BYTES + (1 << 20);
 
 /// Serve all services on `listener` until the future is dropped or the
 /// transport fails, first starting the land worker of every repository with

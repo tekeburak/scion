@@ -20,8 +20,10 @@ tokio = { workspace = true, features = ["net", "io-std"] }
 
 [dev-dependencies]
 rmcp = { version = "3.6", features = ["client", "transport-streamable-http-client-reqwest"] }
+scion-proto.workspace = true
 scion-server.workspace = true
 scion-store.workspace = true
+tonic.workspace = true
 
 [lints]
 workspace = true

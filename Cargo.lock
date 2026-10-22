@@ -3479,12 +3479,14 @@ dependencies = [
  "reqwest",
  "rmcp",
  "schemars",
+ "scion-proto",
  "scion-server",
  "scion-store",
  "scion-types",
  "serde",
  "serde_json",
  "tokio",
+ "tonic",
 ]
 
 [[package]]
