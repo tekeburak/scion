@@ -115,8 +115,8 @@ message PutBlobsResponse {}
 // ---------------------------------------------------------------------------
 // Control plane: served only by scion-server. Every request names its
 // repository; one server serves many. Each RPC needs a role in it: `reader`
-// for reads, `writer` for CreateChangeset, Rebase, Merge, Revert and
-// SubmitChangeRequest, `admin` of the whole repository for MoveRef, Grant,
+// for reads, `writer` for CreateChangeset, Rebase, Merge, Revert,
+// SubmitChangeRequest and CommitAndLand, `admin` of the whole repository for MoveRef, Grant,
 // Revoke and ListGrants; InitRepo needs `admin` on the server (grants of
 // repository `*`); WhoAmI needs only a token. A missing role is
 // PERMISSION_DENIED.
@@ -136,6 +136,7 @@ service ControlService {
   rpc Revert(RevertRequest) returns (RevertResponse);
   rpc Blame(BlameRequest) returns (BlameResponse);
   rpc SubmitChangeRequest(SubmitChangeRequestRequest) returns (ChangeRequest);
+  rpc CommitAndLand(CommitAndLandRequest) returns (ChangeRequest);
   rpc GetChangeRequest(GetChangeRequestRequest) returns (ChangeRequest);
   rpc ListChangeRequests(ListChangeRequestsRequest) returns (ListChangeRequestsResponse);
   rpc FindLanding(FindLandingRequest) returns (FindLandingResponse);
@@ -373,6 +374,16 @@ message SubmitChangeRequestRequest {
   // or with its current status after at most 20 seconds; otherwise reply at
   // once with it PENDING.
   bool wait = 3;
+}
+
+// CreateChangeset and a waiting SubmitChangeRequest of the new changeset in
+// one round trip: the changeset is created as CreateChangeset creates it,
+// refused for the same reasons, and the reply is its change request
+// (`head` is the new changeset), as SubmitChangeRequest with `wait` replies.
+// Its path history is derived after the reply.
+message CommitAndLandRequest {
+  // Canonical encoding (`SCCS`).
+  bytes changeset = 1;
 }
 
 // An unknown repository or request is NOT_FOUND.

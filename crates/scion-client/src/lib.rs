@@ -33,7 +33,7 @@ mod switch;
 mod workspace;
 
 pub use checkout::{CheckoutError, MAIN_REF, checkout, clone};
-pub use commit::{CommitError, commit};
+pub use commit::{CommitError, commit, commit_and_land};
 pub use index::{Index, IndexEntry};
 pub use remote::{
     AccessGrant, Bearer, BlameRun, ChangeRequestStatus, DiffEntry, Fetched, FileEntry, LoginPoll,

@@ -249,6 +249,9 @@ async fn every_json_output_matches_its_schema() {
     let again = commit(&mut scn, &a, "a again");
     let v = scn.ok("revert", &a, &["revert", &again]);
     assert_eq!(v["reverted"], again.as_str(), "{v}");
+    std::fs::write(a.join("a.txt"), b"a, landed at once\n").unwrap();
+    let v = scn.ok("commit", &a, &["commit", "--land", "-m", "a at once"]);
+    assert_eq!(v["request"]["status"], "landed", "{v}");
 
     access(&mut scn, &a);
 

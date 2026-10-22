@@ -146,6 +146,10 @@ enum Command {
         message: String,
         #[arg(long, env = "SCN_AUTHOR", value_name = "NAME <EMAIL>")]
         author: String,
+        /// Also land the new head on `main`, as `scn land` does, in the same
+        /// round trip.
+        #[arg(long)]
+        land: bool,
     },
     /// Land the current head on `main`: the server rebases it onto `main`
     /// and lands it, or names the paths that conflict.
@@ -1141,10 +1145,15 @@ fn now() -> Result<Timestamp> {
     Ok(Timestamp::new(i64::try_from(secs)?, 0))
 }
 
-async fn commit(out: &mut Out, message: &str, author: &str) -> Result<()> {
+async fn commit(out: &mut Out, message: &str, author: &str, land: bool) -> Result<()> {
     let author = parse_identity(author)?;
     let date = now()?;
-    let s = Session::open().await?;
+    let mut s = Session::open().await?;
+    if land {
+        let cr = scion_client::commit_and_land(&s.ws, &s.remote, author, date, message).await?;
+        s.state = s.ws.read_state()?;
+        return landed(out, s, cr).await;
+    }
     let id = scion_client::commit(&s.ws, &s.remote, author, date, message).await?;
     if out.json {
         out.emit(&json!({"head": id.to_hex()}))?;
@@ -1193,7 +1202,7 @@ async fn land(out: &mut Out, no_wait: bool) -> Result<()> {
     let mut s = Session::open().await?;
     let repo = s.config.repo.clone();
     let head = s.state.current_head;
-    let mut cr = s
+    let cr = s
         .remote
         .submit_change_request(&repo, head, !no_wait)
         .await?;
@@ -1209,6 +1218,14 @@ async fn land(out: &mut Out, no_wait: bool) -> Result<()> {
         )?;
         return Ok(());
     }
+    landed(out, s, cr).await
+}
+
+/// Follow submitted request `cr` for the current head of `s` to its end,
+/// and move the working copy to what landed.
+async fn landed(out: &mut Out, mut s: Session, mut cr: RemoteChangeRequest) -> Result<()> {
+    let repo = s.config.repo.clone();
+    let head = s.state.current_head;
     // A long queue answers before the request is finished; ask again.
     while !cr.status.is_finished() {
         cr = s.remote.get_change_request(&repo, cr.id, true).await?;
@@ -1600,7 +1617,11 @@ async fn run(cli: Cli) -> Result<()> {
         },
         Command::Blame { path, rev } => blame(out, &path, &rev).await?,
         Command::Add { paths } => add(out, &paths)?,
-        Command::Commit { message, author } => commit(out, &message, &author).await?,
+        Command::Commit {
+            message,
+            author,
+            land,
+        } => commit(out, &message, &author, land).await?,
         Command::Land {
             status: Some(id), ..
         } => land_status(out, id).await?,
