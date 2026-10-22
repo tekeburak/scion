@@ -58,8 +58,8 @@ signed by the server and a role in the repository it touches, optionally limited
 directory; people sign in with GitHub (`scn login`) and services use tokens from the operator. Landing goes through change requests and a serial
 land worker, and every request can be listed and traced to the changeset it landed;
 merges and reverts run on the server. A [web interface](#web-interface), an HTTP/JSON API and
-an MCP server serve people and agents. A release workflow builds static Linux binaries; the
-first tagged release, a server image, a hosted instance and the cache and daemon tiers follow
+an MCP server serve people and agents. A release workflow builds static Linux binaries and a
+server image; the first tagged release, a hosted instance and the cache and daemon tiers follow
 (see [What's next](#whats-next)).
 
 What works today:
@@ -131,8 +131,11 @@ What works today:
   and `scion-mcp` as static `x86_64` and `aarch64` musl executables, and `scn` for macOS,
   packs one archive per target with a `SHA256SUMS` file and opens a draft GitHub release.
   `scripts/install.sh` picks the archive for the machine, checks it against `SHA256SUMS` and
-  installs the binaries into `~/.local/bin`. No release has been tagged yet; until then, build
-  from source as below.
+  installs the binaries into `~/.local/bin`. The same tag pushes the server image,
+  `ghcr.io/tekeburak/scion-server:<version>` for `linux/amd64` and `linux/arm64`: the static
+  `scion-server` on a distroless base, running as a non-root user, configured by the
+  environment variables listed in `crates/scion-server/src/main.rs`. No release has been
+  tagged yet; until then, build from source as below.
 - **Robustness checks**: a seeded, hermetic simulation runs many clients committing, landing,
   merging and reverting while land workers stop and the server restarts, and checks that
   `main` stays linear and nothing landed is lost or written twice; fuzz targets cover every
@@ -436,8 +439,8 @@ hot entries, trees and history pages live in the metadata database, and import r
 two threads; next, import derives trees concurrently and uploads blobs in fewer requests, the
 object plane gains streaming batch requests, and landing becomes one round trip. The web
 interface, HTTP/JSON API, MCP server and `scn --json` are in, every binary reports one version,
-a tag builds static Linux binaries and macOS `scn`, and an install script fetches them; next
-come a server image, TLS from the clients, a production compose profile and a hosted instance; the regional cache and per-node daemon tiers with
+a tag builds static Linux binaries, macOS `scn` and the server image, and an install script
+fetches the binaries; next come TLS from the clients, a production compose profile and a hosted instance; the regional cache and per-node daemon tiers with
 manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan, with
 acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
 

@@ -3,14 +3,17 @@
 # aarch64 Linux and `scn` for aarch64 and x86_64 macOS, packs one
 # `scion-<version>-<target>.tar.gz` per target with a `SHA256SUMS` file, and
 # opens a draft GitHub release the owner then publishes.
-# `workflow_dispatch`, and a pull request that changes this file, run the same
+# `workflow_dispatch`, and a pull request that changes this file or the image, run the same
 # build as a dry run that publishes nothing; the archives stay on the run as an
 # artifact. Every target is cross-compiled on one Linux runner with
 # cargo-zigbuild (zig is the C compiler and linker for the native dependencies),
 # so no other kind of machine is needed. macOS archives carry `scn` only: the
 # other three link Apple frameworks (Security, SystemConfiguration,
 # CoreFoundation) that exist only in Apple's SDK, and the server tier runs on
-# Linux anyway. The runners behave as the header of ci.yml says.
+# Linux anyway. The same run builds the scion-server image for linux/amd64 and
+# linux/arm64 from the static binaries and checks it serves; a tag pushes it to
+# ghcr.io/<owner>/scion-server:<version>. The runners behave as the header of
+# ci.yml says.
 name: Release
 
 on:
@@ -18,7 +21,7 @@ on:
     tags: ["v*"]
   workflow_dispatch:
   pull_request:
-    paths: [".github/workflows/release.yml"]
+    paths: [".github/workflows/release.yml", "deploy/release.Dockerfile"]
 
 concurrency:
   group: release-${{ github.ref }}
@@ -138,6 +141,104 @@ jobs:
           name: scion-${{ steps.version.outputs.version }}
           path: dist/
           if-no-files-found: error
+
+  image:
+    # The server image holds the static scion-server from the archives above
+    # (deploy/release.Dockerfile compiles nothing), so both platforms build on
+    # this runner without emulation. Every run starts the amd64 image against
+    # a fresh Postgres and RustFS and clones through it; only a tag pushes.
+    name: server image
+    needs: build
+    runs-on: [self-hosted, linux, konuq-ci]
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: scion
+          POSTGRES_PASSWORD: scion
+          POSTGRES_DB: scion
+        ports: ["5432"]
+        options: >-
+          --health-cmd "pg_isready -U scion -d scion"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      rustfs:
+        image: rustfs/rustfs:latest
+        env:
+          RUSTFS_ACCESS_KEY: scion
+          RUSTFS_SECRET_KEY: scionscion
+          RUSTFS_VOLUMES: /data
+          RUSTFS_ADDRESS: ":9000"
+        ports: ["9000"]
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: scion-${{ needs.build.outputs.version }}
+          path: dist
+      - name: image context
+        run: |
+          (cd dist && sha256sum -c SHA256SUMS)
+          rm -rf "$RUNNER_TEMP/image" && mkdir -p "$RUNNER_TEMP/image/amd64" "$RUNNER_TEMP/image/arm64"
+          for pair in amd64:x86_64 arm64:aarch64; do
+            arch="${pair%%:*}" name="scion-$VERSION-${pair#*:}-unknown-linux-musl"
+            tar -C "$RUNNER_TEMP/image/$arch" --strip-components=1 -xzf "dist/$name.tar.gz" "$name/scion-server"
+          done
+          tar -C "$RUNNER_TEMP" --strip-components=1 \
+            -xzf "dist/scion-$VERSION-x86_64-unknown-linux-musl.tar.gz" "scion-$VERSION-x86_64-unknown-linux-musl/scn"
+          echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/scion-server:$VERSION" >> "$GITHUB_ENV"
+      - uses: docker/setup-buildx-action@v3
+      - name: build both platforms
+        run: |
+          docker buildx build -f deploy/release.Dockerfile --platform linux/amd64,linux/arm64 "$RUNNER_TEMP/image"
+          docker buildx build -f deploy/release.Dockerfile --platform linux/amd64 --load -t "$IMAGE" "$RUNNER_TEMP/image"
+          user="$(docker image inspect -f '{{.Config.User}}' "$IMAGE")"
+          echo "runs as: $user"
+          case "$user" in ""|root|0|0:*) echo "::error::the image runs as root"; exit 1 ;; esac
+      - name: the image serves the repository list and a clone
+        env:
+          DB_PORT: ${{ job.services.postgres.ports['5432'] }}
+          S3_PORT: ${{ job.services.rustfs.ports['9000'] }}
+          NETWORK: ${{ job.services.postgres.network }}
+        run: |
+          s3() { docker run --rm --network host -e AWS_ACCESS_KEY_ID=scion -e AWS_SECRET_ACCESS_KEY=scionscion -e AWS_DEFAULT_REGION=us-east-1 amazon/aws-cli --endpoint-url "http://localhost:$S3_PORT" s3 "$@"; }
+          for i in $(seq 1 30); do s3 ls >/dev/null 2>&1 && break; sleep 1; done
+          s3 mb s3://scion-objects
+          # Joined to the services' network, so Postgres and RustFS are reached
+          # by name; its own ports are published on free loopback ports.
+          docker run -d --name "image-smoke-$GITHUB_RUN_ID" --network "$NETWORK" \
+            -p 127.0.0.1::7420 -p 127.0.0.1::8080 \
+            -e DATABASE_URL=postgres://scion:scion@postgres:5432/scion \
+            -e AWS_ENDPOINT=http://rustfs:9000 -e AWS_ALLOW_HTTP=true -e AWS_BUCKET=scion-objects \
+            -e AWS_ACCESS_KEY_ID=scion -e AWS_SECRET_ACCESS_KEY=scionscion -e AWS_REGION=us-east-1 \
+            -e SCION_TOKEN_KEY="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')" \
+            "$IMAGE" --web 0.0.0.0:8080
+          ctr="image-smoke-$GITHUB_RUN_ID"
+          trap 'docker logs "$ctr" | tail -50; docker rm -f "$ctr" >/dev/null' EXIT
+          grpc="http://$(docker port "$ctr" 7420/tcp | head -1)"
+          web="http://$(docker port "$ctr" 8080/tcp | head -1)"
+          for i in $(seq 1 30); do curl -sf -o /dev/null "$web/" && break; sleep 1; done
+          docker exec "$ctr" scion-server grant '*' sp:release admin
+          export SCN_TOKEN="$(docker exec "$ctr" scion-server token sp:release --ttl 1h)"
+          scn="$RUNNER_TEMP/scn"
+          "$scn" init "$grpc" image-smoke
+          curl -sf -H "Authorization: Bearer $SCN_TOKEN" "$web/" | grep -q image-smoke
+          cd "$RUNNER_TEMP" && rm -rf clone && "$scn" clone "$grpc" image-smoke clone
+          test -d clone
+          echo "the image served the list page and a clone of image-smoke"
+      - name: push
+        if: github.ref_type == 'tag'
+        run: |
+          echo "$GITHUB_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          docker buildx build -f deploy/release.Dockerfile --platform linux/amd64,linux/arm64 \
+            --push -t "$IMAGE" "$RUNNER_TEMP/image"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   publish:
     name: draft release

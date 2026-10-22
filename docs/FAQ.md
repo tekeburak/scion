@@ -45,8 +45,9 @@ a role in its repository, optionally limited to a directory, people sign in with
 through `scn login`, admins manage roles with `scn access`, and a hermetic simulation and
 fuzz targets check the server. But nothing is released yet: every binary reports one version
 (`--version`, Phase 9.1) and a `v*` tag builds static `x86_64` and `aarch64` Linux binaries
-into a draft release (Phase 9.2), but no tag has been pushed, and there is no server image,
-hosted instance (Phase 9) or cache tier (Phase 4) yet.
+into a draft release (Phase 9.2) along with macOS `scn` (9.3) and the server image
+`ghcr.io/tekeburak/scion-server` (9.5), but no tag has been pushed, and there is no hosted
+instance (Phase 9) or cache tier (Phase 4) yet.
 The web interface and the agent API are in (Phase 11): `scion-server --web <addr>` (on
 `127.0.0.1:8080` in the compose stack) serves server-rendered pages for files, log, blame,
 changesets and change requests under the same roles and directory grants as `scn`; writers
