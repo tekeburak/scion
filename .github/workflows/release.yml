@@ -1,13 +1,16 @@
 # A `v*` tag the owner pushes is the only thing that publishes a release: this
 # workflow builds the four binaries as static musl executables for x86_64 and
-# aarch64, packs one `scion-<version>-<target>.tar.gz` per target with a
-# `SHA256SUMS` file, and opens a draft GitHub release the owner then publishes.
+# aarch64 Linux and `scn` for aarch64 and x86_64 macOS, packs one
+# `scion-<version>-<target>.tar.gz` per target with a `SHA256SUMS` file, and
+# opens a draft GitHub release the owner then publishes.
 # `workflow_dispatch`, and a pull request that changes this file, run the same
 # build as a dry run that publishes nothing; the archives stay on the run as an
-# artifact. Both targets are cross-compiled on one Linux runner with
+# artifact. Every target is cross-compiled on one Linux runner with
 # cargo-zigbuild (zig is the C compiler and linker for the native dependencies),
-# so no other kind of machine is needed. The runners behave as the header of
-# ci.yml says.
+# so no other kind of machine is needed. macOS archives carry `scn` only: the
+# other three link Apple frameworks (Security, SystemConfiguration,
+# CoreFoundation) that exist only in Apple's SDK, and the server tier runs on
+# Linux anyway. The runners behave as the header of ci.yml says.
 name: Release
 
 on:
@@ -27,8 +30,9 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
-  TARGETS: x86_64-unknown-linux-musl aarch64-unknown-linux-musl
+  TARGETS: x86_64-unknown-linux-musl aarch64-unknown-linux-musl aarch64-apple-darwin x86_64-apple-darwin
   BINARIES: scn scion-server scion-ingest scion-mcp
+  MACOS_BINARIES: scn
 
 jobs:
   build:
@@ -51,7 +55,7 @@ jobs:
       - uses: actions/checkout@v5
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-unknown-linux-musl, aarch64-unknown-linux-musl
+          targets: x86_64-unknown-linux-musl, aarch64-unknown-linux-musl, aarch64-apple-darwin, x86_64-apple-darwin
       - uses: arduino/setup-protoc@v3  # scion-proto's build script runs protoc
         with:
           repo-token: ${{ secrets.GITHUB_TOKEN }}
@@ -81,7 +85,8 @@ jobs:
           CARGO_PROFILE_RELEASE_STRIP: symbols
         run: |
           for target in $TARGETS; do
-            cargo zigbuild --release --locked --target "$target" $(printf -- '-p %s ' $BINARIES)
+            case "$target" in *-apple-darwin) bins="$MACOS_BINARIES" ;; *) bins="$BINARIES" ;; esac
+            cargo zigbuild --release --locked --target "$target" $(printf -- '-p %s ' $bins)
           done
       - name: pack
         env:
@@ -94,7 +99,8 @@ jobs:
           for target in $TARGETS; do
             name="scion-$VERSION-$target"
             mkdir "dist/$name"
-            for bin in $BINARIES; do cp "target/$target/release/$bin" "dist/$name/"; done
+            case "$target" in *-apple-darwin) bins="$MACOS_BINARIES" ;; *) bins="$BINARIES" ;; esac
+            for bin in $bins; do cp "target/$target/release/$bin" "dist/$name/"; done
             cp LICENSE NOTICE "dist/$name/"
             tar -C dist --sort=name --mtime="$mtime" --owner=0 --group=0 --numeric-owner \
               -cf - "$name" | gzip -n > "dist/$name.tar.gz"
@@ -112,6 +118,21 @@ jobs:
             "/opt/scion/scion-$VERSION-x86_64-unknown-linux-musl/scn" --version)"
           echo "$out"
           case "$out" in "scn $VERSION ("*) ;; *) echo "::error::unexpected version: $out"; exit 1 ;; esac
+      - name: macOS archives hold Mach-O executables of their architecture
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            case "$target" in aarch64-*) arch=arm64 ;; x86_64-*) arch=x86_64 ;; esac
+            grep -q " scion-$VERSION-$target.tar.gz\$" dist/SHA256SUMS
+            rm -rf "$RUNNER_TEMP/mac" && mkdir "$RUNNER_TEMP/mac"
+            tar -C "$RUNNER_TEMP/mac" -xzf "dist/scion-$VERSION-$target.tar.gz"
+            for bin in $MACOS_BINARIES; do
+              out="$(file -b "$RUNNER_TEMP/mac/scion-$VERSION-$target/$bin")"
+              echo "$target/$bin: $out"
+              case "$out" in "Mach-O 64-bit $arch executable"*) ;; *) echo "::error::$target/$bin is not a $arch Mach-O executable"; exit 1 ;; esac
+            done
+          done
       - uses: actions/upload-artifact@v4
         with:
           name: scion-${{ steps.version.outputs.version }}

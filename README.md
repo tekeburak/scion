@@ -128,10 +128,11 @@ What works today:
   prints its version and the commit it was built from with `--version`; `GET /api/v1/version`
   and the web interface's footer show the server's.
 - **Release binaries**: pushing a `v*` tag builds `scn`, `scion-server`, `scion-ingest`
-  and `scion-mcp` as static `x86_64` and `aarch64` musl executables, packs one archive per
-  target with a `SHA256SUMS` file and opens a draft GitHub release. `scripts/install.sh` picks
-  the archive for the machine, checks it against `SHA256SUMS` and installs the binaries into
-  `~/.local/bin`. No release has been tagged yet; until then, build from source as below.
+  and `scion-mcp` as static `x86_64` and `aarch64` musl executables, and `scn` for macOS,
+  packs one archive per target with a `SHA256SUMS` file and opens a draft GitHub release.
+  `scripts/install.sh` picks the archive for the machine, checks it against `SHA256SUMS` and
+  installs the binaries into `~/.local/bin`. No release has been tagged yet; until then, build
+  from source as below.
 - **Robustness checks**: a seeded, hermetic simulation runs many clients committing, landing,
   merging and reverting while land workers stop and the server restarts, and checks that
   `main` stays linear and nothing landed is lost or written twice; fuzz targets cover every
@@ -435,8 +436,8 @@ hot entries, trees and history pages live in the metadata database, and import r
 two threads; next, import derives trees concurrently and uploads blobs in fewer requests, the
 object plane gains streaming batch requests, and landing becomes one round trip. The web
 interface, HTTP/JSON API, MCP server and `scn --json` are in, every binary reports one version,
-a tag builds static Linux binaries and an install script fetches them; next come macOS
-binaries, a server image, TLS from the clients, a production compose profile and a hosted instance; the regional cache and per-node daemon tiers with
+a tag builds static Linux binaries and macOS `scn`, and an install script fetches them; next
+come a server image, TLS from the clients, a production compose profile and a hosted instance; the regional cache and per-node daemon tiers with
 manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan, with
 acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
@@ -464,6 +465,8 @@ acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
 # cargo-zigbuild: pip install ziglang (or brew install zig) && cargo install cargo-zigbuild --locked
 #   rustup target add x86_64-unknown-linux-musl && cargo zigbuild --release --locked \
 #     --target x86_64-unknown-linux-musl -p scn -p scion-server -p scion-ingest -p scion-mcp
+#   macOS scn the same way: rustup target add aarch64-apple-darwin && cargo zigbuild --release \
+#     --locked --target aarch64-apple-darwin -p scn
 # scripts/install.sh is checked with shellcheck (apt-get install shellcheck / brew install shellcheck):
 #   shellcheck -s sh scripts/install.sh scripts/install-test.sh && sh scripts/install-test.sh
 cargo test --workspace                     # includes 200 seeds of scion-sim
