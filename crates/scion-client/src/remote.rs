@@ -21,7 +21,7 @@ use scion_types::{
 use tonic::metadata::{Ascii, MetadataValue};
 use tonic::service::Interceptor;
 use tonic::service::interceptor::InterceptedService;
-use tonic::transport::{Channel, Endpoint};
+use tonic::transport::{Certificate, Channel, ClientTlsConfig, Endpoint};
 
 /// The status filter of [`Remote::list_change_requests`].
 pub use scion_proto::v1::ChangeRequestStatus;
@@ -39,8 +39,10 @@ const MAX_MESSAGE_BYTES: usize = 64 << 20;
 /// Failure talking to the server.
 #[derive(Debug, thiserror::Error)]
 pub enum RemoteError {
-    #[error("cannot connect to {0}: {1}")]
+    #[error("cannot connect to {0}: {cause}", cause = causes(.1))]
     Connect(String, #[source] tonic::transport::Error),
+    #[error("cannot read the certificates in SSL_CERT_FILE ({0}): {1}")]
+    CertFile(String, #[source] std::io::Error),
     #[error(transparent)]
     Rpc(#[from] tonic::Status),
     #[error("server sent a malformed {0}")]
@@ -306,6 +308,35 @@ fn token_for(server: &str) -> Result<Option<(String, String)>, RemoteError> {
     }
 }
 
+/// TLS for an `https://` server: the webpki roots, and the certificates in
+/// `SSL_CERT_FILE` when it is set (as OpenSSL and curl read it), which is how
+/// a server behind a private certificate authority is trusted.
+fn tls_config() -> Result<ClientTlsConfig, RemoteError> {
+    let config = ClientTlsConfig::new().with_webpki_roots();
+    match std::env::var_os("SSL_CERT_FILE").filter(|f| !f.is_empty()) {
+        None => Ok(config),
+        Some(file) => {
+            let pem = std::fs::read(&file)
+                .map_err(|e| RemoteError::CertFile(Path::new(&file).display().to_string(), e))?;
+            Ok(config.ca_certificate(Certificate::from_pem(pem)))
+        }
+    }
+}
+
+/// `e` and its sources, joined with `: `. tonic's transport error says only
+/// "transport error"; the reason (refused, a certificate for another name)
+/// is in its sources.
+fn causes(e: &dyn std::error::Error) -> String {
+    let mut out = e.to_string();
+    let mut next = e.source();
+    while let Some(e) = next {
+        out.push_str(": ");
+        out.push_str(&e.to_string());
+        next = e.source();
+    }
+    out
+}
+
 /// Adds `authorization: Bearer <token>` to every request, when there is a
 /// token.
 #[derive(Debug, Clone)]
@@ -355,8 +386,14 @@ impl Remote {
                     .map_err(|_| RemoteError::BadToken(server.to_owned(), from.to_owned()))?,
             ),
         };
-        let channel = Endpoint::from_shared(server.to_owned())
-            .map_err(|e| RemoteError::Connect(server.to_owned(), e))?
+        let mut endpoint = Endpoint::from_shared(server.to_owned())
+            .map_err(|e| RemoteError::Connect(server.to_owned(), e))?;
+        if server.starts_with("https://") {
+            endpoint = endpoint
+                .tls_config(tls_config()?)
+                .map_err(|e| RemoteError::Connect(server.to_owned(), e))?;
+        }
+        let channel = endpoint
             .timeout(RPC_DEADLINE)
             .connect_timeout(RPC_DEADLINE)
             .connect()

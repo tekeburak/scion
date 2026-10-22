@@ -472,8 +472,11 @@ accounting. Backup and restore of the metadata database is the managed platform'
   RustFS, it serves the repository list page and `scn clone` against it succeeds.
 - **9.6 TLS from `scn` and the clients.** `scn`, `scion-ingest`, `scion-mcp` and
   `scion-client` accept `https://` server addresses and verify them against the webpki roots
-  (tonic's rustls feature; `rustls` is already in the tree); the server itself stays plain
-  HTTP/2 behind a terminating proxy. *Accepted when* an e2e test clones and lands through a
+  (tonic's rustls feature; `rustls` is already in the tree), plus the certificates in
+  `SSL_CERT_FILE` when it is set, which is how a private certificate authority (9.7's local
+  one) is trusted. `scion-ingest` works on the stores directly and `scion-mcp`'s HTTP client
+  already verifies TLS, so the change is `scion-client`'s channel. The server itself stays
+  plain HTTP/2 behind a terminating proxy. *Accepted when* an e2e test clones and lands through a
   TLS proxy with a test certificate, and a certificate for another name is refused with a
   message naming the host.
 - **9.7 Production compose profile.** `deploy/compose.prod.yml`: the release image, Postgres

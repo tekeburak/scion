@@ -381,6 +381,7 @@ fn rpc_code(code: tonic::Code) -> &'static str {
 fn remote_code(e: &RemoteError) -> &'static str {
     match e {
         RemoteError::Connect(..) => "unavailable",
+        RemoteError::CertFile(..) => "local",
         RemoteError::Rpc(st) => rpc_code(st.code()),
         RemoteError::Malformed(_) => "internal",
         RemoteError::Token(..) | RemoteError::BadToken(..) => "unauthenticated",

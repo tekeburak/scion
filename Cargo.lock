@@ -3253,6 +3253,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "48e13bd8c0e9365c43cfa5c9e8f9ad49d3c8444926c9aac819e0e4dc503c8fdf"
 dependencies = [
  "aws-lc-rs",
+ "log",
  "once_cell",
  "ring",
  "rustls-pki-types",
@@ -3613,6 +3614,7 @@ dependencies = [
  "serde_json",
  "tempfile",
  "tokio",
+ "tokio-rustls",
  "tonic",
  "tower",
 ]
@@ -4300,11 +4302,13 @@ dependencies = [
  "socket2",
  "sync_wrapper",
  "tokio",
+ "tokio-rustls",
  "tokio-stream",
  "tower",
  "tower-layer",
  "tower-service",
  "tracing",
+ "webpki-roots 1.0.10",
 ]
 
 [[package]]

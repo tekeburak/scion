@@ -82,7 +82,10 @@ What works today:
   fix to the changeset that wrote it), `revert` (the server undoes a changeset on your head,
   refusing if its files changed since; blame keeps crediting the restored lines to their
   authors) and `checkout` of any changeset. Two clones landing
-  at the same time, with no `update` in between, is the CI end-to-end test.
+  at the same time, with no `update` in between, is the CI end-to-end test. An `https://`
+  server address is checked against the public certificate authorities, plus the
+  certificates in `SSL_CERT_FILE` for a private one; the server itself speaks plain HTTP/2
+  behind a proxy that terminates TLS.
 - **`scion-ingest`**: imports a git history into Scion (one changeset per commit, renames and
   copies kept for `blame`, the git sha kept in the changeset), resumes from checkpoints, syncs
   incrementally, refuses a rewritten upstream, and `verify` compares every imported tree with
@@ -440,7 +443,7 @@ two threads; next, import derives trees concurrently and uploads blobs in fewer 
 object plane gains streaming batch requests, and landing becomes one round trip. The web
 interface, HTTP/JSON API, MCP server and `scn --json` are in, every binary reports one version,
 a tag builds static Linux binaries, macOS `scn` and the server image, and an install script
-fetches the binaries; next come TLS from the clients, a production compose profile and a hosted instance; the regional cache and per-node daemon tiers with
+fetches the binaries, and `scn` talks to `https://` servers; next come a production compose profile and a hosted instance; the regional cache and per-node daemon tiers with
 manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan, with
 acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
