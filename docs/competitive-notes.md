@@ -7,6 +7,30 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-10-22
+
+Star and fork counts of the watched projects are missing again: the GitHub API and the
+repository pages refused this run, so only anonymous git reads worked (clones under `/tmp`).
+Scion's own counts came from the API (0 stars, 1 fork). The search for new projects created
+after 2026-10-13 could not run. No tags or releases on any of the four watched repositories.
+
+| Repository | Last push | Last 24 h | Direction |
+|---|---|---|---|
+| [bnsd55/open-scion](https://github.com/bnsd55/open-scion) | 2026-10-22 | 48 merged PRs | Still operations and proof, no new feature. Postgres hardening (disk-full error mapping, crash tests, migrations logged), an audit log that records intent, result and every ref move, client keepalive that notices a dead peer in about 50 s, a measured restart time after a SIGKILL in the middle of a land, a measured restore time, runbooks for first boot and certificate rotation, a release-verification page for users, a security reviewer's starting packet, fuzzing of the archive readers (two bugs found), and a docs test that runs every command a runbook names as proof. Import now refuses dates git cannot write. No new benchmark number in the README; its many-agent land demo (`scn bench --agents`) is unchanged. |
+| [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub) | 2026-10-18 | none | Quiet since its single commit. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 2026-10-16 | none | Quiet for six days. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 2026-10-14 | none | Quiet for eight days. |
+
+### What it means for Scion
+
+- **Shutdown is the next operations gap.** The active project drains requests before it stops
+  and measures recovery after a kill. `scion-server` stops at once on SIGTERM; land recovery
+  (5.4) keeps the data safe, but every rolling deploy of the hosted instance (9.9) cuts
+  in-flight clones and lands with a transport error. Opened as one `idea:` issue.
+- **Runbooks tested by CI** are the pattern behind most of their PRs. Scion's 9.9 `HOSTING.md`
+  and 9.11 quickstart already plan commands checked against the scripts; no change.
+- **Benchmarks:** no new claim anywhere since 2026-10-19.
+
 ## 2026-10-21
 
 Star and fork counts are missing today: the GitHub API token of the watch run was refused, so
