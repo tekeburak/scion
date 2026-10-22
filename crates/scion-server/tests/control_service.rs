@@ -408,4 +408,29 @@ async fn path_log_of_428_changesets_makes_three_metadata_queries() {
         counting.queries(),
         3
     );
+
+    // The same request again is answered from the reply memo; what is left
+    // is the caller's grants, which only a Postgres store memoizes.
+    counting.queries.store(0, Ordering::Relaxed);
+    let again = client
+        .path_log(PathLogRequest {
+            repo: REPO.into(),
+            head: bytes(head),
+            path: "f.txt".into(),
+            limit: 1000,
+        })
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(again.changesets, log.changesets);
+    assert!(
+        counting.queries() <= 1,
+        "{} queries for a repeated path log",
+        counting.queries()
+    );
+    assert_eq!(
+        counting.page_gets(),
+        pages,
+        "a repeated path log reads no page"
+    );
 }
