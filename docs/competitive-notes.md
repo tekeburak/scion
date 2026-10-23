@@ -7,6 +7,35 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-10-23
+
+The repository pages answered this run (the API did not), so star and fork counts are back,
+read from each page. The GitHub search for "scion source control", sorted by last update,
+lists 20 repositories; nine are new to these notes. Nothing below was read beyond each
+repository's page and README headings; `tinyhumansai/openscion` stays GPL-3.0-only.
+
+| Repository | Stars / forks | First screen | Noted |
+|---|---|---|---|
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 236 / 18 | title, tagline, non-affiliation paragraph, a star-history chart, then Benchmarks | Quiet since 2026-10-16; the star-history chart sits above the benchmarks. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 111 / 18 | social-preview image, title, one paragraph, then a benchmark chart against git on synthetic repositories | Quiet since 2026-10-14; no badges. |
+| [bnsd55/open-scion](https://github.com/bnsd55/open-scion) | 29 / 2 | banner, four badges (CI, license, Rust version, "alpha"), an alpha notice, one-line purpose, a non-affiliation section | 34 commits since noon on 2026-10-22, all tests, CI matrix (Postgres majors, arm64, xfs), import written in batches, audit lines. No new README benchmark number. |
+| [OpenCSGs/scion](https://github.com/OpenCSGs/scion) *new* | 3 / 0 | title, an English / Chinese switcher, an architecture diagram, a demo GIF (four agents landing on one branch, with an MP4 link), then benchmark tables | Apache-2.0. Its benchmark tables put git and another implementation of the design side by side with its own medians. Topics: grpc, rust, source-control, version-control. |
+| [adrianchifor/scn](https://github.com/adrianchifor/scn) *new* | 1 / 0 | title and an SVG architecture diagram (stateless controllers, an index, SQLite shards, S3), then install and compose sections | No badges, no benchmark chart, no demo. |
+| [rizaust/open-scion](https://github.com/rizaust/open-scion) | 3 | — | Last update about 2026-10-15. |
+| [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub) | 0 / 0 | — | Quiet since its single commit; no description or topics. |
+| Seen in the search, not opened: `TheDancingDeveloper-org/graft` (0, design stage), `culebraluxe/forgevcs` (0), `Lvstw1205/scion-lite` (0), `Hanam824/scion` (0, a desktop app), `wrencanfly/wren` (0, built on git), `TomOrth/deltrove` (0, planning), `scholzdev/boughline` (0), `virajbhartiya/flux` (1), `mangreen/mini-scion` (1), `fenwii/openscion` (1) | | | All created in the ten days since the post, none with a release. |
+
+### What it means for Scion
+
+- **A demo of many agents landing on one branch** is now on the first screen of two projects
+  (an animated banner on 2026-10-19, a GIF here). Scion's README shows a measured chart of the
+  same thing (16 writers); no GIF is planned, since a recording would need its own script to
+  stay reproducible like the SVGs.
+- **Benchmarks against another implementation** appear for the first time in a README. Scion
+  plans peers in its own benchmark (10.10, from the 6.10 decision); until then its table says
+  "Other implementations of the design: not measured in this run", which stays true.
+- **Status badge:** only `bnsd55/open-scion` and Scion carry an "alpha" badge; no change.
+
 ## 2026-10-22
 
 Star and fork counts of the watched projects are missing again: the GitHub API and the
