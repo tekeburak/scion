@@ -447,16 +447,20 @@ Read these numbers with their limits:
 
 - **Import** writes one immutable object per blob, tree and history page to a remote object
   store, where git writes a local packfile; parity with git's push is not a goal. The figure to
-  quote is the cold row, 8.0× git: into an empty bucket the object store's write rate is the
-  bound. Warm, with the objects already stored, it is 2.1× git.
+  quote is the cold row, 8.4× git: into an empty bucket the object store's write rate is the
+  bound. Warm, with the objects already stored, it is 1.9× git.
 - **Cold `log` and `blame`**, the first call after import with nothing cached on the server,
-  take 3.6× and 1.0× git: a path's history is walked in lockstep, one read per step, and blame
-  answers from the file's own history. Warm, `blame` is 0.19× git and a path log 1.0×. Clone is
-  0.47× git and a sparse clone 0.11×.
+  take 4.0× and 1.2× git: a path's history is walked in lockstep, one read per step, and blame
+  answers from the file's own history. Warm, both are answered from memory: `blame` is 0.16×
+  git and a path log 0.67×. Clone is 0.35× git and a sparse clone 0.11×.
+- **`status`** lists only the directories whose entries changed, so a clean `status` reads no
+  file and the row (0.04× git) is mostly the cost of starting a process; see
+  [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 - **A single commit + land** (`scn commit --land`, one round trip to land) still goes through a
-  change request and the serial land worker, so on its own it takes 1.2× git's local commit and
-  push. The worker pays off under contention: 16 writers landing at once finish in 0.12× git's
-  time, because no writer repeats another's fetch, rebase and push.
+  change request and the serial land worker, so on its own it takes about git's time for a
+  local commit and push (45 ms against 43 ms). The worker pays off under contention: 16 writers
+  landing at once finish in 0.12× git's time, because no writer repeats another's fetch, rebase
+  and push.
 - One machine, three runs, shared cloud VM: medians move by several milliseconds between
   runs. The CSV with every sample is [docs/bench-real.csv](docs/bench-real.csv); render it with
   `python3 scripts/render-assets.py`. Older synthetic workloads against an in-process server
