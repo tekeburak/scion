@@ -41,6 +41,20 @@ way to each listed path one level at a time and each listed directory with every
 it at once. `scn commit` hashes its files locally, asks `HasBlobs`, and sends only the missing
 ones in one `PutBlobs` stream.
 
+Since 10.8 a clean `status` on the sparse clone (322 files, about 70 directories) lists no
+directory and reads no file: it makes one `statx` per directory and file, on several threads
+once there are more than 128 of either, about 0.7 ms in all. The index records each file's
+ctime and inode with its mtime, and each directory's mtime when its listing held only what the
+index puts there; a recorded time counts only when it is older than the index file, so an edit
+made in the same clock tick as the checkout is still rehashed, and a proptest over random edit
+sets checks the result against a full re-hash. The row is now about the cost of starting a
+process: `scn status` takes about 3.3 ms when run alone on the benchmark machine, of which
+`scn --version` takes 2.1 ms and `/bin/true` 1.4 ms, and `bench-real`'s timer reads 4 ms for an
+empty command. So 7 ms against git's 172 ms is 0.04×, and the 0.03× target (about 5 ms) sits
+below what the timer measures for any process. Since 10.8, `bench-real` also runs `scn` in its
+working copy from its own shell, as git runs with `-C`, instead of through `sh -c "cd … && scn"`,
+which had charged every `scn` row in a working copy a second shell.
+
 ## Synthetic workloads
 
 The [benchmark runner](../crates/scion-client/examples/benchmark.rs) compares Scion with git on
