@@ -16,7 +16,7 @@ use scion_proto::MAX_IDS;
 use scion_proto::trace::{span, timed};
 use scion_types::{BlobId, Changeset, ChangesetId, FileChange, Identity, RepoPath, Timestamp};
 
-use crate::checkout::{BATCHES_IN_FLIGHT, mtime_ns};
+use crate::checkout::BATCHES_IN_FLIGHT;
 use crate::index::{Index, IndexEntry};
 use crate::remote::{Remote, RemoteChangeRequest, RemoteError};
 use crate::status::{FileStatus, StatusError, read_working_file, status};
@@ -82,12 +82,7 @@ async fn upload(
         let io_err = |e| CommitError::Io(file.clone(), e);
         let meta = std::fs::symlink_metadata(&file).map_err(io_err)?;
         let (kind, data) = read_working_file(&file).map_err(io_err)?;
-        let entry = IndexEntry {
-            id: BlobId::hash(&data),
-            kind,
-            size: data.len() as u64,
-            mtime_ns: mtime_ns(&meta),
-        };
+        let entry = IndexEntry::new(BlobId::hash(&data), kind, &meta);
         read.push((path.clone(), entry, data));
     }
     let ids: Vec<BlobId> = read
@@ -250,7 +245,7 @@ impl Pending {
             self.index.entries.remove(path);
         }
         self.index.entries.extend(self.uploaded);
-        ws.write_index(&self.index)?;
+        ws.write_index(&mut self.index)?;
         self.state.current_head = id;
         ws.write_state(&self.state)?;
         ws.write_added(&BTreeSet::new())?;

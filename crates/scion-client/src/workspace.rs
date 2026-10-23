@@ -7,8 +7,9 @@ use std::path::{Path, PathBuf};
 use scion_types::{ChangesetId, RepoPath};
 use serde::{Deserialize, Serialize};
 
-use crate::index::Index;
+use crate::index::{Index, mtime_ns};
 use crate::sparse::{SparseError, SparseProfile};
+use crate::status::clean_dirs;
 
 /// Name of the metadata directory at the root of a working copy.
 pub const SCN_DIR: &str = ".scn";
@@ -83,6 +84,13 @@ fn read(path: PathBuf) -> Result<Vec<u8>, WorkspaceError> {
 
 fn read_string(path: PathBuf) -> Result<String, WorkspaceError> {
     std::fs::read_to_string(&path).map_err(|e| WorkspaceError::Io(path, e))
+}
+
+/// The mtime of the file at `path`.
+fn written_ns(path: &Path) -> Result<i64, WorkspaceError> {
+    std::fs::metadata(path)
+        .map(|meta| mtime_ns(&meta))
+        .map_err(|e| WorkspaceError::Io(path.to_owned(), e))
 }
 
 /// Write `data` to a temporary file next to `path` and rename it into place,
@@ -209,11 +217,20 @@ impl Workspace {
             return Ok(Index::default());
         }
         let bytes = read(path.clone())?;
-        Index::decode(&bytes).map_err(|e| WorkspaceError::Parse(path, e.to_string()))
+        let mut index = Index::decode(&bytes)
+            .map_err(|e| WorkspaceError::Parse(path.clone(), e.to_string()))?;
+        index.written_ns = written_ns(&path)?;
+        Ok(index)
     }
 
-    pub fn write_index(&self, index: &Index) -> Result<(), WorkspaceError> {
-        write_atomic(self.file("index"), &index.encode())
+    /// Write `index`, first recording which of its directories hold nothing
+    /// else.
+    pub fn write_index(&self, index: &mut Index) -> Result<(), WorkspaceError> {
+        index.dirs = clean_dirs(&self.root, index);
+        let path = self.file("index");
+        write_atomic(path.clone(), &index.encode())?;
+        index.written_ns = written_ns(&path)?;
+        Ok(())
     }
 
     /// A list of paths, one per line, from `.scn/<name>`; empty if absent.

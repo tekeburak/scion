@@ -106,7 +106,6 @@ async fn apply(
         path: path.clone(),
         id: f.id,
         kind: f.kind,
-        size: f.size,
     };
     let mut plan: BTreeMap<RepoPath, Option<File>> = BTreeMap::new();
     if from != to {
@@ -424,7 +423,6 @@ pub async fn update_with_markers(
                 path: path.clone(),
                 id: BlobId::hash(&data),
                 kind,
-                size: data.len() as u64,
             };
             write_file(root, &file, data).await?;
             if !index.entries.contains_key(&path) {
