@@ -907,6 +907,42 @@ impl MetadataStore for PostgresStore {
         Ok(out)
     }
 
+    async fn get_encoded_changesets(
+        &self,
+        repo: &str,
+        ids: &[ChangesetId],
+    ) -> Result<Vec<Option<Vec<u8>>>> {
+        let mut out = Vec::with_capacity(ids.len());
+        let mut missing = Vec::new();
+        for id in ids {
+            let cs = self.changesets.get(&(repo.to_owned(), *id)).await;
+            if cs.is_none() {
+                missing.push(id.as_bytes().to_vec());
+            }
+            out.push(cs.map(|cs| cs.encode_to_vec()));
+        }
+        if missing.is_empty() {
+            return Ok(out);
+        }
+        // The stored bytes are the canonical encoding, checked when the
+        // changeset was stored, so they are returned as they are.
+        let rows: Vec<(Vec<u8>, Vec<u8>)> = sqlx::query_as(
+            "SELECT c.id, c.canonical FROM changesets c JOIN repos r ON r.id = c.repo \
+             WHERE r.name = $1 AND c.id = ANY($2)",
+        )
+        .bind(repo)
+        .bind(&missing)
+        .fetch_all(&self.pool)
+        .await?;
+        let found: HashMap<Vec<u8>, Vec<u8>> = rows.into_iter().collect();
+        for (slot, id) in out.iter_mut().zip(ids) {
+            if slot.is_none() {
+                *slot = found.get(id.as_bytes().as_slice()).cloned();
+            }
+        }
+        Ok(out)
+    }
+
     async fn generation(&self, repo: &str, id: ChangesetId) -> Result<Option<u64>> {
         let row: Option<(i64,)> = sqlx::query_as(
             "SELECT c.generation FROM changesets c JOIN repos r ON r.id = c.repo \
@@ -1427,16 +1463,18 @@ impl MetadataStore for PostgresStore {
 mod tests {
     use super::*;
 
-    /// With 1,000 landed requests, `find_landings` plans as index probes
-    /// only, under the generic plan a cached statement ends up with as well
-    /// as a custom one.
-    #[tokio::test]
-    async fn find_landings_uses_the_indexes() {
-        let opts: PgConnectOptions = std::env::var("SCION_TEST_DATABASE_URL")
+    fn options() -> PgConnectOptions {
+        std::env::var("SCION_TEST_DATABASE_URL")
             .unwrap_or_else(|_| "postgres://scion:scion@localhost:5432/scion".to_owned())
             .parse()
-            .unwrap();
-        let name = format!("scion_test_{}_plan", std::process::id());
+            .unwrap()
+    }
+
+    /// A migrated store in a database of its own, named after `suffix`, and
+    /// a connection to drop it with.
+    async fn fresh(suffix: &str) -> (PostgresStore, PgPool, String) {
+        let opts = options();
+        let name = format!("scion_test_{}_{suffix}", std::process::id());
         let admin = PgPool::connect_with(opts.clone()).await.unwrap();
         sqlx::query(&format!("CREATE DATABASE \"{name}\""))
             .execute(&admin)
@@ -1446,6 +1484,108 @@ mod tests {
             .await
             .unwrap();
         store.migrate().await.unwrap();
+        (store, admin, name)
+    }
+
+    async fn drop_fresh(store: PostgresStore, admin: PgPool, name: String) {
+        store.pool().close().await;
+        sqlx::query(&format!("DROP DATABASE \"{name}\" WITH (FORCE)"))
+            .execute(&admin)
+            .await
+            .unwrap();
+    }
+
+    /// History pages and trees are stored with lz4, which a path log's
+    /// page reads decompress faster than pglz (Phase 10.7).
+    #[tokio::test]
+    async fn pages_and_trees_are_compressed_with_lz4() {
+        let (store, admin, name) = fresh("lz4").await;
+        store.create_repo("lz4").await.unwrap();
+        for table in ["pages", "trees"] {
+            let (method,): (String,) = sqlx::query_as(
+                "SELECT attcompression::text FROM pg_attribute \
+                 WHERE attrelid = $1::regclass AND attname = 'bytes'",
+            )
+            .bind(table)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+            assert_eq!(method, "l", "{table}");
+        }
+        let page = Bytes::from("a history node ".repeat(1_000));
+        store
+            .put_pages("lz4", std::slice::from_ref(&page))
+            .await
+            .unwrap();
+        let (method,): (Option<String>,) =
+            sqlx::query_as("SELECT pg_column_compression(bytes) FROM pages")
+                .fetch_one(store.pool())
+                .await
+                .unwrap();
+        assert_eq!(method.as_deref(), Some("lz4"));
+        let read = store
+            .get_pages("lz4", &[BlobId::hash(&page)])
+            .await
+            .unwrap();
+        assert_eq!(read, [Some(page)]);
+        drop_fresh(store, admin, name).await;
+    }
+
+    /// Encoded changesets read by a server that has not decoded them are
+    /// the stored canonical bytes, in the order asked, without a decode.
+    #[tokio::test]
+    async fn encoded_changesets_are_the_stored_bytes() {
+        let (store, admin, name) = fresh("encoded").await;
+        store.create_repo("enc").await.unwrap();
+        let mut ids = Vec::new();
+        let mut batch = Vec::new();
+        for i in 0..3 {
+            let cs = Changeset {
+                repo: "enc".into(),
+                parents: ids.last().copied().into_iter().collect(),
+                author: scion_types::Identity::new("t", "t@example.com"),
+                author_date: scion_types::Timestamp::new(i, 0),
+                committer: None,
+                committer_date: None,
+                message: format!("change {i}"),
+                file_changes: std::collections::BTreeMap::new(),
+                extra: std::collections::BTreeMap::new(),
+            };
+            ids.push(cs.id());
+            batch.push(cs);
+        }
+        store.put_changesets(&batch).await.unwrap();
+        let cold = PostgresStore::connect_with(options().database(&name))
+            .await
+            .unwrap();
+        let unknown = ChangesetId::from_bytes([9; 32]);
+        assert_eq!(
+            cold.get_encoded_changesets("enc", &[ids[2], unknown, ids[0], ids[2]])
+                .await
+                .unwrap(),
+            [
+                Some(batch[2].encode_to_vec()),
+                None,
+                Some(batch[0].encode_to_vec()),
+                Some(batch[2].encode_to_vec()),
+            ]
+        );
+        assert!(
+            cold.changesets
+                .get(&("enc".to_owned(), ids[0]))
+                .await
+                .is_none()
+        );
+        cold.pool().close().await;
+        drop_fresh(store, admin, name).await;
+    }
+
+    /// With 1,000 landed requests, `find_landings` plans as index probes
+    /// only, under the generic plan a cached statement ends up with as well
+    /// as a custom one.
+    #[tokio::test]
+    async fn find_landings_uses_the_indexes() {
+        let (store, admin, name) = fresh("plan").await;
         store.create_repo("plan").await.unwrap();
         let cs = |i: u32, tag: u8| {
             let mut b = [tag; 32];
@@ -1502,10 +1642,6 @@ mod tests {
             );
         }
         drop(conn);
-        store.pool().close().await;
-        sqlx::query(&format!("DROP DATABASE \"{name}\" WITH (FORCE)"))
-            .execute(&admin)
-            .await
-            .unwrap();
+        drop_fresh(store, admin, name).await;
     }
 }
