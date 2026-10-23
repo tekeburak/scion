@@ -55,7 +55,8 @@ Scion is that design, built on boring infrastructure:
 Scion is **alpha** software. The server, the CLI, git import and the real-repository benchmark
 work and are exercised end to end in CI on Postgres + S3. Every request needs a token
 signed by the server and a role in the repository it touches, optionally limited to a
-directory; people sign in with GitHub (`scn login`) and services use tokens from the operator. Landing goes through change requests and a serial
+directory; people sign in with GitHub (`scn login`) and services use tokens from the
+operator. Landing goes through change requests and a serial
 land worker, and every request can be listed and traced to the changeset it landed;
 merges and reverts run on the server. A [web interface](#web-interface), an HTTP/JSON API and
 an MCP server serve people and agents. A release workflow builds static Linux binaries and a
@@ -115,7 +116,8 @@ What works today:
   admin rejects it; each page shows only the buttons the visitor's role allows. A server
   admin creates repositories from the repository list, and a repository's settings page lets
   its admins make it public or private and grant and revoke roles. The pages run inside the
-  server and check the same roles and directory grants as `scn`. People sign in with GitHub in the browser (once the
+  server and check the same roles and directory grants as `scn`. People sign in with
+  GitHub in the browser (once the
   OAuth app's `SCION_GITHUB_CLIENT_SECRET` is set; the server keeps no session state), tools
   send `Authorization: Bearer <token>`, and `scn access grant anyone reader` makes a
   repository, or with `--path` one directory, public: readable without signing in.
@@ -197,7 +199,8 @@ OAuth app with device flow enabled, start the stack with `SCION_GITHUB_CLIENT_ID
 client id and run `scn login http://127.0.0.1:7420`; the token lands in
 `~/.config/scn/tokens/` (mode 0600) and is valid for 30 days. With the app's client secret in
 `SCION_GITHUB_CLIENT_SECRET` too (callback URL `http://127.0.0.1:8080/login/callback`), *Sign
-in* on the pages does the same in the browser and shows private repositories. A token stays valid until its `--ttl` runs out, also across `down -v`. A `scion-server` run
+in* on the pages does the same in the browser and shows private repositories. A token stays valid
+until its `--ttl` runs out, also across `down -v`. A `scion-server` run
 outside compose needs `SCION_TOKEN_KEY` (`openssl rand -hex 32`) and must be restarted after
 `down -v` too: it keeps an in-memory memo of the objects the bucket holds, and that memo
 outlives the bucket.
@@ -232,7 +235,8 @@ to the landed changeset. Only a change to the same lines as one already on `main
 writes conflict markers into those files to resolve and `commit` before landing again.
 `scn commit --land -m <message>` commits and lands in one step, with one round trip to the
 server for both. `scn land --no-wait` prints the request id at once and
-`scn land --status <id>` reads its outcome later; `scn requests --status needs-rebase` lists only the conflicted requests, and
+`scn land --status <id>` reads its outcome later; `scn requests --status needs-rebase` lists
+only the conflicted requests, and
 `scn log --landed` finds the request behind a changeset even when the server rebased it to a
 new id.
 
@@ -443,11 +447,12 @@ Read these numbers with their limits:
 
 - **Import** writes one immutable object per blob, tree and history page to a remote object
   store, where git writes a local packfile; parity with git's push is not a goal. The figure to
-  quote is the cold row, 8.6× git: into an empty bucket the object store's write rate is the
-  bound. Warm, with the objects already stored, it is 2.2× git.
+  quote is the cold row, 8.0× git: into an empty bucket the object store's write rate is the
+  bound. Warm, with the objects already stored, it is 2.1× git.
 - **Cold `log` and `blame`**, the first call after import with nothing cached on the server,
-  take 6.0× and 3.2× git. Warm, `blame` is 0.24× git and a path log 0.86×. Clone is 0.37× git
-  and a sparse clone 0.07×.
+  take 3.6× and 1.0× git: a path's history is walked in lockstep, one read per step, and blame
+  answers from the file's own history. Warm, `blame` is 0.19× git and a path log 1.0×. Clone is
+  0.47× git and a sparse clone 0.11×.
 - **A single commit + land** (`scn commit --land`, one round trip to land) still goes through a
   change request and the serial land worker, so on its own it takes 1.2× git's local commit and
   push. The worker pays off under contention: 16 writers landing at once finish in 0.12× git's
@@ -473,9 +478,10 @@ A performance pass is under way, aimed at every benchmark row being a multiple f
 a path log already reads all of its changesets in one batch, the server's memos keep their
 hot entries and are invalidated across processes, trees and history pages live in the
 metadata database, import reads git on two threads, clone and commit move objects in
-batches, and `scn commit --land` lands in one round trip; next, cold `log` and `blame` read
-history in larger steps, `status` walks the working copy on several threads, and the land
-worker prepares the next request while the previous one lands. The web
+batches, `scn commit --land` lands in one round trip, and a cold path log or blame walks
+history in lockstep and answers from the file's own history; next, warm `log` and `blame`
+answered from memory, `status` walking the working copy on several threads, and a land
+worker that prepares the next request while the previous one lands. The web
 interface, HTTP/JSON API, MCP server and `scn --json` are in, every binary reports one version,
 a tag builds static Linux binaries, macOS `scn` and the server image, and an install script
 fetches the binaries, `scn` talks to `https://` servers, and a production compose profile runs
