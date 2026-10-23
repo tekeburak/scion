@@ -9,7 +9,6 @@
 use std::collections::{BTreeMap, HashMap};
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::UNIX_EPOCH;
 
 use futures_util::{StreamExt, TryStreamExt, stream};
 use scion_proto::MAX_IDS;
@@ -52,7 +51,6 @@ pub(crate) struct File {
     pub(crate) path: RepoPath,
     pub(crate) id: BlobId,
     pub(crate) kind: FileType,
-    pub(crate) size: u64,
 }
 
 /// Fetch the trees `wanted` (each id with whether every tree beneath it is
@@ -126,13 +124,8 @@ async fn list_files(
                     TreeEntry::Tree { id } if sparse.descends_into(&path) => {
                         next.push((Some(path), id));
                     }
-                    TreeEntry::Blob { id, kind, size } if sparse.includes(&path) => {
-                        files.push(File {
-                            path,
-                            id,
-                            kind,
-                            size,
-                        });
+                    TreeEntry::Blob { id, kind, .. } if sparse.includes(&path) => {
+                        files.push(File { path, id, kind });
                     }
                     TreeEntry::Tree { .. } | TreeEntry::Blob { .. } => {}
                 }
@@ -143,14 +136,6 @@ async fn list_files(
     Ok(files)
 }
 
-pub(crate) fn mtime_ns(meta: &std::fs::Metadata) -> i64 {
-    meta.modified()
-        .ok()
-        .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
-        .and_then(|d| i64::try_from(d.as_nanos()).ok())
-        .unwrap_or(0)
-}
-
 /// Write one file and return its index entry, on the blocking pool.
 pub(crate) async fn write_file(
     root: &Path,
@@ -158,8 +143,8 @@ pub(crate) async fn write_file(
     data: Vec<u8>,
 ) -> Result<IndexEntry, CheckoutError> {
     let dest = root.join(file.path.as_str());
-    let (id, kind, size) = (file.id, file.kind, file.size);
-    tokio::task::spawn_blocking(move || write_entry(&dest, id, kind, size, &data))
+    let (id, kind) = (file.id, file.kind);
+    tokio::task::spawn_blocking(move || write_entry(&dest, id, kind, &data))
         .await
         .unwrap_or_else(|e| std::panic::resume_unwind(e.into_panic()))
 }
@@ -169,7 +154,6 @@ fn write_entry(
     dest: &Path,
     id: BlobId,
     kind: FileType,
-    size: u64,
     data: &[u8],
 ) -> Result<IndexEntry, CheckoutError> {
     let io_err = |e| CheckoutError::Io(dest.to_owned(), e);
@@ -191,12 +175,7 @@ fn write_entry(
         }
     }
     let meta = std::fs::symlink_metadata(dest).map_err(io_err)?;
-    Ok(IndexEntry {
-        id,
-        kind,
-        size,
-        mtime_ns: mtime_ns(&meta),
-    })
+    Ok(IndexEntry::new(id, kind, &meta))
 }
 
 /// Write every blob received on `blobs` to the files in `by_id` that hold
@@ -212,7 +191,7 @@ fn write_files(
     while let Some((id, data)) = blobs.blocking_recv() {
         for file in by_id.get(&id).map_or(&[][..], Vec::as_slice) {
             let dest = root.join(file.path.as_str());
-            let entry = write_entry(&dest, id, file.kind, file.size, &data)?;
+            let entry = write_entry(&dest, id, file.kind, &data)?;
             entries.push((file.path.clone(), entry));
         }
     }
@@ -270,7 +249,10 @@ pub async fn checkout(
     if entries.len() != expected {
         return Err(RemoteError::Malformed("reply: a blob is missing").into());
     }
-    Ok(Index { entries })
+    Ok(Index {
+        entries,
+        ..Index::default()
+    })
 }
 
 /// Clone `repo` from `server`, connected as `remote`, into `dest` at the
@@ -297,8 +279,8 @@ pub async fn clone(
         },
     )?;
     ws.write_sparse(&sparse)?;
-    let index = checkout(&remote, repo, dest, main.root_tree, &sparse).await?;
-    ws.write_index(&index)?;
+    let mut index = checkout(&remote, repo, dest, main.root_tree, &sparse).await?;
+    ws.write_index(&mut index)?;
     ws.write_state(&State {
         current_head: main.target,
         base: main.target,

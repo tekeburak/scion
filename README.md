@@ -479,9 +479,10 @@ a path log already reads all of its changesets in one batch, the server's memos 
 hot entries and are invalidated across processes, trees and history pages live in the
 metadata database, import reads git on two threads, clone and commit move objects in
 batches, `scn commit --land` lands in one round trip, and a cold path log or blame walks
-history in lockstep and answers from the file's own history; next, warm `log` and `blame`
-answered from memory, `status` walking the working copy on several threads, and a land
-worker that prepares the next request while the previous one lands. The web
+history in lockstep and answers from the file's own history, a warm `log` or `blame` is
+answered from memory, and `status` lists only the directories whose entries changed, on
+several threads; next, a land worker that prepares the next request while the previous one
+lands. The web
 interface, HTTP/JSON API, MCP server and `scn --json` are in, every binary reports one version,
 a tag builds static Linux binaries, macOS `scn` and the server image, and an install script
 fetches the binaries, `scn` talks to `https://` servers, and a production compose profile runs
