@@ -478,21 +478,23 @@ Read these numbers with their limits:
 
 ## What's next
 
-A performance pass is under way, aimed at every benchmark row being a multiple faster than git:
-a path log already reads all of its changesets in one batch, the server's memos keep their
-hot entries and are invalidated across processes, trees and history pages live in the
-metadata database, import reads git on two threads, clone and commit move objects in
-batches, `scn commit --land` lands in one round trip, and a cold path log or blame walks
-history in lockstep and answers from the file's own history, a warm `log` or `blame` is
-answered from memory, and `status` lists only the directories whose entries changed, on
-several threads; next, a land worker that prepares the next request while the previous one
-lands. The web
-interface, HTTP/JSON API, MCP server and `scn --json` are in, every binary reports one version,
-a tag builds static Linux binaries, macOS `scn` and the server image, and an install script
-fetches the binaries, `scn` talks to `https://` servers, and a production compose profile runs
-the server behind TLS; next comes a hosted instance; the regional cache and per-node daemon tiers with
-manifest-based seeding; and virtualized checkouts over FUSE / NFS. The detailed plan, with
-acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
+The work in flight and the work planned after it, in order:
+
+- **Faster landing under load** (in progress). The land worker prepares the next change
+  request while the previous one lands, aimed at 16 concurrent writers landing in a tenth of
+  git's time. It continues a performance pass that already batches clone and commit, lands a
+  commit in one round trip, answers a warm `log` or `blame` from memory and has `status` list
+  only the directories whose entries changed.
+- **Wider benchmarks** (planned). A second, larger slice of the real repository, and a nightly
+  run that turns red when any row regresses by more than 20%.
+- **Releases and hosting** (in progress). The first tagged release, release notes generated
+  from merged changes, a hosted instance, and a five-minute quickstart from the install script
+  to a landed change.
+- **Cache tiers** (planned). A regional cache and a per-node daemon in front of the server,
+  seeded from snapshot manifests; today clients talk to the server directly.
+- **Virtualized checkouts** (planned). Working copies served over FUSE / NFS.
+
+The detailed plan, with acceptance criteria per step, is [`docs/ROADMAP.md`](docs/ROADMAP.md).
 
 ## Repository layout
 
