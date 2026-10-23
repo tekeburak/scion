@@ -36,6 +36,32 @@ repository's page and README headings; `tinyhumansai/openscion` stays GPL-3.0-on
   "Other implementations of the design: not measured in this run", which stays true.
 - **Status badge:** only `bnsd55/open-scion` and Scion carry an "alpha" badge; no change.
 
+### 2026-10-23, second run (05:20 UTC)
+
+The GitHub search API answered this run; per-repository API reads were refused, so commits
+and tags come from anonymous clones under `/tmp`. Counts unchanged since the first run except
+`feder-cr/git-ai`, which the search now reports at 967 stars and 93 forks (2,299 on
+2026-10-19): a drop of more than half, as when an account's stars are removed in bulk.
+
+| Repository | Last push | Last 24 h | Direction |
+|---|---|---|---|
+| [OpenCSGs/scion](https://github.com/OpenCSGs/scion) | 2026-10-23 | 32 commits, tags `v0.1.7`–`v0.1.9` (ten tags since 2026-10-20) | Client ergonomics around concurrent landing. New `scn watch` follows branches on the server and prints each commit as it lands; `scn revert` and `scn cherry-pick` make a pending commit; a stack of pending commits that `sync` rebases one by one; land conflicts name up to three paths; `status` says how far the server's branch has moved (behind N). Server rebase records the original commit in an extension so `log` shows "rebased from". Docker Hub images. README benchmark claims 2–12× faster than git on another project's synthetic workloads (one Apple M5, medians). |
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 2026-10-23 | 28 commits, tag `v0.3.1` | Built on git (reftable housekeeping, start-point resolution of branches); a measured study of conflict handling for agent PRs. Not the reference design's architecture. |
+| [bnsd55/open-scion](https://github.com/bnsd55/open-scion) | 2026-10-23 | 47 commits | Same direction as in the first run: import and graph reads in batches, audit lines, CI matrix proven on real xfs, Postgres majors and arm64. No tag, no new README number. |
+| `CarterT27/scion`, `tinyhumansai/openscion`, `kianaaa19/scionhub` | 2026-10-16 / 10-14 / 10-18 | none | Quiet. |
+
+New in the search with five stars or more: none.
+
+#### What it means for Scion
+
+- **Following `main` live.** Scion has no way for an agent or CI job to wait for the next
+  landed changeset other than polling `log`. A streaming read keyed by `generation` fits
+  Phase 11.5 (agent ergonomics). Opened as one `idea:` issue.
+- **Release cadence:** one project has shipped ten tags in four days; Scion's first release
+  is 9.x. No change to the plan; noted.
+- **Benchmarks:** one more README now claims a multiple over git on synthetic workloads;
+  Scion's numbers stay from its real-repository benchmark (`docs/BENCHMARKS.md`).
+
 ## 2026-10-22
 
 Star and fork counts of the watched projects are missing again: the GitHub API and the
