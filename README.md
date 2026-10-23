@@ -83,7 +83,8 @@ What works today:
   (the server merges a revision such as a `release/*` fix into your head; blame credits the
   fix to the changeset that wrote it), `revert` (the server undoes a changeset on your head,
   refusing if its files changed since; blame keeps crediting the restored lines to their
-  authors) and `checkout` of any changeset. A clone fetches objects in batches, every tree of
+  authors) and `checkout` of any changeset. `status` lists only the directories whose entries
+  were added, removed or renamed since the checkout, and checks files on several threads. A clone fetches objects in batches, every tree of
   a directory it takes whole in one request and blobs 256 at a time, so a 2,330-file clone is
   12 requests; `commit` asks the server which contents it already holds and uploads only the
   rest, in one stream. Two clones landing
@@ -447,15 +448,18 @@ Read these numbers with their limits:
 
 - **Import** writes one immutable object per blob, tree and history page to a remote object
   store, where git writes a local packfile; parity with git's push is not a goal. The figure to
-  quote is the cold row, 8.0× git: into an empty bucket the object store's write rate is the
-  bound. Warm, with the objects already stored, it is 2.1× git.
+  quote is the cold row, 8.4× git: into an empty bucket the object store's write rate is the
+  bound. Warm, with the objects already stored, it is 1.9× git.
 - **Cold `log` and `blame`**, the first call after import with nothing cached on the server,
-  take 3.6× and 1.0× git: a path's history is walked in lockstep, one read per step, and blame
-  answers from the file's own history. Warm, `blame` is 0.19× git and a path log 1.0×. Clone is
-  0.47× git and a sparse clone 0.11×.
+  take 4.0× and 1.2× git: a path's history is walked in lockstep, one read per step, and blame
+  answers from the file's own history. Warm, both are answered from memory: `blame` is 0.16× git
+  and a path log 0.67×. Clone is 0.35× git and a sparse clone 0.11×.
+- **`status`** in a clean working copy is 0.04× git. It reads no file and lists no directory
+  whose entries did not change, so most of its 7 ms is starting a process: the benchmark's
+  timer reads 4 ms for an empty command.
 - **A single commit + land** (`scn commit --land`, one round trip to land) still goes through a
-  change request and the serial land worker, so on its own it takes 1.2× git's local commit and
-  push. The worker pays off under contention: 16 writers landing at once finish in 0.12× git's
+  change request and the serial land worker, so on its own it takes about the time of git's
+  local commit and push (1.0×). The worker pays off under contention: 16 writers landing at once finish in 0.12× git's
   time, because no writer repeats another's fetch, rebase and push.
 - One machine, three runs, shared cloud VM: medians move by several milliseconds between
   runs. The CSV with every sample is [docs/bench-real.csv](docs/bench-real.csv); render it with
@@ -482,8 +486,7 @@ batches, `scn commit --land` lands in one round trip, and a cold path log or bla
 history in lockstep and answers from the file's own history, a warm `log` or `blame` is
 answered from memory, and `status` lists only the directories whose entries changed, on
 several threads; next, a land worker that prepares the next request while the previous one
-lands. The web
-interface, HTTP/JSON API, MCP server and `scn --json` are in, every binary reports one version,
+lands. The web interface, HTTP/JSON API, MCP server and `scn --json` are in, every binary reports one version,
 a tag builds static Linux binaries, macOS `scn` and the server image, and an install script
 fetches the binaries, `scn` talks to `https://` servers, and a production compose profile runs
 the server behind TLS; next comes a hosted instance; the regional cache and per-node daemon tiers with
