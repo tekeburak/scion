@@ -412,6 +412,10 @@ import, with nothing cached on the server) and warm, and once more from a second
 clones each edit a different file and then all commit and publish together: git pushes, and
 on a rejected push pulls with rebase and pushes again; `scn` lands. The table gives the total
 from the first start to the last finish, and the p50 and p99 of the writers' own times.
+Given checkouts of other public implementations of the same design (`BENCH_PEERS`, see
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md#other-implementations)), the script runs every
+workload against them too, on the same machine, and the table lists them under neutral labels;
+a workload one of them cannot express reads `unsupported`.
 
 <p align="center">
   <img src="docs/assets/bench-real.svg" width="100%"

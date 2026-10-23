@@ -5,6 +5,15 @@ The headline numbers, measured on a slice of a real repository's history, are in
 the CSV with every sample is [`bench-real.csv`](bench-real.csv). This page keeps the older
 synthetic workloads, which exercise the client library directly against an in-process server.
 
+## Other implementations
+
+`BENCH_PEERS=<dir>[:<dir>...] scripts/bench-real` also runs every workload against checkouts
+of other public implementations of the same design, on the same slice and machine. The script
+builds each checkout with its own toolchain, picks the adapter its binaries match, and records
+its rows under that adapter's neutral label (`impl-a`, `impl-b`), with `unsupported` for a
+workload it cannot express; the CSV header records the commit each checkout is at. Without
+`BENCH_PEERS` it measures git and Scion only, and the README table says so.
+
 ## Where the time goes
 
 `SCION_TRACE=1 scripts/bench-real 1` makes every Scion process print one line per finished
