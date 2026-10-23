@@ -7,8 +7,8 @@ binaries and a server image built on a `v*` tag (none tagged yet), an install sc
 from `scn`, and a production compose profile behind TLS. It replaces the previous version of
 this file and [`phase-6-benchmark.md`](phase-6-benchmark.md), whose numbers are out of date.
 Every number below is a median from the README's [Benchmarks](../../README.md#benchmarks)
-table (`docs/bench-real.csv`, the run taken with Phase 10.7's lockstep chain walk, #199,
-three runs, 2026-10-22); re-check them against the README before posting. Like the README,
+table (`docs/bench-real.csv`, the run taken with Phase 10.8's status, #206, three runs,
+2026-10-23); re-check them against the README before posting. Like the README,
 these drafts describe the benchmark slice without naming the project it comes from.
 
 ## Show HN
@@ -44,14 +44,14 @@ up the server image, Postgres and Caddy terminating TLS on one `https://` addres
 The numbers come from `scripts/bench-real`, which rebuilds 600 first-parent commits of a real
 open-source repository's `library/` directory and times both tools on one 4-vCPU cloud VM
 (compose Postgres + S3, server on loopback; git in a full clone, `scn` in a sparse clone).
-Medians: 16 writers each landing a different file at once finish in 434 ms against 3,604 ms
-for git's fetch-rebase-push retry loop (p99 per writer 419 ms against 3,588 ms), a clone
-902 ms against 1,931 ms, sparse clone 76 ms against 671 ms, `status` 10 ms against 209 ms and
-warm `blame` 14 ms against 73 ms; warm path `log` (26 ms each) and the first `blame` after
-import, with nothing cached on the server (67 ms against 65 ms), tie. Where git wins: a single
-commit + `land` is 60 ms against 49 ms, because it goes through a change request; import into
-an empty bucket takes 8.0× git's time (2.1× with the objects already stored); and the first
-path `log` after import takes 3.6× git's. What is missing: a tagged release,
+Medians: 16 writers each landing a different file at once finish in 409 ms against 3,547 ms
+for git's fetch-rebase-push retry loop (p99 per writer 391 ms against 3,536 ms), a clone
+606 ms against 1,729 ms, sparse clone 62 ms against 564 ms, `status` 7 ms against 172 ms,
+warm `blame` 9 ms against 56 ms and warm path `log` 16 ms against 24 ms; a single commit +
+`land` (45 ms against 43 ms) ties git, though it still goes through a change request. Where
+git wins: import into an empty bucket takes 8.4× git's time (1.9× with the objects already
+stored), and the first path `log` and `blame` after import, with nothing cached on the server,
+take 4.0× and 1.2× git's. What is missing: a tagged release,
 a hosted instance, the cache and daemon tiers, and by design Windows, offline mode and git wire
 compatibility. It is alpha software measured on one machine, and for most repositories git is
 the right tool.
@@ -82,16 +82,17 @@ stored object.
 
 `scripts/bench-real` imports a pinned 600-commit slice of a real repository into git and into
 Scion on Postgres + an S3-compatible server and times each workload with both, checking every
-checkout byte for byte outside the timers. Sixteen writers landing at once (434 vs 3,604 ms),
-clone (902 vs 1,931 ms), sparse clone (76 vs 671 ms), `status` (10 vs 209 ms) and warm `blame`
-(14 vs 73 ms) come in below git, warm path `log` (26 vs 26 ms) and cold `blame` (67 vs 65 ms)
-tie it; a single commit + `land` (60 vs 49 ms), cold path `log` (3.6×) and import (8.0× into
-an empty bucket, 2.1× warm) do not, and the README says why. A performance pass is under way:
+checkout byte for byte outside the timers. Sixteen writers landing at once (409 vs 3,547 ms),
+clone (606 vs 1,729 ms), sparse clone (62 vs 564 ms), `status` (7 vs 172 ms), warm `blame`
+(9 vs 56 ms) and warm path `log` (16 vs 24 ms) come in below git, a single commit + `land`
+(45 vs 43 ms) ties it; cold path `log` (4.0×), cold `blame` (1.2×) and import (8.4× into an
+empty bucket, 1.9× warm) do not, and the README says why. A performance pass is under way:
 trees and history pages moved into Postgres, the server memoizes grants and refs across
 processes through `LISTEN`/`NOTIFY`, clone and commit move objects in batches, `commit --land`
-lands in one round trip, and a cold path history is walked in lockstep; next, warm `log` and
-`blame` answered from memory, a multi-threaded `status` and a land worker that prepares the
-next request while the previous one lands. Alpha, not production-ready; feedback on the
+lands in one round trip, a cold path history is walked in lockstep, a warm `log` or `blame`
+is answered from memory, and `status` lists only the directories whose entries changed, on
+several threads; next, a land worker that prepares the next request while the previous one
+lands. Alpha, not production-ready; feedback on the
 derived-data design and the benchmark method is very welcome.
 
 ## Türkçe (5 cümle)
@@ -103,11 +104,11 @@ Her istek sunucunun imzaladığı bir token ve repoda (istenirse bir dizinle sı
 istiyor; insanlar GitHub ile giriyor, sunucu aynı rollerle bir web arayüzü, bir HTTP/JSON API
 ve ajanlar için bir MCP sunucusu sunuyor.
 Gerçek bir açık kaynak reponun 600 commit'lik geçmişiyle git'e karşı ölçülen medyan değerlerde
-aynı anda `land` eden 16 yazar 434 ms'de bitiriyor (git 3.604 ms), clone 902 ms (git 1.931 ms),
-sparse clone 76 ms (git 671 ms), `status` 10 ms (git 209 ms), sıcak `blame` 14 ms (git 73 ms)
-sürüyor.
-Git'in önde olduğu yerler de açıkça yazılı: tek bir commit + `land` 60 ms (git 49 ms), boş
-bucket'a içe aktarma git'in 8,0 katı (nesneler zaten varken 2,1 katı), soğuk yol `log`'u 3,6
-katı sürüyor; soğuk `blame` ise git'le başa baş (67 ms'ye 65 ms).
+aynı anda `land` eden 16 yazar 409 ms'de bitiriyor (git 3.547 ms), clone 606 ms (git 1.729 ms),
+sparse clone 62 ms (git 564 ms), `status` 7 ms (git 172 ms), sıcak `blame` 9 ms (git 56 ms),
+sıcak yol `log`'u 16 ms (git 24 ms) sürüyor.
+Git'in önde olduğu yerler de açıkça yazılı: boş bucket'a içe aktarma git'in 8,4 katı (nesneler
+zaten varken 1,9 katı), soğuk yol `log`'u 4,0, soğuk `blame` 1,2 katı sürüyor; tek bir commit +
+`land` ise git'le başa baş (45 ms'ye 43 ms).
 Proje alfa aşamasında: kendi sunucunu TLS arkasında kurmak mümkün, ama etiketlenmiş bir sürüm,
 barındırılan bir örnek ve önbellek katmanları henüz yok; çoğu repo için doğru araç hâlâ git.
