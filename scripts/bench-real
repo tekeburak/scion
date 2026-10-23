@@ -197,6 +197,17 @@ time_it() {
     trace_rows "$workload" "$tool" "$run" "$mark" "$WORK/stderr"
 }
 
+# Runs "$2..." in directory $1 from this shell, as `git -C` does, so a
+# timed scn command pays for no extra shell.
+in_dir() {
+    local back=$PWD rc=0
+    cd "$1" || return
+    shift
+    "$@" || rc=$?
+    cd "$back"
+    return "$rc"
+}
+
 # BSD date has no %N; perl ships with macOS.
 if [ "$(date +%N)" = N ]; then
     now_ms() { perl -MTime::HiRes=time -e 'printf "%d\n", time * 1000'; }
@@ -533,24 +544,24 @@ for run in $(seq 1 "$RUNS"); do
     same_checkout "$dir/git-sparse/$SPARSE" "$dir/scn-sparse/$SPARSE"
 
     time_it status git "$run" git -C "$dir/git-full" status --porcelain
-    time_it status scion "$run" sh -c "cd '$dir/scn-sparse' && '$BIN/scn' status"
+    time_it status scion "$run" in_dir "$dir/scn-sparse" "$BIN/scn" status
 
     # The first call is cold (nothing derived or cached for this repository
     # yet), the second warm; both are recorded.
     for temp in cold warm; do
         time_it "log $temp" git "$run" git -C "$dir/git-full" log --first-parent -n 1000 -- "$LOG_PATH"
-        time_it "log $temp" scion "$run" sh -c "cd '$dir/scn-sparse' && '$BIN/scn' log -n 1000 '$LOG_PATH'"
+        time_it "log $temp" scion "$run" in_dir "$dir/scn-sparse" "$BIN/scn" log -n 1000 "$LOG_PATH"
     done
     for temp in cold warm; do
         time_it "blame $temp" git "$run" git -C "$dir/git-full" blame -- "$BLAME_FILE"
-        time_it "blame $temp" scion "$run" sh -c "cd '$dir/scn-sparse' && '$BIN/scn' blame '$BLAME_FILE'"
+        time_it "blame $temp" scion "$run" in_dir "$dir/scn-sparse" "$BIN/scn" blame "$BLAME_FILE"
     done
     # A second client that has asked nothing yet, of a server that has.
     "$BIN/scn" clone --sparse "$SPARSE" "$SERVER" "$repo" "$dir/scn-fresh" >/dev/null
     time_it "log warm client cold" git "$run" git -C "$dir/git-full" log --first-parent -n 1000 -- "$LOG_PATH"
-    time_it "log warm client cold" scion "$run" sh -c "cd '$dir/scn-fresh' && '$BIN/scn' log -n 1000 '$LOG_PATH'"
+    time_it "log warm client cold" scion "$run" in_dir "$dir/scn-fresh" "$BIN/scn" log -n 1000 "$LOG_PATH"
     time_it "blame warm client cold" git "$run" git -C "$dir/git-full" blame -- "$BLAME_FILE"
-    time_it "blame warm client cold" scion "$run" sh -c "cd '$dir/scn-fresh' && '$BIN/scn' blame '$BLAME_FILE'"
+    time_it "blame warm client cold" scion "$run" in_dir "$dir/scn-fresh" "$BIN/scn" blame "$BLAME_FILE"
 
     # The other implementations compare their checkouts with git's, so they
     # run before git's land edits it.
@@ -561,7 +572,7 @@ for run in $(seq 1 "$RUNS"); do
     echo "// bench-real run $run" >>"$dir/scn-sparse/$EDIT_FILE"
     time_it land git "$run" sh -c "git -C '$dir/git-full' commit -q -a -m 'bench edit' &&
         git -C '$dir/git-full' push -q origin HEAD:main"
-    time_it land scion "$run" sh -c "cd '$dir/scn-sparse' && '$BIN/scn' commit --land -m 'bench edit'"
+    time_it land scion "$run" in_dir "$dir/scn-sparse" "$BIN/scn" commit --land -m "bench edit"
 
     # Each writer appends to its own file, so no edit overlaps another; the
     # clones start from the main both tools now have.
