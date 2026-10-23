@@ -54,6 +54,13 @@ const BLAME_MEMO_RUNS: u64 = 200_000;
 /// by repository, that changeset and the path.
 type BlameMemo = moka::sync::Cache<(String, ChangesetId, RepoPath), FileBlame>;
 
+/// Bytes of path log replies remembered.
+const PATH_LOG_MEMO_BYTES: u64 = 64 << 20;
+
+/// The changesets a `PathLog` answered, encoded, keyed by repository, head,
+/// path and limit.
+type PathLogMemo = moka::sync::Cache<(String, ChangesetId, RepoPath, usize), Vec<Vec<u8>>>;
+
 /// Serves the control plane from the metadata and object stores.
 #[derive(Clone)]
 pub(crate) struct ControlServer {
@@ -64,6 +71,9 @@ pub(crate) struct ControlServer {
     /// stored, so a repeated request does not attribute the file again
     /// while that node is derived. They are immutable, like the node.
     blames: BlameMemo,
+    /// Replies `PathLog` gave. A head's history never changes, so neither
+    /// does the reply.
+    path_logs: PathLogMemo,
 }
 
 impl std::fmt::Debug for ControlServer {
@@ -85,6 +95,12 @@ impl ControlServer {
             blames: moka::sync::Cache::builder()
                 .max_capacity(BLAME_MEMO_RUNS)
                 .weigher(|_, file: &FileBlame| u32::try_from(file.runs.len()).unwrap_or(u32::MAX))
+                .build(),
+            path_logs: moka::sync::Cache::builder()
+                .max_capacity(PATH_LOG_MEMO_BYTES)
+                .weigher(|_, reply: &Vec<Vec<u8>>| {
+                    u32::try_from(reply.iter().map(Vec::len).sum::<usize>()).unwrap_or(u32::MAX)
+                })
                 .build(),
         }
     }
@@ -955,15 +971,20 @@ impl ControlService for ControlServer {
         let head = changeset_id(&req.head, "head")?;
         let path = repo_path(&req.path)?;
         scope.check("read", [&path])?;
+        let key = (req.repo, head, path, limit(req.limit));
+        if let Some(changesets) = self.path_logs.get(&key) {
+            return Ok(Response::new(LogResponse { changesets }));
+        }
+        let (repo, head, path, limit) = &key;
         let ids = timed(
             "walk",
-            scion_core::path_log(&self.deriver(&req.repo), head, &path, limit(req.limit)),
+            scion_core::path_log(&self.deriver(repo), *head, path, *limit),
         )
         .await
         .map_err(derive_status)?;
-        Ok(Response::new(LogResponse {
-            changesets: timed("read", self.encoded(&req.repo, ids)).await?,
-        }))
+        let changesets = timed("read", self.encoded(repo, ids)).await?;
+        self.path_logs.insert(key, changesets.clone());
+        Ok(Response::new(LogResponse { changesets }))
     }
 
     async fn merge_base(

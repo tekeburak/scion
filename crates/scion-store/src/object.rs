@@ -27,9 +27,9 @@ const HAS_CONCURRENCY: usize = 32;
 
 /// Bytes of recently read or written small blobs kept in memory.
 const BLOB_MEMO_BYTES: usize = 64 << 20;
-/// Blobs at most this large are memoised: derived nodes and source files,
-/// not large assets.
-const SMALL_BLOB_BYTES: usize = 64 << 10;
+/// Blobs at most this large are memoised: source files, the longest of them
+/// included (a warm `blame` reads the file it attributes), not large assets.
+const SMALL_BLOB_BYTES: usize = 256 << 10;
 /// Stored blobs at most this large are decompressed and checked on the
 /// reading task; larger ones on the blocking pool, so a request that reads
 /// many source files at once uses every core.
@@ -243,6 +243,17 @@ mod tests {
             reader.get_blob(id).await,
             Err(StoreError::Corrupt(_))
         ));
+    }
+
+    #[tokio::test]
+    async fn a_long_source_file_is_read_again_from_memory() {
+        let store = ObjectStorage::in_memory();
+        // About the size of the longest files of a large Rust codebase.
+        let data = Bytes::from(b"fn f() {}\n".repeat(20_000));
+        let id = store.put_blob(data.clone()).await.unwrap();
+        // With the object gone from the backend, only the memo can answer.
+        store.backend.delete(&blob_key(id)).await.unwrap();
+        assert_eq!(store.get_blob(id).await.unwrap(), Some(data));
     }
 
     #[tokio::test]
