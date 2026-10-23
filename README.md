@@ -55,7 +55,8 @@ Scion is that design, built on boring infrastructure:
 Scion is **alpha** software. The server, the CLI, git import and the real-repository benchmark
 work and are exercised end to end in CI on Postgres + S3. Every request needs a token
 signed by the server and a role in the repository it touches, optionally limited to a
-directory; people sign in with GitHub (`scn login`) and services use tokens from the operator. Landing goes through change requests and a serial
+directory; people sign in with GitHub (`scn login`) and services use tokens from the
+operator. Landing goes through change requests and a serial
 land worker, and every request can be listed and traced to the changeset it landed;
 merges and reverts run on the server. A [web interface](#web-interface), an HTTP/JSON API and
 an MCP server serve people and agents. A release workflow builds static Linux binaries and a
@@ -115,7 +116,8 @@ What works today:
   admin rejects it; each page shows only the buttons the visitor's role allows. A server
   admin creates repositories from the repository list, and a repository's settings page lets
   its admins make it public or private and grant and revoke roles. The pages run inside the
-  server and check the same roles and directory grants as `scn`. People sign in with GitHub in the browser (once the
+  server and check the same roles and directory grants as `scn`. People sign in with
+  GitHub in the browser (once the
   OAuth app's `SCION_GITHUB_CLIENT_SECRET` is set; the server keeps no session state), tools
   send `Authorization: Bearer <token>`, and `scn access grant anyone reader` makes a
   repository, or with `--path` one directory, public: readable without signing in.
@@ -197,7 +199,8 @@ OAuth app with device flow enabled, start the stack with `SCION_GITHUB_CLIENT_ID
 client id and run `scn login http://127.0.0.1:7420`; the token lands in
 `~/.config/scn/tokens/` (mode 0600) and is valid for 30 days. With the app's client secret in
 `SCION_GITHUB_CLIENT_SECRET` too (callback URL `http://127.0.0.1:8080/login/callback`), *Sign
-in* on the pages does the same in the browser and shows private repositories. A token stays valid until its `--ttl` runs out, also across `down -v`. A `scion-server` run
+in* on the pages does the same in the browser and shows private repositories. A token stays valid
+until its `--ttl` runs out, also across `down -v`. A `scion-server` run
 outside compose needs `SCION_TOKEN_KEY` (`openssl rand -hex 32`) and must be restarted after
 `down -v` too: it keeps an in-memory memo of the objects the bucket holds, and that memo
 outlives the bucket.
@@ -232,7 +235,8 @@ to the landed changeset. Only a change to the same lines as one already on `main
 writes conflict markers into those files to resolve and `commit` before landing again.
 `scn commit --land -m <message>` commits and lands in one step, with one round trip to the
 server for both. `scn land --no-wait` prints the request id at once and
-`scn land --status <id>` reads its outcome later; `scn requests --status needs-rebase` lists only the conflicted requests, and
+`scn land --status <id>` reads its outcome later; `scn requests --status needs-rebase` lists
+only the conflicted requests, and
 `scn log --landed` finds the request behind a changeset even when the server rebased it to a
 new id.
 
