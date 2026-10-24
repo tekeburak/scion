@@ -41,11 +41,17 @@ const PAGE_MEMO_BYTES: usize = 64 << 20;
 const REF_MEMO_BYTES: usize = 1 << 20;
 /// Bytes of repositories' grants kept in memory while listening.
 const GRANT_MEMO_BYTES: usize = 4 << 20;
-/// The channel on which every write to `refs` or `grants` names its
-/// repository, in the writing transaction.
-const INVALIDATE_CHANNEL: &str = "scion_invalidate";
+/// The channel on which every write to `refs` names its repository, in the
+/// writing transaction.
+const REFS_CHANNEL: &str = "scion_refs";
+/// The channel on which every write to `grants` names its repository, in the
+/// writing transaction.
+const GRANTS_CHANNEL: &str = "scion_grants";
 /// Pause before reconnecting a listener whose connection was lost.
 const RELISTEN_DELAY: Duration = Duration::from_secs(1);
+
+/// A repository's refs, by name.
+type Refs = Arc<Vec<(String, RefState)>>;
 
 type DerivedKey = (String, String, u32, ChangesetId);
 
@@ -63,27 +69,28 @@ pub struct PostgresStore {
     derived: Arc<Recent<DerivedKey, Vec<u8>>>,
     trees: Arc<Recent<(String, TreeId), Tree>>,
     pages: Arc<Recent<(String, BlobId), Bytes>>,
-    mutable: Arc<Mutable>,
+    refs: Arc<Memo<Refs>>,
+    grants: Arc<Memo<Arc<Vec<Grant>>>>,
 }
 
-/// Memos of each repository's refs and grants, which other processes write
-/// too. They serve reads only while a listener receives the notifications
-/// those writes send; each notification drops its repository's entries.
+/// A memo of each repository's refs or grants, which other processes write
+/// too. It serves reads only while a listener receives the notifications
+/// those writes send; each notification drops its repository's entry. Refs
+/// and grants have one each, so landing, which moves `main` every time,
+/// leaves the grants every request reads in memory.
 #[derive(Debug)]
-struct Mutable {
-    refs: Recent<String, Arc<Vec<(String, RefState)>>>,
-    grants: Recent<String, Arc<Vec<Grant>>>,
+struct Memo<V> {
+    entries: Recent<String, V>,
     /// Bumped by every invalidation, and whether a listener is connected.
     /// A read remembers its result only if no invalidation happened since
     /// it started, so a result older than a write is never kept after it.
     epoch: Mutex<(u64, bool)>,
 }
 
-impl Mutable {
-    fn new() -> Self {
+impl<V: Clone + Send + Sync + 'static> Memo<V> {
+    fn new(bytes: usize) -> Self {
         Self {
-            refs: Recent::new(REF_MEMO_BYTES),
-            grants: Recent::new(GRANT_MEMO_BYTES),
+            entries: Recent::new(bytes),
             epoch: Mutex::new((0, false)),
         }
     }
@@ -108,43 +115,41 @@ impl Mutable {
         }
     }
 
-    /// Drop `repo`'s entries.
+    /// Drop `repo`'s entry.
     fn forget(&self, repo: &str) {
         let mut state = self.state();
         state.0 += 1;
-        self.refs.remove(&repo.to_owned());
-        self.grants.remove(&repo.to_owned());
+        self.entries.remove(&repo.to_owned());
     }
 
     /// Drop every entry, and use the memos from now on only if `listening`.
     fn reset(&self, listening: bool) {
         let mut state = self.state();
         *state = (state.0 + 1, listening);
-        self.refs.clear();
-        self.grants.clear();
+        self.entries.clear();
     }
-}
 
-/// `repo`'s memoised value in `memo`, or `read` and remember it, weighed by
-/// `weight`, while the memos are in use.
-async fn memoized<V: Clone + Send + Sync + 'static>(
-    mutable: &Mutable,
-    memo: &Recent<String, V>,
-    repo: &str,
-    weight: impl FnOnce(&V) -> usize,
-    read: impl Future<Output = Result<V>>,
-) -> Result<V> {
-    let Some(epoch) = mutable.epoch() else {
-        return read.await;
-    };
-    if let Some(hit) = memo.get(&repo.to_owned()).await {
-        return Ok(hit);
+    /// `repo`'s memoised value, or `read` and remember it, weighed by
+    /// `weight`, while the memo is in use.
+    async fn get(
+        &self,
+        repo: &str,
+        weight: impl FnOnce(&V) -> usize,
+        read: impl Future<Output = Result<V>>,
+    ) -> Result<V> {
+        let Some(epoch) = self.epoch() else {
+            return read.await;
+        };
+        if let Some(hit) = self.entries.get(&repo.to_owned()).await {
+            return Ok(hit);
+        }
+        let value = read.await?;
+        self.remember(epoch, || {
+            self.entries
+                .insert(repo.to_owned(), value.clone(), repo.len() + weight(&value));
+        });
+        Ok(value)
     }
-    let value = read.await?;
-    mutable.remember(epoch, || {
-        memo.insert(repo.to_owned(), value.clone(), repo.len() + weight(&value));
-    });
-    Ok(value)
 }
 
 /// Rows of `changesets.canonical` one blocking task decodes: a larger read
@@ -231,7 +236,8 @@ impl PostgresStore {
             derived: Arc::new(Recent::new(DERIVED_MEMO_BYTES)),
             trees: Arc::new(Recent::new(TREE_MEMO_BYTES)),
             pages: Arc::new(Recent::new(PAGE_MEMO_BYTES)),
-            mutable: Arc::new(Mutable::new()),
+            refs: Arc::new(Memo::new(REF_MEMO_BYTES)),
+            grants: Arc::new(Memo::new(GRANT_MEMO_BYTES)),
         }
     }
 
@@ -250,9 +256,13 @@ impl PostgresStore {
                     // `Ok(None)` and `Err` both mean the connection is gone,
                     // with whatever was sent meanwhile.
                     while let Ok(Some(n)) = l.try_recv().await {
-                        store.mutable.forget(n.payload());
+                        if n.channel() == REFS_CHANNEL {
+                            store.refs.forget(n.payload());
+                        } else {
+                            store.grants.forget(n.payload());
+                        }
                     }
-                    store.mutable.reset(false);
+                    store.reset(false);
                 }
                 tokio::time::sleep(RELISTEN_DELAY).await;
                 listener = store.listener().await.ok();
@@ -261,17 +271,23 @@ impl PostgresStore {
         Ok(())
     }
 
-    /// A connection listening on [`INVALIDATE_CHANNEL`], outside the pool,
-    /// after which the memos start out empty.
+    /// A connection listening on [`REFS_CHANNEL`] and [`GRANTS_CHANNEL`],
+    /// outside the pool, after which the memos start out empty.
     async fn listener(&self) -> Result<PgListener> {
         let pool = PgPoolOptions::new()
             .max_connections(1)
             .connect_lazy_with((*self.pool.connect_options()).clone());
         let mut listener = PgListener::connect_with(&pool).await?;
         listener.eager_reconnect(false);
-        listener.listen(INVALIDATE_CHANNEL).await?;
-        self.mutable.reset(true);
+        listener.listen_all([REFS_CHANNEL, GRANTS_CHANNEL]).await?;
+        self.reset(true);
         Ok(listener)
+    }
+
+    /// Empty both memos, and use them from now on only if `listening`.
+    fn reset(&self, listening: bool) {
+        self.refs.reset(listening);
+        self.grants.reset(listening);
     }
 
     /// Apply pending migrations.
@@ -536,14 +552,13 @@ fn decode_tree(id: TreeId, bytes: &[u8]) -> Result<Tree> {
 
 impl PostgresStore {
     /// Every ref of `repo`, by name, memoised while listening.
-    async fn refs(&self, repo: &str) -> Result<Arc<Vec<(String, RefState)>>> {
-        let weight = |refs: &Arc<Vec<(String, RefState)>>| {
-            refs.iter().map(|(name, _)| name.len() + 48).sum()
-        };
-        memoized(&self.mutable, &self.mutable.refs, repo, weight, async {
-            Ok(Arc::new(self.select_refs(repo).await?))
-        })
-        .await
+    async fn refs(&self, repo: &str) -> Result<Refs> {
+        let weight = |refs: &Refs| refs.iter().map(|(name, _)| name.len() + 48).sum();
+        self.refs
+            .get(repo, weight, async {
+                Ok(Arc::new(self.select_refs(repo).await?))
+            })
+            .await
     }
 
     async fn select_refs(&self, repo: &str) -> Result<Vec<(String, RefState)>> {
@@ -577,10 +592,11 @@ impl PostgresStore {
                 .map(|g| g.principal.len() + g.path_prefix.len() + 8)
                 .sum()
         };
-        memoized(&self.mutable, &self.mutable.grants, repo, weight, async {
-            Ok(Arc::new(self.select_grants(repo).await?))
-        })
-        .await
+        self.grants
+            .get(repo, weight, async {
+                Ok(Arc::new(self.select_grants(repo).await?))
+            })
+            .await
     }
 
     async fn select_grants(&self, repo: &str) -> Result<Vec<Grant>> {
@@ -907,6 +923,42 @@ impl MetadataStore for PostgresStore {
         Ok(out)
     }
 
+    async fn get_encoded_changesets(
+        &self,
+        repo: &str,
+        ids: &[ChangesetId],
+    ) -> Result<Vec<Option<Vec<u8>>>> {
+        let mut out = Vec::with_capacity(ids.len());
+        let mut missing = Vec::new();
+        for id in ids {
+            let cs = self.changesets.get(&(repo.to_owned(), *id)).await;
+            if cs.is_none() {
+                missing.push(id.as_bytes().to_vec());
+            }
+            out.push(cs.map(|cs| cs.encode_to_vec()));
+        }
+        if missing.is_empty() {
+            return Ok(out);
+        }
+        // The stored bytes are the canonical encoding, checked when the
+        // changeset was stored, so they are returned as they are.
+        let rows: Vec<(Vec<u8>, Vec<u8>)> = sqlx::query_as(
+            "SELECT c.id, c.canonical FROM changesets c JOIN repos r ON r.id = c.repo \
+             WHERE r.name = $1 AND c.id = ANY($2)",
+        )
+        .bind(repo)
+        .bind(&missing)
+        .fetch_all(&self.pool)
+        .await?;
+        let found: HashMap<Vec<u8>, Vec<u8>> = rows.into_iter().collect();
+        for (slot, id) in out.iter_mut().zip(ids) {
+            if slot.is_none() {
+                *slot = found.get(id.as_bytes().as_slice()).cloned();
+            }
+        }
+        Ok(out)
+    }
+
     async fn generation(&self, repo: &str, id: ChangesetId) -> Result<Option<u64>> {
         let row: Option<(i64,)> = sqlx::query_as(
             "SELECT c.generation FROM changesets c JOIN repos r ON r.id = c.repo \
@@ -932,14 +984,14 @@ impl MetadataStore for PostgresStore {
         .bind(repo_id)
         .bind(name)
         .bind(target.as_bytes().as_slice())
-        .bind(INVALIDATE_CHANNEL)
+        .bind(REFS_CHANNEL)
         .bind(repo)
         .fetch_optional(&self.pool)
         .await?;
         if inserted.is_none() {
             return Err(StoreError::RefExists(name.to_owned()));
         }
-        self.mutable.forget(repo);
+        self.refs.forget(repo);
         Ok(RefState { target, version: 0 })
     }
 
@@ -972,11 +1024,11 @@ impl MetadataStore for PostgresStore {
         .bind(name)
         .bind(new_target.as_bytes().as_slice())
         .bind(expected)
-        .bind(INVALIDATE_CHANNEL)
+        .bind(REFS_CHANNEL)
         .fetch_optional(&self.pool)
         .await?;
         // On a mismatch the memo may predate the write that won.
-        self.mutable.forget(repo);
+        self.refs.forget(repo);
         if let Some((version, _)) = updated {
             return Ok(RefState {
                 target: new_target,
@@ -1370,11 +1422,11 @@ impl MetadataStore for PostgresStore {
         .bind(&grant.principal)
         .bind(&grant.path_prefix)
         .bind(grant.role.as_str())
-        .bind(INVALIDATE_CHANNEL)
+        .bind(GRANTS_CHANNEL)
         .bind(repo)
         .execute(&self.pool)
         .await?;
-        self.mutable.forget(repo);
+        self.grants.forget(repo);
         Ok(())
     }
 
@@ -1388,11 +1440,11 @@ impl MetadataStore for PostgresStore {
         .bind(repo_id)
         .bind(principal)
         .bind(path_prefix)
-        .bind(INVALIDATE_CHANNEL)
+        .bind(GRANTS_CHANNEL)
         .bind(repo)
         .fetch_optional(&self.pool)
         .await?;
-        self.mutable.forget(repo);
+        self.grants.forget(repo);
         Ok(done.is_some())
     }
 
@@ -1427,16 +1479,18 @@ impl MetadataStore for PostgresStore {
 mod tests {
     use super::*;
 
-    /// With 1,000 landed requests, `find_landings` plans as index probes
-    /// only, under the generic plan a cached statement ends up with as well
-    /// as a custom one.
-    #[tokio::test]
-    async fn find_landings_uses_the_indexes() {
-        let opts: PgConnectOptions = std::env::var("SCION_TEST_DATABASE_URL")
+    fn options() -> PgConnectOptions {
+        std::env::var("SCION_TEST_DATABASE_URL")
             .unwrap_or_else(|_| "postgres://scion:scion@localhost:5432/scion".to_owned())
             .parse()
-            .unwrap();
-        let name = format!("scion_test_{}_plan", std::process::id());
+            .unwrap()
+    }
+
+    /// A migrated store in a database of its own, named after `suffix`, and
+    /// a connection to drop it with.
+    async fn fresh(suffix: &str) -> (PostgresStore, PgPool, String) {
+        let opts = options();
+        let name = format!("scion_test_{}_{suffix}", std::process::id());
         let admin = PgPool::connect_with(opts.clone()).await.unwrap();
         sqlx::query(&format!("CREATE DATABASE \"{name}\""))
             .execute(&admin)
@@ -1446,6 +1500,108 @@ mod tests {
             .await
             .unwrap();
         store.migrate().await.unwrap();
+        (store, admin, name)
+    }
+
+    async fn drop_fresh(store: PostgresStore, admin: PgPool, name: String) {
+        store.pool().close().await;
+        sqlx::query(&format!("DROP DATABASE \"{name}\" WITH (FORCE)"))
+            .execute(&admin)
+            .await
+            .unwrap();
+    }
+
+    /// History pages and trees are stored with lz4, which a path log's
+    /// page reads decompress faster than pglz (Phase 10.7).
+    #[tokio::test]
+    async fn pages_and_trees_are_compressed_with_lz4() {
+        let (store, admin, name) = fresh("lz4").await;
+        store.create_repo("lz4").await.unwrap();
+        for table in ["pages", "trees"] {
+            let (method,): (String,) = sqlx::query_as(
+                "SELECT attcompression::text FROM pg_attribute \
+                 WHERE attrelid = $1::regclass AND attname = 'bytes'",
+            )
+            .bind(table)
+            .fetch_one(store.pool())
+            .await
+            .unwrap();
+            assert_eq!(method, "l", "{table}");
+        }
+        let page = Bytes::from("a history node ".repeat(1_000));
+        store
+            .put_pages("lz4", std::slice::from_ref(&page))
+            .await
+            .unwrap();
+        let (method,): (Option<String>,) =
+            sqlx::query_as("SELECT pg_column_compression(bytes) FROM pages")
+                .fetch_one(store.pool())
+                .await
+                .unwrap();
+        assert_eq!(method.as_deref(), Some("lz4"));
+        let read = store
+            .get_pages("lz4", &[BlobId::hash(&page)])
+            .await
+            .unwrap();
+        assert_eq!(read, [Some(page)]);
+        drop_fresh(store, admin, name).await;
+    }
+
+    /// Encoded changesets read by a server that has not decoded them are
+    /// the stored canonical bytes, in the order asked, without a decode.
+    #[tokio::test]
+    async fn encoded_changesets_are_the_stored_bytes() {
+        let (store, admin, name) = fresh("encoded").await;
+        store.create_repo("enc").await.unwrap();
+        let mut ids = Vec::new();
+        let mut batch = Vec::new();
+        for i in 0..3 {
+            let cs = Changeset {
+                repo: "enc".into(),
+                parents: ids.last().copied().into_iter().collect(),
+                author: scion_types::Identity::new("t", "t@example.com"),
+                author_date: scion_types::Timestamp::new(i, 0),
+                committer: None,
+                committer_date: None,
+                message: format!("change {i}"),
+                file_changes: std::collections::BTreeMap::new(),
+                extra: std::collections::BTreeMap::new(),
+            };
+            ids.push(cs.id());
+            batch.push(cs);
+        }
+        store.put_changesets(&batch).await.unwrap();
+        let cold = PostgresStore::connect_with(options().database(&name))
+            .await
+            .unwrap();
+        let unknown = ChangesetId::from_bytes([9; 32]);
+        assert_eq!(
+            cold.get_encoded_changesets("enc", &[ids[2], unknown, ids[0], ids[2]])
+                .await
+                .unwrap(),
+            [
+                Some(batch[2].encode_to_vec()),
+                None,
+                Some(batch[0].encode_to_vec()),
+                Some(batch[2].encode_to_vec()),
+            ]
+        );
+        assert!(
+            cold.changesets
+                .get(&("enc".to_owned(), ids[0]))
+                .await
+                .is_none()
+        );
+        cold.pool().close().await;
+        drop_fresh(store, admin, name).await;
+    }
+
+    /// With 1,000 landed requests, `find_landings` plans as index probes
+    /// only, under the generic plan a cached statement ends up with as well
+    /// as a custom one.
+    #[tokio::test]
+    async fn find_landings_uses_the_indexes() {
+        let (store, admin, name) = fresh("plan").await;
         store.create_repo("plan").await.unwrap();
         let cs = |i: u32, tag: u8| {
             let mut b = [tag; 32];
@@ -1502,10 +1658,6 @@ mod tests {
             );
         }
         drop(conn);
-        store.pool().close().await;
-        sqlx::query(&format!("DROP DATABASE \"{name}\" WITH (FORCE)"))
-            .execute(&admin)
-            .await
-            .unwrap();
+        drop_fresh(store, admin, name).await;
     }
 }

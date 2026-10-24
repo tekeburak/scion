@@ -9,19 +9,24 @@
 # leaves the stack running (reset it with
 # `docker compose -f deploy/docker-compose.yml down -v`).
 #
-# Two other public implementations of the same reference design run the same
-# workloads on the same slice when their clone URLs are given (see "Performance
+# Other public implementations of the same reference design run the same
+# workloads on the same slice when their checkouts are given (see "Performance
 # bar" in docs/ARCHITECTURE.md):
 #
-#   BENCH_IMPL_A_URL=<git url> BENCH_IMPL_B_URL=<git url> scripts/bench-real
+#   BENCH_PEERS=<dir>[:<dir>...] scripts/bench-real
 #
-# Each is pinned to the commit in IMPL_*_COMMIT below, fetched and built once
-# under target/bench-real/, and refused if the URL does not serve that commit.
-# impl-a runs over CockroachDB (a container this script starts and removes) and
-# the same S3 server as Scion, one fresh bucket and repository per run, over
-# TLS with a throwaway CA. impl-b keeps its state in memory, so its server is
-# restarted per run. A workload one of them cannot express is printed and
-# recorded as `unsupported`.
+# Each checkout is built with its own pinned toolchain (`cargo build --release`)
+# and run by the adapter its binaries match, under that adapter's neutral label:
+# impl-a builds a `scion-import`, impl-b a server ending in `-server` and a
+# client without a dash. A checkout that matches neither, or a second checkout
+# for the same adapter, is refused. The adapters follow the command lines of
+# the commits named below; the CSV header records the commit each
+# checkout is at. impl-a runs over CockroachDB (a container this script starts
+# and removes) and the same S3 server as Scion, one fresh bucket and repository
+# per run, over TLS with a throwaway CA. impl-b keeps its state in memory, so
+# its server is restarted per run. A workload one of them cannot express is
+# printed and recorded as `unsupported`. Without BENCH_PEERS only git and Scion
+# run, and the README table says the others were not measured.
 #
 # The slice is the `library/` directory of rust-lang/rust over its first-parent
 # history from SINCE to TIP: every first-parent commit that touched it becomes
@@ -58,7 +63,7 @@
 #                push, and on a rejected push pull --rebase and push again;
 #                scn commit --land. Recorded per run as the total (first start
 #                to last finish) and the p50 and p99 of the writers' own times
-#                (`land 16 writers`, `... p50`, `... p99`); git and scion only.
+#                (`land 16 writers`, `... p50`, `... p99`).
 #
 # git runs its history workloads (status, log, blame, land) in the full clone,
 # its best case; scn and the other implementations run them in the sparse
@@ -85,10 +90,9 @@ LOG_PATH=core/src
 BLAME_FILE=alloc/src/vec/mod.rs
 EDIT_FILE=core/src/lib.rs
 WRITERS=16
-IMPL_A_COMMIT=7d445a0744e30f4dcb36a794b0ce42648157e1b9
-IMPL_B_COMMIT=00e92ab9c2a9985f39a64636b4b6c5c4bb583916
-IMPL_A_URL=${BENCH_IMPL_A_URL:-}
-IMPL_B_URL=${BENCH_IMPL_B_URL:-}
+# The peer adapters follow the command lines of impl-a at
+# 7d445a0744e30f4dcb36a794b0ce42648157e1b9 and impl-b at
+# 00e92ab9c2a9985f39a64636b4b6c5c4bb583916.
 CRDB_IMAGE=cockroachdb/cockroach:v24.3.5
 CRDB=scion-bench-crdb
 
@@ -264,23 +268,29 @@ unsupported() {
     echo "$1,$2,$3,,unsupported" >>"$OUT"
 }
 
-# Fetches $1 at exactly commit $2 into $3 and builds its release binaries with
-# its own pinned toolchain.
-build_impl() {
-    local url=$1 commit=$2 dir=$3
-    if [ ! -f "$dir/.built" ]; then
-        rm -rf "$dir"
-        git init -q "$dir"
-        say "fetching $commit"
-        git -C "$dir" fetch -q --depth 1 "$url" "$commit"
-        git -C "$dir" checkout -q FETCH_HEAD
-        say "building $(basename "$dir")"
-        (cd "$dir" && cargo build -q --release --workspace --bins)
-        touch "$dir/.built"
+# Builds the peer checkout $1 with its own pinned toolchain and sets IMPL_A or
+# IMPL_B to it, by the binaries it builds.
+add_peer() {
+    local dir rel servers
+    dir=$(cd "$1" && pwd) || { say "BENCH_PEERS: $1 is not a directory"; exit 1; }
+    say "building the peer in $dir"
+    (cd "$dir" && cargo build -q --release --workspace --bins)
+    rel=$dir/target/release
+    servers=$(find "$rel" -maxdepth 1 -type f -perm -u+x -name '*-server' | wc -l)
+    if [ -x "$rel/scion-import" ]; then
+        [ -z "$IMPL_A" ] || { say "BENCH_PEERS: $IMPL_A and $dir are both impl-a"; exit 1; }
+        IMPL_A=$dir
+    elif [ "$servers" -eq 1 ]; then
+        [ -z "$IMPL_B" ] || { say "BENCH_PEERS: $IMPL_B and $dir are both impl-b"; exit 1; }
+        IMPL_B=$dir
+    else
+        say "BENCH_PEERS: $dir builds neither impl-a's nor impl-b's binaries"
+        exit 1
     fi
-    [ "$(git -C "$dir" rev-parse HEAD)" = "$commit" ] ||
-        { say "$dir is not at the pinned commit $commit"; exit 1; }
 }
+
+# The commit the peer checkout $1 is at.
+peer_commit() { git -C "$1" rev-parse HEAD 2>/dev/null || echo "unknown commit"; }
 
 # Waits until "$2" succeeds, giving up after about 20 s or when pid $1 exits.
 wait_for() {
@@ -298,7 +308,8 @@ wait_for() {
 # container, a CA with a loopback server certificate, a token signing key, a
 # service principal and an access policy that lets it read, write and land.
 # Its importer replaces the repository's bootstrap root changeset on main with
-# a forced update, hence `force`.
+# a forced update, hence `force`. The container is paused outside impl-a's
+# own workloads, so it takes no CPU from the others.
 setup_impl_a() {
     local d=$WORK/impl-a-env
     rm -rf "$d"
@@ -310,6 +321,7 @@ setup_impl_a() {
         docker exec "$CRDB" cockroach sql --insecure -e 'SELECT 1' >/dev/null 2>&1 && break
         sleep 0.3
     done
+    docker pause "$CRDB" >/dev/null
     openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes -days 2 \
         -subj /CN=bench-ca -keyout "$d/ca.key" -out "$d/ca.pem" 2>/dev/null
     openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:prime256v1 -nodes \
@@ -338,11 +350,11 @@ refs = ["group:bench"]
 ACL
 }
 
-# Starts impl-a's server for repository $1 on a fresh bucket $1 and exports
-# the endpoint and a token for its clients.
+# Starts impl-a's server for repository $1 on bucket $2 (default: a fresh
+# bucket $1) and exports the endpoint and a token for its clients.
 start_impl_a() {
-    local d=$WORK/impl-a-env name=$1 port=$(( (RANDOM % 20000) + 30000 ))
-    "${COMPOSE[@]}" run --rm --no-deps --entrypoint aws bucket-init \
+    local d=$WORK/impl-a-env name=$1 bucket=${2:-$1} port=$(( (RANDOM % 20000) + 30000 ))
+    [ -n "${2:-}" ] || "${COMPOSE[@]}" run --rm --no-deps --entrypoint aws bucket-init \
         --endpoint-url http://rustfs:9000 s3 mb "s3://$name" >/dev/null
     cat >"$d/server.toml" <<TOML
 [server]
@@ -356,7 +368,7 @@ url = "postgresql://root@127.0.0.1:26257/defaultdb?sslmode=disable"
 
 [objects]
 endpoint = "$AWS_ENDPOINT"
-bucket = "$name"
+bucket = "$bucket"
 region = "$AWS_REGION"
 
 [auth]
@@ -385,10 +397,23 @@ TOML
     export SCION_TOKEN
 }
 
+stop_impl_a() {
+    kill "$impl_a_pid" 2>/dev/null || true
+    wait "$impl_a_pid" 2>/dev/null || true
+}
+
 impl_a_run() {
-    local run=$1 dir=$2 a=$IMPL_A/target/release
+    local run=$1 dir=$2 a=$IMPL_A/target/release i
+    docker unpause "$CRDB" >/dev/null
+    # Its server serves one repository, so the warm import, into a second
+    # repository on the same bucket, gets a server of its own.
     start_impl_a "bench-a-$stamp-$run"
     time_it "import cold" impl-a "$run" "$a/scion-import" --git "$SUBSET" --ref main --target-ref main
+    stop_impl_a
+    start_impl_a "bench-a-$stamp-$run-warm" "bench-a-$stamp-$run"
+    time_it "import warm" impl-a "$run" "$a/scion-import" --git "$SUBSET" --ref main --target-ref main
+    stop_impl_a
+    start_impl_a "bench-a-$stamp-$run" "bench-a-$stamp-$run"
     time_it clone impl-a "$run" "$a/scion" checkout main "$dir/a-full"
     same_checkout "$dir/git-full" "$dir/a-full" .scion
     time_it "sparse clone" impl-a "$run" "$a/scion" checkout main "$dir/a-sparse" --sparse "$SPARSE"
@@ -400,11 +425,27 @@ impl_a_run() {
     for temp in cold warm; do
         time_it "blame $temp" impl-a "$run" "$a/scion" -C "$dir/a-sparse" blame "$BLAME_FILE"
     done
+    "$a/scion" checkout main "$dir/a-fresh" --sparse "$SPARSE" >/dev/null
+    time_it "log warm client cold" impl-a "$run" "$a/scion" -C "$dir/a-fresh" log "$LOG_PATH" --rev main --first-parent --limit 1000
+    time_it "blame warm client cold" impl-a "$run" "$a/scion" -C "$dir/a-fresh" blame "$BLAME_FILE"
     echo "// bench-real run $run" >>"$dir/a-sparse/$EDIT_FILE"
     time_it land impl-a "$run" sh -c "'$a/scion' -C '$dir/a-sparse' commit -m 'bench edit' &&
         '$a/scion' -C '$dir/a-sparse' land --ref main"
-    kill "$impl_a_pid" 2>/dev/null || true
-    wait "$impl_a_pid" 2>/dev/null || true
+    # A writer whose land is refused rebases onto main and lands again, as
+    # git's writers pull and push again.
+    for i in $(seq 1 "$WRITERS"); do
+        "$a/scion" checkout main "$dir/a-w$i" --sparse "$SPARSE" >/dev/null
+        echo "// bench-real writer $i" >>"$dir/a-w$i/${WRITER_FILES[$((i - 1))]}"
+    done
+    time_writers "land 16 writers" impl-a "$run" "w='$dir/a-w'\$1
+        '$a/scion' -C \"\$w\" commit -m 'bench writer' || exit 1
+        for _ in \$(seq 1 $((WRITERS * 4))); do
+            '$a/scion' -C \"\$w\" land --ref main 2>/dev/null && exit 0
+            '$a/scion' -C \"\$w\" rebase --onto main || exit 1
+        done
+        exit 1"
+    stop_impl_a
+    docker pause "$CRDB" >/dev/null
 }
 
 # impl-b names its binaries after itself: the server is the one ending in
@@ -434,9 +475,16 @@ impl_b_run() {
     unsupported "log warm" impl-b "$run"
     unsupported "blame cold" impl-b "$run"
     unsupported "blame warm" impl-b "$run"
+    unsupported "log warm client cold" impl-b "$run"
+    unsupported "blame warm client cold" impl-b "$run"
     echo "// bench-real run $run" >>"$dir/b-sparse/$EDIT_FILE"
     # Its commit uploads, creates the changeset and moves main in one step.
     time_it land impl-b "$run" "$cli" commit -m 'bench edit' --dir "$dir/b-sparse"
+    # A commit that loses the race to move main has nothing to update or
+    # rebase its working copy with.
+    for w in "land 16 writers" "land 16 writers p50" "land 16 writers p99"; do
+        unsupported "$w" impl-b "$run"
+    done
     kill "$impl_b_pid" 2>/dev/null || true
     wait "$impl_b_pid" 2>/dev/null || true
 }
@@ -465,12 +513,11 @@ SCN_TOKEN=$(SCION_TOKEN_KEY=$TOKEN_KEY "$BIN/scion-server" token sp:bench --ttl 
 export SCN_TOKEN
 # sp:bench creates each run's repositories, and so administers them.
 "$BIN/scion-server" grant '*' sp:bench admin >/dev/null
-IMPL_A=$WORK/impl-a-${IMPL_A_COMMIT:0:12}
-IMPL_B=$WORK/impl-b-${IMPL_B_COMMIT:0:12}
-if [ -n "$IMPL_A_URL" ]; then build_impl "$IMPL_A_URL" "$IMPL_A_COMMIT" "$IMPL_A"; setup_impl_a
-else say "impl-a skipped: BENCH_IMPL_A_URL is not set"; fi
-if [ -n "$IMPL_B_URL" ]; then build_impl "$IMPL_B_URL" "$IMPL_B_COMMIT" "$IMPL_B"
-else say "impl-b skipped: BENCH_IMPL_B_URL is not set"; fi
+IMPL_A="" IMPL_B=""
+IFS=: read -r -a peers <<<"${BENCH_PEERS:-}"
+for peer in "${peers[@]}"; do [ -z "$peer" ] || add_peer "$peer"; done
+[ -n "$IMPL_A$IMPL_B" ] || say "no peers: BENCH_PEERS is not set, measuring git and scion only"
+[ -z "$IMPL_A" ] || setup_impl_a
 
 # Starts scion-server on an empty bucket $1, which scion-ingest then uses too:
 # the server memoizes what the bucket holds, so a new bucket gets a new server.
@@ -493,7 +540,7 @@ start_server() {
 }
 
 server_pid="" impl_a_pid="" impl_b_pid=""
-trap 'kill $server_pid $impl_a_pid $impl_b_pid 2>/dev/null || true; [ -z "$IMPL_A_URL" ] || docker rm -f "$CRDB" >/dev/null 2>&1 || true' EXIT
+trap 'kill $server_pid $impl_a_pid $impl_b_pid 2>/dev/null || true; [ -z "$IMPL_A" ] || docker rm -f "$CRDB" >/dev/null 2>&1 || true' EXIT
 
 # The writers' files: the first $WRITERS sources under $LOG_PATH other than
 # the one the single land edits.
@@ -509,8 +556,8 @@ files=$(git -C "$SUBSET" ls-tree -r main | wc -l | tr -d ' ')
     echo "# repository: $UPSTREAM $SUBDIR/, first-parent commits since $SINCE up to $TIP ($commits commits, $files files at the tip)"
     echo "# machine: $(machine)"
     echo "# tools: $(git --version); scion $(git -C "$ROOT" rev-parse --short HEAD); $RUNS runs; $(date -u +%Y-%m-%dT%H:%M:%SZ)"
-    [ -z "$IMPL_A_URL" ] || echo "# impl-a: $IMPL_A_URL $IMPL_A_COMMIT over CockroachDB ${CRDB_IMAGE#*:} + the same S3"
-    [ -z "$IMPL_B_URL" ] || echo "# impl-b: $IMPL_B_URL $IMPL_B_COMMIT in memory"
+    [ -z "$IMPL_A" ] || echo "# impl-a: $(peer_commit "$IMPL_A") over CockroachDB ${CRDB_IMAGE#*:} + the same S3"
+    [ -z "$IMPL_B" ] || echo "# impl-b: $(peer_commit "$IMPL_B") in memory"
     echo "workload,tool,run,ms,result"
 } >"$OUT"
 [ "$TRACE" != 1 ] || echo "workload,tool,run,process,stage,calls,ms" >"$TRACE_OUT"
@@ -565,8 +612,8 @@ for run in $(seq 1 "$RUNS"); do
 
     # The other implementations compare their checkouts with git's, so they
     # run before git's land edits it.
-    [ -z "$IMPL_A_URL" ] || impl_a_run "$run" "$dir"
-    [ -z "$IMPL_B_URL" ] || impl_b_run "$run" "$dir"
+    [ -z "$IMPL_A" ] || impl_a_run "$run" "$dir"
+    [ -z "$IMPL_B" ] || impl_b_run "$run" "$dir"
 
     echo "// bench-real run $run" >>"$dir/git-full/$EDIT_FILE"
     echo "// bench-real run $run" >>"$dir/scn-sparse/$EDIT_FILE"
