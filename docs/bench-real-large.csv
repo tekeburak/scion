@@ -1,0 +1,94 @@
+# repository: https://github.com/rust-lang/rust.git compiler/, first-parent commits since 2023-02-01 up to 91e9c2688eb23af9a5b77f056156e756550c7c99 (6008 commits, 2978 files at the tip)
+# machine: Linux 6.18.44-fc-v153 x86_64; Intel(R) Xeon(R) Processor @ 2.80GHz; 4 cpus; 15 GiB
+# tools: git version 2.43.0; scion e1ee623; 3 runs; 2026-10-24T05:12:42Z
+workload,tool,run,ms,result
+import cold,git,1,17744,ok
+import cold,scion,1,167198,ok
+import warm,git,1,17861,ok
+import warm,scion,1,31253,ok
+clone,git,1,18076,ok
+clone,scion,1,875,ok
+sparse clone,git,1,3257,ok
+sparse clone,scion,1,34,ok
+status,git,1,172,ok
+status,scion,1,7,ok
+log cold,git,1,92,ok
+log cold,scion,1,278,ok
+log warm,git,1,90,ok
+log warm,scion,1,46,ok
+blame cold,git,1,375,ok
+blame cold,scion,1,495,ok
+blame warm,git,1,408,ok
+blame warm,scion,1,12,ok
+log warm client cold,git,1,83,ok
+log warm client cold,scion,1,41,ok
+blame warm client cold,git,1,421,ok
+blame warm client cold,scion,1,13,ok
+land,git,1,53,ok
+land,scion,1,60,ok
+land 16 writers,git,1,3859,ok
+land 16 writers p50,git,1,2552,ok
+land 16 writers p99,git,1,3842,ok
+land 16 writers,scion,1,469,ok
+land 16 writers p50,scion,1,325,ok
+land 16 writers p99,scion,1,449,ok
+import cold,git,2,17369,ok
+import cold,scion,2,170454,ok
+import warm,git,2,17042,ok
+import warm,scion,2,29979,ok
+clone,git,2,17647,ok
+clone,scion,2,905,ok
+sparse clone,git,2,3511,ok
+sparse clone,scion,2,17,ok
+status,git,2,180,ok
+status,scion,2,7,ok
+log cold,git,2,104,ok
+log cold,scion,2,303,ok
+log warm,git,2,128,ok
+log warm,scion,2,52,ok
+blame cold,git,2,402,ok
+blame cold,scion,2,565,ok
+blame warm,git,2,447,ok
+blame warm,scion,2,13,ok
+log warm client cold,git,2,117,ok
+log warm client cold,scion,2,78,ok
+blame warm client cold,git,2,478,ok
+blame warm client cold,scion,2,16,ok
+land,git,2,76,ok
+land,scion,2,62,ok
+land 16 writers,git,2,4387,ok
+land 16 writers p50,git,2,2951,ok
+land 16 writers p99,git,2,4364,ok
+land 16 writers,scion,2,551,ok
+land 16 writers p50,scion,2,367,ok
+land 16 writers p99,scion,2,528,ok
+import cold,git,3,17556,ok
+import cold,scion,3,167752,ok
+import warm,git,3,18338,ok
+import warm,scion,3,33120,ok
+clone,git,3,18727,ok
+clone,scion,3,924,ok
+sparse clone,git,3,3391,ok
+sparse clone,scion,3,17,ok
+status,git,3,197,ok
+status,scion,3,9,ok
+log cold,git,3,99,ok
+log cold,scion,3,296,ok
+log warm,git,3,107,ok
+log warm,scion,3,48,ok
+blame cold,git,3,394,ok
+blame cold,scion,3,499,ok
+blame warm,git,3,474,ok
+blame warm,scion,3,12,ok
+log warm client cold,git,3,102,ok
+log warm client cold,scion,3,56,ok
+blame warm client cold,git,3,405,ok
+blame warm client cold,scion,3,11,ok
+land,git,3,56,ok
+land,scion,3,83,ok
+land 16 writers,git,3,3815,ok
+land 16 writers p50,git,3,2219,ok
+land 16 writers p99,git,3,3801,ok
+land 16 writers,scion,3,700,ok
+land 16 writers p50,scion,3,505,ok
+land 16 writers p99,scion,3,662,ok
