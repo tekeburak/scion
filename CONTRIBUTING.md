@@ -10,11 +10,6 @@ is being worked on; the README describes what works today. `CLAUDE.md` holds the
 every change follows, for people and agents alike, together with `docs/ARCHITECTURE.md` and
 `docs/DATA_MODEL.md`.
 
-Small, self-contained tasks (a doc comment, a unit test, a clearer error message) carry the
-[`good first issue`](https://github.com/tekeburak/scion/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22)
-label. Each one names the file to change and ends with a **Done when:** line saying how the
-change is checked.
-
 ## Ground rules
 
 - **The numbered invariants in `CLAUDE.md` are not changed in a PR.** A change that would bend
