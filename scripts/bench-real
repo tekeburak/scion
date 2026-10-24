@@ -2,12 +2,15 @@
 # Scion against git on a pinned slice of a real repository.
 #
 #   scripts/bench-real [runs=3] [out=target/bench-real/results.csv]
+#   BENCH_SLICE=large scripts/bench-real [runs=3] [out]
 #
 # Needs git, protoc, openssl, Docker (with compose) and the Rust toolchain pinned
 # by rust-toolchain.toml. It starts Postgres and S3 from deploy/docker-compose.yml,
 # builds the release binaries, runs its own scion-server on loopback per run, and
 # leaves the stack running (reset it with
-# `docker compose -f deploy/docker-compose.yml down -v`).
+# `docker compose -f deploy/docker-compose.yml down -v`). With DATABASE_URL and
+# AWS_ENDPOINT set it uses that Postgres and S3 server instead and starts
+# nothing, as the nightly CI job does with its own services.
 #
 # Other public implementations of the same reference design run the same
 # workloads on the same slice when their checkouts are given (see "Performance
@@ -28,11 +31,13 @@
 # printed and recorded as `unsupported`. Without BENCH_PEERS only git and Scion
 # run, and the README table says the others were not measured.
 #
-# The slice is the `library/` directory of rust-lang/rust over its first-parent
-# history from SINCE to TIP: every first-parent commit that touched it becomes
-# one linear commit whose tree is that directory, with author, committer, dates
-# and message kept and submodule entries dropped. It is built once and cached
-# under target/bench-real/. Git and Scion then start from that same repository.
+# The slice is one directory of rust-lang/rust over its first-parent history
+# from SINCE to TIP: every first-parent commit that touched it becomes one
+# linear commit whose tree is that directory, with author, committer, dates and
+# message kept and submodule entries dropped. The default slice is `library/`
+# since 2026-01-01 (about 600 commits); BENCH_SLICE=large takes `compiler/`
+# since 2023-02-01 (about 6,000). Each is built once and cached under
+# target/bench-real/. Git and Scion then start from that same repository.
 #
 # Each run uses a fresh bare git repository, a fresh bucket, a fresh Scion
 # repository name and a scion-server started for it, so every Scion run is cold
@@ -83,12 +88,22 @@ set -euo pipefail
 
 UPSTREAM=https://github.com/rust-lang/rust.git
 TIP=91e9c2688eb23af9a5b77f056156e756550c7c99
-SINCE=2026-01-01
-SUBDIR=library
-SPARSE=core
-LOG_PATH=core/src
-BLAME_FILE=alloc/src/vec/mod.rs
-EDIT_FILE=core/src/lib.rs
+case ${BENCH_SLICE:-} in
+'')
+    SINCE=2026-01-01 FETCH=--shallow-since=$SINCE SUBDIR=library SPARSE=core LOG_PATH=core/src
+    BLAME_FILE=alloc/src/vec/mod.rs EDIT_FILE=core/src/lib.rs
+    ;;
+large)
+    # --shallow-since would stop at a 2024 subtree merge whose side history is
+    # years older; a fixed depth reaches past SINCE on the first-parent line.
+    SINCE=2023-02-01 FETCH=--depth=9000 SUBDIR=compiler SPARSE=rustc_middle LOG_PATH=rustc_middle/src
+    BLAME_FILE=rustc_middle/src/ty/context.rs EDIT_FILE=rustc_middle/src/lib.rs
+    ;;
+*)
+    echo "bench-real: BENCH_SLICE is empty or large, not $BENCH_SLICE" >&2
+    exit 1
+    ;;
+esac
 WRITERS=16
 # The peer adapters follow the command lines of impl-a at
 # 7d445a0744e30f4dcb36a794b0ce42648157e1b9 and impl-b at
@@ -102,12 +117,17 @@ WORK=$ROOT/target/bench-real
 OUT=${2:-$WORK/results.csv}
 TRACE=${SCION_TRACE:-}
 TRACE_OUT=${OUT%.csv}-trace.csv
-SUBSET=$WORK/subset-${TIP:0:12}.git
+SUBSET=$WORK/subset-$SUBDIR-$SINCE-${TIP:0:12}.git
 BIN=$ROOT/target/release
 COMPOSE=(docker compose -f "$ROOT/deploy/docker-compose.yml")
 
-export DATABASE_URL=postgres://scion:scion@127.0.0.1:5432/scion
-export AWS_ENDPOINT=http://127.0.0.1:9000 AWS_ALLOW_HTTP=true
+# Our own stack unless one is given.
+EXTERNAL_STACK=${DATABASE_URL:+${AWS_ENDPOINT:+1}}
+if [ -z "$EXTERNAL_STACK" ]; then
+    export DATABASE_URL=postgres://scion:scion@127.0.0.1:5432/scion
+    export AWS_ENDPOINT=http://127.0.0.1:9000
+fi
+export AWS_ALLOW_HTTP=true
 export AWS_ACCESS_KEY_ID=scion AWS_SECRET_ACCESS_KEY=scionscion AWS_REGION=us-east-1
 export SCN_AUTHOR="Bench <bench@example.com>"
 # A fresh token key per invocation, given only to our own server.
@@ -121,6 +141,19 @@ export GIT_CONFIG_KEY_1=init.defaultBranch GIT_CONFIG_VALUE_1=main
 
 say() { echo "bench-real: $*" >&2; }
 
+# Creates bucket $1 on the S3 server: through the compose network on our own
+# stack, from the host's network on a given one.
+make_bucket() {
+    if [ -n "$EXTERNAL_STACK" ]; then
+        docker run --rm --network host -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY \
+            -e AWS_DEFAULT_REGION="$AWS_REGION" amazon/aws-cli \
+            --endpoint-url "$AWS_ENDPOINT" s3 mb "s3://$1"
+    else
+        "${COMPOSE[@]}" run --rm --no-deps --entrypoint aws bucket-init \
+            --endpoint-url http://rustfs:9000 s3 mb "s3://$1"
+    fi
+}
+
 # Builds $SUBSET: fetch the range without blobs, rewrite it, then fetch only
 # the blobs the rewritten history needs.
 build_subset() {
@@ -129,7 +162,7 @@ build_subset() {
     git init -q --bare "$up"
     git -C "$up" remote add origin "$UPSTREAM"
     say "fetching $UPSTREAM $TIP since $SINCE (no blobs)"
-    git -C "$up" fetch -q --filter=blob:none --shallow-since="$SINCE" --no-tags origin "$TIP"
+    git -C "$up" fetch -q --filter=blob:none "$FETCH" --no-tags origin "$TIP"
 
     say "rewriting the first-parent history of $SUBDIR/"
     local index=$WORK/subset.index parent="" commit tree n=0
@@ -147,7 +180,7 @@ build_subset() {
             GIT_COMMITTER_NAME=$cn GIT_COMMITTER_EMAIL=$ce GIT_COMMITTER_DATE=$cd \
             git -C "$up" commit-tree "$tree" ${parent:+-p "$parent"})
         n=$((n + 1))
-    done < <(git -C "$up" log --first-parent --reverse --date=raw --format="$fmt" "$TIP" -- "$SUBDIR")
+    done < <(git -C "$up" log --first-parent --reverse --since="$SINCE" --date=raw --format="$fmt" "$TIP" -- "$SUBDIR")
     rm -f "$index"
 
     say "fetching the blobs of $n commits"
@@ -354,8 +387,7 @@ ACL
 # bucket $1) and exports the endpoint and a token for its clients.
 start_impl_a() {
     local d=$WORK/impl-a-env name=$1 bucket=${2:-$1} port=$(( (RANDOM % 20000) + 30000 ))
-    [ -n "${2:-}" ] || "${COMPOSE[@]}" run --rm --no-deps --entrypoint aws bucket-init \
-        --endpoint-url http://rustfs:9000 s3 mb "s3://$name" >/dev/null
+    [ -n "${2:-}" ] || make_bucket "$name" >/dev/null
     cat >"$d/server.toml" <<TOML
 [server]
 listen = "127.0.0.1:$port"
@@ -504,9 +536,11 @@ machine() {
 mkdir -p "$WORK" "$(dirname "$OUT")"
 [ -d "$SUBSET" ] || build_subset
 
-say "starting Postgres and S3"
-"${COMPOSE[@]}" up -d --wait postgres rustfs bucket-init >"$WORK/compose.log" 2>&1 ||
-    { cat "$WORK/compose.log" >&2; exit 1; }
+if [ -z "$EXTERNAL_STACK" ]; then
+    say "starting Postgres and S3"
+    "${COMPOSE[@]}" up -d --wait postgres rustfs bucket-init >"$WORK/compose.log" 2>&1 ||
+        { cat "$WORK/compose.log" >&2; exit 1; }
+fi
 say "building release binaries"
 (cd "$ROOT" && cargo build -q --release -p scion-server -p scion-ingest -p scn)
 SCN_TOKEN=$(SCION_TOKEN_KEY=$TOKEN_KEY "$BIN/scion-server" token sp:bench --ttl 2d)
@@ -523,8 +557,7 @@ for peer in "${peers[@]}"; do [ -z "$peer" ] || add_peer "$peer"; done
 # the server memoizes what the bucket holds, so a new bucket gets a new server.
 start_server() {
     local port=$(( (RANDOM % 20000) + 30000 ))
-    "${COMPOSE[@]}" run --rm --no-deps --entrypoint aws bucket-init \
-        --endpoint-url http://rustfs:9000 s3 mb "s3://$1" >/dev/null 2>&1
+    make_bucket "$1" >/dev/null 2>&1
     export AWS_BUCKET=$1
     SCION_TOKEN_KEY=$TOKEN_KEY SCION_LISTEN=127.0.0.1:$port "$BIN/scion-server" \
         2>"$WORK/server.log" &
