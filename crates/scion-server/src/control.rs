@@ -384,6 +384,30 @@ async fn create(
     Ok(created)
 }
 
+/// Derive and store, on a task, the path history of changeset `id` of
+/// `repo`, which is stored; until the task has, `PathLog` and `Blame`
+/// derive it on first use.
+pub(crate) fn spawn_history(
+    meta: Arc<dyn MetadataStore>,
+    objects: Arc<dyn ObjectStore>,
+    repo: String,
+    id: ChangesetId,
+) {
+    tokio::spawn(async move {
+        let stored = async {
+            let cs = meta
+                .get_changeset(&repo, id)
+                .await
+                .map_err(store_status)?
+                .ok_or_else(|| Status::data_loss(format!("changeset {id} is missing")))?;
+            store_history(&*meta, &*objects, &cs).await
+        };
+        if let Err(e) = timed("history", stored).await {
+            eprintln!("scion-server: path history of {id} in {repo:?}: {e}");
+        }
+    });
+}
+
 /// Derive the path history of `cs`, which is stored, and store it in one
 /// write of its pages and one of its pointer, as [`create_changesets`] does.
 async fn store_history(
@@ -497,6 +521,20 @@ pub async fn rebase(
     onto: ChangesetId,
     scope: &Scope,
 ) -> Result<Rebased, Status> {
+    replay(meta, objects, repo, (head, onto), scope, true).await
+}
+
+/// [`rebase`], deriving the path history of the changesets it creates only
+/// if `history`: the land worker moves `main` on the root tree and the skip
+/// list, and stores the history afterwards.
+pub(crate) async fn replay(
+    meta: &dyn MetadataStore,
+    objects: &dyn ObjectStore,
+    repo: &str,
+    (head, onto): (ChangesetId, ChangesetId),
+    scope: &Scope,
+    history: bool,
+) -> Result<Rebased, Status> {
     let _rebase = span("rebase");
     let ctx = Deriver::new(repo, meta, objects);
     let clean = async |head: ChangesetId, created| {
@@ -571,7 +609,7 @@ pub async fn rebase(
             file_changes: merged.changes,
             ..cs
         };
-        let [(new, _)] = create_changesets(meta, objects, &[replayed])
+        let [(new, _)] = create(meta, objects, &[replayed], history)
             .await?
             .try_into()
             .expect("one changeset in, one out");
@@ -1251,14 +1289,6 @@ impl ControlService for ControlServer {
             .await
             .map_err(store_status)?
             .ok_or_else(|| Status::internal(format!("change request {} vanished", cr.id)))?;
-        // Nothing above waited on the path history; until this task stores
-        // it, `PathLog` and `Blame` derive it on first use.
-        let (meta, objects) = (self.meta.clone(), self.objects.clone());
-        tokio::spawn(async move {
-            if let Err(e) = timed("history", store_history(&*meta, &*objects, &cs)).await {
-                eprintln!("scion-server: path history of {id} in {repo:?}: {e}");
-            }
-        });
         Ok(Response::new(change_request(cr)))
     }
 
