@@ -40,48 +40,50 @@ changing any id or any client.
 
 ## Can I use it today?
 
-Not for real work yet. Access control is done (Phase 7): every request needs a valid token and
-a role in its repository, optionally limited to a directory, people sign in with GitHub
-through `scn login`, admins manage roles with `scn access`, and a hermetic simulation and
-fuzz targets check the server. But nothing is released yet: every binary reports one version
-(`--version`, Phase 9.1) and a `v*` tag builds static `x86_64` and `aarch64` Linux binaries
-into a draft release (Phase 9.2) along with macOS `scn` (9.3) and the server image
-`ghcr.io/tekeburak/scion-server` (9.5), and `scripts/install.sh` (9.4) installs the binaries
-for the machine after checking them against the release's `SHA256SUMS`; but no tag has been
-pushed, and there is no hosted instance (Phase 9) or cache tier (Phase 4) yet. Running your
-own server is possible: `scn` reaches `https://` servers, checked against the public
-certificate authorities plus any in `SSL_CERT_FILE` (9.6), and `deploy/compose.prod.yml` runs
-the server image, Postgres and Caddy terminating TLS on one address with a Let's Encrypt
-certificate (9.7); the README's "Run your own server" section has the commands. Every write
-path (gRPC, `/api/v1` and the MCP tools) refuses an anonymous write and a blob over the
-64 MiB per-blob limit with an error that names it (9.8).
-The web interface and the agent API are in (Phase 11): `scion-server --web <addr>` (on
-`127.0.0.1:8080` in the compose stack) serves server-rendered pages for files, log, blame,
-changesets and change requests under the same roles and directory grants as `scn`; writers
-rebase, land and reject change requests from the page, admins create repositories and manage
-roles there, people sign in with GitHub in the browser, and `scn access grant anyone reader`
-makes a repository public. `/api/v1` ([`docs/API.md`](API.md)) runs the whole init → clone →
-commit → land loop over plain HTTP, `scion-mcp` ([`docs/MCP.md`](MCP.md)) serves agents over
-MCP, and `scn --json` prints machine-readable output. The README's "Web interface" section
-has screenshots.
-The MVP (Phase 3) is done: `scion-server` serves the object and control gRPC services over
-Postgres + S3. `scn` can `init` a repository, `clone --sparse`, `status`, `log`, `diff`,
-`blame`, `add`, `commit` (an anonymous head; `--land` also lands it), `land` (a change
-request the server rebases onto `main` and lands), `update` (the server rebases the head onto
-`main`) and `checkout` any changeset. The README [Getting started](../README.md#getting-started) section runs that
-loop on the compose stack with only Docker and the Rust toolchain installed. Change requests
-are done (Phase 5): `scn land` submits one (`SubmitChangeRequest`) and waits while the
-serial land worker of the repository rebases and lands it, so concurrent heads land from the
-CLI with no manual `update`, `scn requests` lists them newest first, and `scn log --landed`
-shows which request landed each changeset and when. Merges and reverts run on the server:
-`scn merge <rev>` merges a revision such as a `release/*` fix into your head, `scn revert
-<rev>` undoes a changeset on it, and `scn update --conflicts` writes conflict markers to
-resolve locally instead of refusing. A benchmark of 16 writers landing at once is in the
-README (numbers below).
-Git import (Phase 6) works and a benchmark script runs it against git on a real
-repository; the README's Benchmarks section shows the results. A cold `blame` or path `log` (the first call
-for a revision) takes several times git's time; the 6.12 criteria bound how many.
-The README status section tracks this.
+To try it, yes; for real work, not yet. Scion is alpha: no release has been tagged, there is no
+hosted instance and the cache tiers are not built. What runs today, on the local compose stack
+or on your own server:
+
+- **The server and the CLI.** `scion-server` serves the object and control gRPC services over
+  Postgres + S3. `scn` can `init` a repository, `clone --sparse`, `status`, `log`, `diff`,
+  `blame`, `add`, `commit` (an anonymous head; `--land` also lands it, in one round trip) and
+  `checkout` any changeset. The README's [Getting started](../README.md#getting-started) runs
+  that loop with only Docker and the Rust toolchain installed.
+- **Landing.** `scn land` submits the head as a change request; the repository's serial land
+  worker rebases it onto `main` on the server and lands it, so concurrent heads land with no
+  manual `update`. `scn requests` lists the requests newest first and `scn log --landed` shows
+  which request landed each changeset. `scn merge <rev>` and `scn revert <rev>` run on the
+  server, and `scn update --conflicts` writes conflict markers to resolve locally instead of
+  refusing.
+- **Access control.** Every request needs a token signed by the server and a role in its
+  repository, optionally limited to a directory. People sign in with GitHub (`scn login`),
+  services use tokens from `scion-server token`, and admins manage roles with `scn access`.
+  Every write path (gRPC, `/api/v1` and the MCP tools) refuses an anonymous write and a blob
+  over the 64 MiB per-blob limit with an error that names it.
+- **The web interface and the agent API.** `scion-server --web <addr>` (on `127.0.0.1:8080`
+  in the compose stack) serves pages for files, log, blame, changesets and change requests
+  under the same roles as `scn`; writers rebase, land and reject change requests there and
+  admins create repositories and manage roles. `/api/v1` ([`docs/API.md`](API.md)) runs the
+  whole init → clone → commit → land loop over plain HTTP, `scion-mcp`
+  ([`docs/MCP.md`](MCP.md)) serves agents over MCP, and `scn --json` prints machine-readable
+  output.
+- **Git import.** `scion-ingest` imports a git history (next question), and
+  `scripts/bench-real` measures Scion against git on a real repository (see
+  [Is it faster than git?](#is-it-faster-than-git)).
+- **Running your own server.** `deploy/compose.prod.yml` runs the server image, Postgres and
+  Caddy terminating TLS on one `https://` address with a Let's Encrypt certificate; `scn`
+  checks `https://` servers against the public certificate authorities plus any in
+  `SSL_CERT_FILE`. The README's "Run your own server" section has the commands.
+- **Release tooling, not yet used.** A `v*` tag builds static `x86_64` and `aarch64` Linux
+  binaries and macOS `scn` into a draft release, and the server image
+  `ghcr.io/tekeburak/scion-server`; `scripts/install.sh` installs the binaries after checking
+  them against the release's `SHA256SUMS`. Until a tag is pushed, build from source.
+
+A seeded, hermetic simulation and fuzz targets check the server; the fuzz corpus is replayed on
+every test run. What is missing is
+listed under [What are the known limits today?](#what-are-the-known-limits-today) and, step by
+step, in [`docs/ROADMAP.md`](ROADMAP.md) (release and hosting in Phase 9, the cache tiers in
+Phase 4).
 
 ## Can I bring an existing git repository?
 
@@ -142,8 +144,7 @@ lands, so no writer pays another's round trips.
 
 ## What are the known limits today?
 
-Beyond the missing cache tiers and released binaries, these are the gaps a first user hits, each with
-the roadmap step that closes it:
+Beyond the missing cache tiers and released binaries, these are the gaps a first user hits:
 
 - **Incremental import is for mirror repositories.** A re-run of `scion-ingest import` refuses
   with "the upstream history was rewritten" whenever `main` points at a changeset that did not
