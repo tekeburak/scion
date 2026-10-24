@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use scion_proto::trace::timed;
 use scion_store::{
     ChangeRequest, ChangeRequestStatus, LandOutcome, MetadataStore, ObjectStore, Role, StoreError,
 };
@@ -178,12 +179,11 @@ async fn land_pending(
             finish(meta, objects, repo, &cr, outcome, finished).await?;
         }
     }
-    while let Some(cr) = meta
-        .claim_next_change_request(repo)
+    while let Some(cr) = timed("claim", meta.claim_next_change_request(repo))
         .await
         .map_err(store_status)?
     {
-        let outcome = land(&**meta, &**objects, repo, &cr, false).await?;
+        let outcome = timed("worker", land(&**meta, &**objects, repo, &cr, false)).await?;
         finish(meta, objects, repo, &cr, outcome, finished).await?;
     }
     Ok(())
@@ -204,7 +204,7 @@ async fn finish(
         LandOutcome::Landed(id) => Some(id),
         _ => None,
     };
-    meta.finish_change_request(repo, cr.id, outcome)
+    timed("finish", meta.finish_change_request(repo, cr.id, outcome))
         .await
         .map_err(store_status)?;
     finished.notify_waiters();
@@ -236,7 +236,7 @@ async fn land(
     cr: &ChangeRequest,
     resumed: bool,
 ) -> Result<LandOutcome, Status> {
-    let scope = Scope::of(meta, repo, &cr.submitter, Role::Writer).await?;
+    let scope = timed("scope", Scope::of(meta, repo, &cr.submitter, Role::Writer)).await?;
     if resumed {
         if let Some(copy) = landed_copy(meta, repo, cr).await? {
             return Ok(LandOutcome::Landed(copy));
@@ -244,8 +244,7 @@ async fn land(
     }
     let mut head = cr.head;
     loop {
-        let main = meta
-            .get_ref(repo, "main")
+        let main = timed("main", meta.get_ref(repo, "main"))
             .await
             .map_err(store_status)?
             .ok_or_else(|| Status::not_found(format!("ref \"main\" in {repo:?}")))?;
@@ -265,7 +264,7 @@ async fn land(
             }
             Rebased::Clean { head, .. } => head,
         };
-        match meta.move_ref(repo, "main", main.version, rebased).await {
+        match timed("cas", meta.move_ref(repo, "main", main.version, rebased)).await {
             Ok(_) => return Ok(LandOutcome::Landed(rebased)),
             Err(StoreError::CasMismatch { .. }) => head = rebased,
             Err(e) => return Err(store_status(e)),
