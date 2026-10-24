@@ -39,9 +39,10 @@ Scion is that design, built on boring infrastructure:
   first parent. Directory trees, path history, blame and the ancestry index are *derived data*,
   computed from that and replaceable without a client change. One changed file in a 2,500-file
   tree rewrites five tree nodes: the directories on its path.
-- **Thin, sparse clients.** A working copy holds the directories you asked for and a bounded
-  object cache; everything else is fetched by immutable id, which makes every request a
-  cacheable GET through the daemon → regional cache → server hierarchy.
+- **Thin, sparse clients.** A working copy holds the directories you asked for; everything
+  else is fetched by immutable id, so every object request names content that never changes
+  and any tier can answer it from cache. Today clients fetch from the server directly; the
+  per-node daemon and regional cache tiers are planned.
 - **One `main`.** The only server-side refs are `main` and `release/*`. Work in progress is an
   anonymous head the client tracks; landing is a server-side rebase onto `main`, so there is
   nothing to push and no merge queue to wait in.
@@ -372,10 +373,11 @@ A **changeset** is the unit of work: commit metadata plus a flat list of files c
 to the first parent, each pointing at a content-addressed blob. Changesets are created on the
 server and appended to a write-ahead log; there is nothing to push. Directory **trees**, file
 history, blame and commit-graph indexes are **derived data**, computed recursively from each
-changeset's parents and never stored in the changeset itself. Clients keep a bounded local
-object cache and a sparse working copy, and resolve every tree and blob by immutable id through
-a strict cache hierarchy, per-node daemon → regional cache → authoritative server, so every
-request is a cacheable GET and no tier needs repository maintenance.
+changeset's parents and never stored in the changeset itself. Clients keep a sparse working
+copy and resolve every tree and blob by immutable id, so every object request is cacheable and
+no tier needs repository maintenance. The design puts a strict cache hierarchy in that path,
+per-node daemon → regional cache → authoritative server; today the server answers directly,
+and the two cache tiers are next on the roadmap.
 
 <p align="center">
   <img src="docs/assets/changeset.svg" width="800" alt="A changeset: repo, parents, author, committer, message, file_changes and extra; file changes point at blobs; trees, path history, blame and the skip list are derived">
