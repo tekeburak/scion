@@ -72,8 +72,11 @@ What works today:
   ahead of the first request.
 - **Change requests and the land worker**: a submitted head is landed by one serial worker
   per repository, in submission order, rebased onto the current `main` on the server and
-  moved in with a single compare-and-swap. A conflict leaves `main` untouched and reports the
-  conflicting paths; a request interrupted by a server restart resumes and lands exactly once.
+  moved in with a single compare-and-swap. While one request's swap is in flight, the worker
+  already rebases the next onto the `main` that swap will make, and starts that one over if
+  the swap is lost, so requests still land strictly in order. A conflict leaves `main`
+  untouched and reports the conflicting paths; a request interrupted by a server restart
+  resumes and lands exactly once.
 - **`scn`**, the CLI: `init` a repository, `clone --sparse`, `status`, `log`, `diff`, `blame`,
   `add`, `commit` (an anonymous head; `--land` also lands it, in the same round trip), `land`
   (submits the head as a change request; the server rebases it onto `main` and lands it, or
@@ -454,20 +457,20 @@ Read these numbers with their limits:
 
 - **Import** writes one immutable object per blob, tree and history page to a remote object
   store, where git writes a local packfile; parity with git's push is not a goal. The figure to
-  quote is the cold row, 8.3× git: into an empty bucket the object store's write rate is the
-  bound. Warm, with the objects already stored, it is 2.0× git.
+  quote is the cold row, 8.4× git: into an empty bucket the object store's write rate is the
+  bound. Warm, with the objects already stored, it is 1.9× git.
 - **Cold `log` and `blame`**, the first call after import with nothing cached on the server,
   take 3.6× and 1.1× git: a path's history is walked in lockstep, one read per step, and blame
   answers from the file's own history. Warm, both are answered from memory: `blame` is 0.14×
-  git and a path log 0.65×. Clone is 0.38× git and a sparse clone 0.11×.
+  git and a path log 0.73×. Clone is 0.36× git and a sparse clone 0.05×.
 - **`status`** lists only the directories whose entries changed, so a clean `status` reads no
   file and the row (0.04× git) is mostly the cost of starting a process; see
   [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 - **A single commit + land** (`scn commit --land`, one round trip to land) still goes through a
   change request and the serial land worker, so on its own it takes longer than git's local
-  commit and push (49 ms against 41 ms). The worker pays off under contention: 16 writers
-  landing at once finish in 0.13× git's time, because no writer repeats another's fetch, rebase
-  and push.
+  commit and push (52 ms against 43 ms). The worker pays off under contention: 16 writers
+  landing at once finish in 0.10× git's time, because no writer repeats another's fetch, rebase
+  and push, and the worker rebases the next request while the previous one lands.
 - **The other implementations** ran on the same machine and stack, at the commits named under
   the table; `unsupported` marks a workload one of them has no command for.
 - One machine, three runs, shared cloud VM: medians move by several milliseconds between
@@ -489,13 +492,11 @@ Read these numbers with their limits:
 
 The work in flight and the work planned after it, in order:
 
-- **Faster landing under load** (in progress). The land worker prepares the next change
-  request while the previous one lands, aimed at 16 concurrent writers landing in a tenth of
-  git's time. It continues a performance pass that already batches clone and commit, lands a
-  commit in one round trip, answers a warm `log` or `blame` from memory and has `status` list
-  only the directories whose entries changed.
-- **Wider benchmarks** (planned). A second, larger slice of the real repository, and a nightly
-  run that turns red when any row regresses by more than 20%.
+- **Wider benchmarks** (in progress). A second, larger slice of the real repository, and a
+  nightly run that turns red when any row regresses by more than 20%. It closes a performance
+  pass that already batches clone and commit, lands a commit in one round trip, answers a warm
+  `log` or `blame` from memory, has `status` list only the directories whose entries changed
+  and has the land worker prepare the next change request while the previous one lands.
 - **Releases and hosting** (in progress). The first tagged release, release notes generated
   from merged changes, a hosted instance, and a five-minute quickstart from the install script
   to a landed change.
