@@ -68,7 +68,7 @@ struct Cli {
 enum Command {
     /// Sign in to a server with GitHub and keep its token for this user.
     Login {
-        /// Server address, e.g. `http://127.0.0.1:7420`.
+        /// Server address, e.g. `http://127.0.0.1:7420` (the compose stack's).
         server: String,
     },
     /// Show who the token for a server names, until when, and its roles in
@@ -85,14 +85,14 @@ enum Command {
     },
     /// Create an empty repository on a server, with `main` at its root.
     Init {
-        /// Server address, e.g. `http://127.0.0.1:7420`.
+        /// Server address, e.g. `http://127.0.0.1:7420` (the compose stack's).
         server: String,
         /// Repository name.
         repo: String,
     },
     /// Create a working copy of a repository at its current `main`.
     Clone {
-        /// Server address, e.g. `http://127.0.0.1:7420`.
+        /// Server address, e.g. `http://127.0.0.1:7420` (the compose stack's).
         server: String,
         /// Repository name.
         repo: String,

@@ -32,7 +32,7 @@ pub enum WorkspaceError {
 /// `.scn/config`: where the repository lives.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Config {
-    /// Server address, e.g. `http://scion.internal:7070`.
+    /// Server address, e.g. `http://scion.internal:7420`.
     pub server: String,
     /// Repository name on that server.
     pub repo: String,

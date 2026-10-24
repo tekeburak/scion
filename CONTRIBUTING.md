@@ -1,9 +1,14 @@
 # Contributing
 
-Thanks for your interest. The phase table and the single-PR steps in `docs/ROADMAP.md` are
-the source of truth for what is being worked on; the README describes what works today. `CLAUDE.md` holds the working rules every change
-follows, for people and agents alike; read it, together with `docs/ARCHITECTURE.md` and
-`docs/DATA_MODEL.md`, before opening a PR.
+Thanks for your interest. Scion is developed by its maintainer, and issues and pull requests
+from outside the project are not accepted for now; the repository is limited to collaborators.
+You are welcome to read, build, run and fork it under the license. The rest of this page is
+how changes are made inside the project.
+
+The phase table and the single-PR steps in `docs/ROADMAP.md` are the source of truth for what
+is being worked on; the README describes what works today. `CLAUDE.md` holds the working rules
+every change follows, for people and agents alike, together with `docs/ARCHITECTURE.md` and
+`docs/DATA_MODEL.md`.
 
 ## Ground rules
 
@@ -35,10 +40,8 @@ follows, for people and agents alike; read it, together with `docs/ARCHITECTURE.
    `Invariant kept:` and `Could be simpler:`.
 4. Commit messages explain *why*; the diff shows *what*.
 5. CI must be green. Reviews look at intent and invariants first, lines second.
-
-Issues labelled [`good first issue`](https://github.com/tekeburak/scion/labels/good%20first%20issue)
-are small, self-contained and need no design decision: a doc comment, a unit test, a clearer
-error message. Say on the issue that you are taking it, and open one PR for it.
+6. A pull request from a fork is reviewed and merged by the maintainer alone; agents and
+   automation never merge, approve or run CI for one.
 
 ## Checks
 
