@@ -427,25 +427,25 @@ a workload one of them cannot express reads `unsupported`.
 <!-- bench-real:start (scripts/render-assets.py writes this table) -->
 | Workload | git, ms | scion, ms | impl-a, ms | impl-b, ms | scion / git |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| import, cold | 1,451 | 12,093 | 193,144 | unsupported | 8.3× |
-| import, warm | 1,377 | 2,797 | 201,079 | unsupported | 2.0× |
-| clone | 1,738 | 663 | 1,182 | 280 | 0.38× |
-| sparse clone | 560 | 61 | 155 | 41 | 0.11× |
-| status | 189 | 7 | 9 | unsupported | 0.04× |
-| path log, cold | 23 | 82 | 1,531 | unsupported | 3.6× |
-| path log, warm | 26 | 17 | 1,005 | unsupported | 0.65× |
-| blame, cold | 53 | 58 | 1,070 | unsupported | 1.1× |
-| blame, warm | 59 | 8 | 23 | unsupported | 0.14× |
-| path log, server warm, client cold | 28 | 18 | 1,014 | unsupported | 0.64× |
-| blame, server warm, client cold | 63 | 10 | 24 | unsupported | 0.16× |
-| commit + land | 41 | 49 | 172 | 8 | 1.2× |
-| land, 16 writers at once | 3,253 | 424 | 3,905 | unsupported | 0.13× |
-| land, 16 writers: p50 per land | 2,237 | 290 | 2,449 | unsupported | 0.13× |
-| land, 16 writers: p99 per land | 3,238 | 408 | 3,890 | unsupported | 0.13× |
+| import, cold | 1,386 | 11,629 | 180,789 | unsupported | 8.4× |
+| import, warm | 1,365 | 2,580 | 196,170 | unsupported | 1.9× |
+| clone | 1,617 | 582 | 1,187 | 249 | 0.36× |
+| sparse clone | 513 | 28 | 167 | 36 | 0.05× |
+| status | 161 | 7 | 10 | unsupported | 0.04× |
+| path log, cold | 22 | 79 | 1,899 | unsupported | 3.6× |
+| path log, warm | 22 | 16 | 1,263 | unsupported | 0.73× |
+| blame, cold | 49 | 56 | 1,253 | unsupported | 1.1× |
+| blame, warm | 57 | 8 | 23 | unsupported | 0.14× |
+| path log, server warm, client cold | 23 | 18 | 1,242 | unsupported | 0.78× |
+| blame, server warm, client cold | 61 | 9 | 24 | unsupported | 0.15× |
+| commit + land | 43 | 52 | 178 | 7 | 1.2× |
+| land, 16 writers at once | 3,022 | 295 | 4,943 | unsupported | 0.10× |
+| land, 16 writers: p50 per land | 2,045 | 207 | 3,193 | unsupported | 0.10× |
+| land, 16 writers: p99 per land | 3,014 | 285 | 4,922 | unsupported | 0.09× |
 
 Repository: library/ of the public repository pinned in scripts/bench-real, first-parent commits since 2026-01-01 up to 91e9c2688eb23af9a5b77f056156e756550c7c99 (600 commits, 2330 files at the tip).  
 Machine: Linux 6.18.44-fc-v153 x86_64; Intel(R) Xeon(R) Processor @ 2.10GHz; 4 cpus; 15 GiB.  
-Run: git version 2.43.0; scion 53da42f; 3 runs; 2026-10-24T02:26:17Z.  
+Run: git version 2.43.0; scion 52d0dbc; 3 runs; 2026-10-24T05:02:50Z.  
 impl-a: another implementation of the design, at 7d445a0744e30f4dcb36a794b0ce42648157e1b9 over CockroachDB v24.3.5 + the same S3.  
 impl-b: another implementation of the design, at 00e92ab9c2a9985f39a64636b4b6c5c4bb583916 in memory.
 <!-- bench-real:end -->
