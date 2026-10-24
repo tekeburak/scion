@@ -122,22 +122,23 @@ sparse clone, its normal case.
 
 The measurements, medians of three runs on the 600-commit slice `scripts/bench-real` imports
 (4 vCPU, the compose Postgres + RustFS stack, one fresh bucket per run, the run behind the
-README table, taken on 2026-10-24 after 10.7 stored history pages in lz4): a cold import, into
-an empty bucket, takes 12,093 ms against git's 1,451 ms (8.3×), where the object store's write
+README table, taken on 2026-10-24 after 10.9 pipelined the land worker): a cold import, into
+an empty bucket, takes 11,629 ms against git's 1,386 ms (8.4×), where the object store's write
 rate is the bound, within the 10× criterion; a warm import, with the objects already stored,
-takes 2,797 ms against 1,377 ms (2.0×). The README quotes the cold row. A full clone takes
-663 ms against git's 1,738 ms (0.38×) and a sparse clone 61 ms against 560 ms (0.11×); `status`
-takes 7 ms against 189 ms (0.04×). `log` and `blame` are measured cold (the first call for a
+takes 2,580 ms against 1,365 ms (1.9×). The README quotes the cold row. A full clone takes
+582 ms against git's 1,617 ms (0.36×) and a sparse clone 28 ms against 513 ms (0.05×); `status`
+takes 7 ms against 161 ms (0.04×). `log` and `blame` are measured cold (the first call for a
 new repository), warm, and once more from a second clone (server warm, client cold). Warm
-`blame` of one file at the tip takes 8 ms against git's 59 ms (0.14×), and warm path `log`
-17 ms against 26 ms (0.65×); from a second clone they take 10 ms against 63 ms and 18 ms
-against 28 ms. Cold, the path `log` takes 82 ms against git's 23 ms (3.6×; the criterion is
-20×) and the `blame` 58 ms against 53 ms (1.1×; the criterion is 5×). A single
-`scn commit --land` takes 49 ms against git's 41 ms (1.2×), above the at-or-below-git target:
+`blame` of one file at the tip takes 8 ms against git's 57 ms (0.14×), and warm path `log`
+16 ms against 22 ms (0.73×); from a second clone they take 9 ms against 61 ms and 18 ms
+against 23 ms. Cold, the path `log` takes 79 ms against git's 22 ms (3.6×; the criterion is
+20×) and the `blame` 56 ms against 49 ms (1.1×; the criterion is 5×). A single
+`scn commit --land` takes 52 ms against git's 43 ms (1.2×), above the at-or-below-git target:
 it is one round trip to land, but still a change request and the land worker. Sixteen writers
-landing at once, each editing a different file, all land in 424 ms against 3,253 ms for git's
-fetch-rebase-push retry loop (p50 per land 290 ms against 2,237 ms, p99 408 ms against
-3,238 ms): the server rebases each request in turn, so no writer pays another's round trips.
+landing at once, each editing a different file, all land in 295 ms against 3,022 ms for git's
+fetch-rebase-push retry loop (0.10×; p50 per land 207 ms against 2,045 ms, p99 285 ms against
+3,014 ms): the server rebases each request in turn, preparing the next while the previous one
+lands, so no writer pays another's round trips.
 
 ## What are the known limits today?
 
