@@ -2,10 +2,12 @@
 //! task, started by its first submit (or at server start if requests are
 //! waiting) and woken by every later one. It takes pending requests in
 //! submission order, rebases each head onto `main` through [`rebase`](crate::control::rebase) and
-//! moves `main` with one compare-and-swap. Submitting returns at once, so
-//! landers never queue behind each other's round trips; the worker never
-//! waits on a client. A client that asks to wait is told when its request
-//! is finished, without polling.
+//! moves `main` with one compare-and-swap; while that CAS is in flight, the
+//! next request is claimed and rebased onto the `main` the CAS makes, so
+//! each land costs one rebase rather than a rebase plus the CAS and its
+//! bookkeeping. Submitting returns at once, so landers never queue behind
+//! each other's round trips; the worker never waits on a client. A client
+//! that asks to wait is told when its request is finished, without polling.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -13,10 +15,11 @@ use std::time::Duration;
 
 use scion_proto::trace::timed;
 use scion_store::{
-    ChangeRequest, ChangeRequestStatus, LandOutcome, MetadataStore, ObjectStore, Role, StoreError,
+    ChangeRequest, ChangeRequestStatus, LandOutcome, MetadataStore, ObjectStore, RefState, Role,
+    StoreError,
 };
 use scion_types::{Changeset, ChangesetId};
-use tokio::sync::Notify;
+use tokio::sync::{Notify, broadcast};
 use tonic::{Request, Status};
 
 use crate::auth::{Scope, authorize, principal};
@@ -35,12 +38,15 @@ pub(crate) struct LandWorkers {
     workers: Mutex<HashMap<String, Arc<Worker>>>,
 }
 
-/// One repository's worker: woken by submits, announcing every finished
-/// request to the clients waiting on one.
-#[derive(Default)]
+/// Finished requests a waiting client may fall behind by before it reads
+/// its own from the store instead.
+const FINISHED_QUEUED: usize = 64;
+
+/// One repository's worker: woken by submits, sending every finished
+/// request to the clients waiting on one, so none of them reads it again.
 struct Worker {
     wake: Notify,
-    finished: Notify,
+    finished: broadcast::Sender<ChangeRequest>,
 }
 
 impl LandWorkers {
@@ -58,7 +64,10 @@ impl LandWorkers {
         workers
             .entry(repo.to_owned())
             .or_insert_with(|| {
-                let worker = Arc::new(Worker::default());
+                let worker = Arc::new(Worker {
+                    wake: Notify::new(),
+                    finished: broadcast::channel(FINISHED_QUEUED).0,
+                });
                 tokio::spawn(work(
                     self.meta.clone(),
                     self.objects.clone(),
@@ -91,18 +100,22 @@ impl LandWorkers {
         }
         // Only an open request, so of a repository that exists, reaches its
         // worker.
-        let worker = self.worker(repo);
+        let mut finished = self.worker(repo).finished.subscribe();
         loop {
             // Listening before reading, so a finish between the read and
-            // the sleep still wakes it.
-            let finished = worker.finished.notified();
-            tokio::pin!(finished);
-            finished.as_mut().enable();
+            // the wait is still received.
             let cr = self.meta.get_change_request(repo, id).await?;
-            if !cr.as_ref().is_some_and(is_open)
-                || tokio::time::timeout_at(deadline, finished).await.is_err()
-            {
+            if !cr.as_ref().is_some_and(is_open) {
                 return Ok(cr);
+            }
+            loop {
+                match tokio::time::timeout_at(deadline, finished.recv()).await {
+                    Err(_) => return Ok(cr),
+                    Ok(Ok(done)) if done.id == id => return Ok(Some(done)),
+                    Ok(Ok(_)) => {}
+                    // Fell behind: read it again.
+                    Ok(Err(_)) => break,
+                }
             }
         }
     }
@@ -167,7 +180,7 @@ async fn land_pending(
     objects: &Arc<dyn ObjectStore>,
     repo: &str,
     resume: bool,
-    finished: &Notify,
+    finished: &broadcast::Sender<ChangeRequest>,
 ) -> Result<(), Status> {
     if resume {
         while let Some(cr) = meta
@@ -179,48 +192,148 @@ async fn land_pending(
             finish(meta, objects, repo, &cr, outcome, finished).await?;
         }
     }
-    while let Some(cr) = timed("claim", meta.claim_next_change_request(repo))
-        .await
-        .map_err(store_status)?
-    {
-        let outcome = timed("worker", land(&**meta, &**objects, repo, &cr, false)).await?;
-        finish(meta, objects, repo, &cr, outcome, finished).await?;
+    // The next request, when it was claimed while the previous one's CAS
+    // was in flight, and its step, prepared onto the `main` that CAS made.
+    let (store, blobs) = (&**meta, &**objects);
+    let mut next = None;
+    let mut ready = None;
+    loop {
+        if next.is_none() {
+            next = timed("claim", meta.claim_next_change_request(repo))
+                .await
+                .map_err(store_status)?;
+        }
+        let Some(cr) = next.take() else {
+            return Ok(());
+        };
+        let mut step = match ready.take() {
+            Some(step) => step,
+            None => prepare(store, blobs, repo, &cr, cr.head, main(store, repo).await?).await?,
+        };
+        loop {
+            let (from, to) = match step {
+                Step::Done(outcome) => {
+                    finish(meta, objects, repo, &cr, outcome, finished).await?;
+                    break;
+                }
+                Step::Move { from, to } => (from, to),
+            };
+            // While this CAS is in flight, the next request is claimed and
+            // rebased onto the `main` the CAS makes.
+            let made = RefState {
+                target: to,
+                version: from.version + 1,
+            };
+            let this = async {
+                match timed("cas", meta.move_ref(repo, "main", from.version, to)).await {
+                    Ok(_) => {
+                        let landed = LandOutcome::Landed(to);
+                        finish(meta, objects, repo, &cr, landed, finished).await?;
+                        Ok(true)
+                    }
+                    Err(StoreError::CasMismatch { .. }) => Ok(false),
+                    Err(e) => Err(store_status(e)),
+                }
+            };
+            let ahead = async {
+                if next.is_none() {
+                    next = timed("claim", meta.claim_next_change_request(repo))
+                        .await
+                        .map_err(store_status)?;
+                }
+                match &next {
+                    Some(n) => prepare(store, blobs, repo, n, n.head, made).await.map(Some),
+                    None => Ok(None),
+                }
+            };
+            let (landed, ahead) = tokio::join!(this, ahead);
+            let (landed, ahead) = (landed?, ahead?);
+            if landed {
+                ready = ahead;
+                break;
+            }
+            // Another writer (`MoveRef`, an import) moved `main` meanwhile:
+            // the rebased stack is replayed onto the new `main`, and what was
+            // prepared for the next request, which assumed this CAS, is
+            // dropped. Each retry follows a move of `main`, never a timer.
+            step = prepare(store, blobs, repo, &cr, to, main(store, repo).await?).await?;
+        }
     }
-    Ok(())
 }
 
-/// Record `cr`'s `outcome` and tell the clients waiting on it. Nothing a
-/// land waits on derived the path history of what landed, so a task
-/// stores it now.
+/// Record `cr`'s `outcome` and send it to the clients waiting on it.
+/// Nothing a land waits on derived the path history of what landed, so a
+/// task stores it now.
 async fn finish(
     meta: &Arc<dyn MetadataStore>,
     objects: &Arc<dyn ObjectStore>,
     repo: &str,
     cr: &ChangeRequest,
     outcome: LandOutcome,
-    finished: &Notify,
+    finished: &broadcast::Sender<ChangeRequest>,
 ) -> Result<(), Status> {
     let landed = match outcome {
         LandOutcome::Landed(id) => Some(id),
         _ => None,
     };
-    timed("finish", meta.finish_change_request(repo, cr.id, outcome))
+    let cr = timed("finish", meta.finish_change_request(repo, cr.id, outcome))
         .await
         .map_err(store_status)?;
-    finished.notify_waiters();
+    // No receiver means no client is waiting.
+    let _ = finished.send(cr);
     if let Some(id) = landed {
         spawn_history(meta.clone(), objects.clone(), repo.to_owned(), id);
     }
     Ok(())
 }
 
-/// Rebase `cr`'s head onto `main` and move `main` to the result by CAS,
-/// unless it changes a path its submitter may not change. The submitter's
-/// grants are read now, so one revoked since the submit counts, and
-/// changesets someone else created are held to the submitter's grants. A
-/// lost CAS means another writer (`MoveRef`, an import) moved `main` meanwhile,
-/// so the rebased stack is replayed onto the new `main`; each retry follows
-/// a move of `main`, never a timer.
+async fn main(meta: &dyn MetadataStore, repo: &str) -> Result<RefState, Status> {
+    timed("main", meta.get_ref(repo, "main"))
+        .await
+        .map_err(store_status)?
+        .ok_or_else(|| Status::not_found(format!("ref \"main\" in {repo:?}")))
+}
+
+/// What landing a request onto one `main` comes to.
+enum Step {
+    /// Finished without moving `main`.
+    Done(LandOutcome),
+    /// Lands by moving `main` from `from` to `to`.
+    Move { from: RefState, to: ChangesetId },
+}
+
+/// Rebase `head`, `cr`'s head or its rebased stack, onto `main`, unless it
+/// changes a path `cr`'s submitter may not change. The submitter's grants
+/// are read now, so one revoked since the submit counts, and changesets
+/// someone else created are held to the submitter's grants.
+async fn prepare(
+    meta: &dyn MetadataStore,
+    objects: &dyn ObjectStore,
+    repo: &str,
+    cr: &ChangeRequest,
+    head: ChangesetId,
+    main: RefState,
+) -> Result<Step, Status> {
+    let scope = timed("scope", Scope::of(meta, repo, &cr.submitter, Role::Writer)).await?;
+    // The path history of what it creates is stored once it has landed.
+    let rebased = replay(meta, objects, repo, (head, main.target), &scope, false).await?;
+    Ok(match rebased {
+        Rebased::Denied { paths } => Step::Done(LandOutcome::Denied(
+            paths.iter().map(|p| p.as_str().to_owned()).collect(),
+        )),
+        Rebased::Conflict { paths, .. } => Step::Done(LandOutcome::NeedsRebase(
+            paths.iter().map(|p| p.as_str().to_owned()).collect(),
+        )),
+        Rebased::Clean { head, .. } if head == main.target => Step::Done(LandOutcome::Rejected),
+        Rebased::Clean { head, .. } => Step::Move {
+            from: main,
+            to: head,
+        },
+    })
+}
+
+/// Land `cr` by itself: [`prepare`] it onto `main` and move `main` by CAS,
+/// replaying onto the new `main` after a lost CAS.
 ///
 /// Landing again is idempotent: rebased changesets are content-addressed,
 /// so a request stopped before its CAS recreates the same ids. One
@@ -236,7 +349,6 @@ async fn land(
     cr: &ChangeRequest,
     resumed: bool,
 ) -> Result<LandOutcome, Status> {
-    let scope = timed("scope", Scope::of(meta, repo, &cr.submitter, Role::Writer)).await?;
     if resumed {
         if let Some(copy) = landed_copy(meta, repo, cr).await? {
             return Ok(LandOutcome::Landed(copy));
@@ -244,30 +356,15 @@ async fn land(
     }
     let mut head = cr.head;
     loop {
-        let main = timed("main", meta.get_ref(repo, "main"))
-            .await
-            .map_err(store_status)?
-            .ok_or_else(|| Status::not_found(format!("ref \"main\" in {repo:?}")))?;
-        let rebased = match replay(meta, objects, repo, (head, main.target), &scope, false).await? {
-            Rebased::Denied { paths } => {
-                return Ok(LandOutcome::Denied(
-                    paths.iter().map(|p| p.as_str().to_owned()).collect(),
-                ));
+        match prepare(meta, objects, repo, cr, head, main(meta, repo).await?).await? {
+            Step::Done(outcome) => return Ok(outcome),
+            Step::Move { from, to } => {
+                match timed("cas", meta.move_ref(repo, "main", from.version, to)).await {
+                    Ok(_) => return Ok(LandOutcome::Landed(to)),
+                    Err(StoreError::CasMismatch { .. }) => head = to,
+                    Err(e) => return Err(store_status(e)),
+                }
             }
-            Rebased::Conflict { paths, .. } => {
-                return Ok(LandOutcome::NeedsRebase(
-                    paths.iter().map(|p| p.as_str().to_owned()).collect(),
-                ));
-            }
-            Rebased::Clean { head: new, .. } if new == main.target => {
-                return Ok(LandOutcome::Rejected);
-            }
-            Rebased::Clean { head, .. } => head,
-        };
-        match timed("cas", meta.move_ref(repo, "main", main.version, rebased)).await {
-            Ok(_) => return Ok(LandOutcome::Landed(rebased)),
-            Err(StoreError::CasMismatch { .. }) => head = rebased,
-            Err(e) => return Err(store_status(e)),
         }
     }
 }

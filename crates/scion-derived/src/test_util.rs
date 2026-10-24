@@ -137,6 +137,7 @@ pub struct CountingMeta<'a> {
     pub tree_gets: AtomicUsize,
     pub page_puts: AtomicUsize,
     pub page_gets: AtomicUsize,
+    pub change_request_reads: AtomicUsize,
 }
 
 impl<'a> CountingMeta<'a> {
@@ -150,6 +151,7 @@ impl<'a> CountingMeta<'a> {
             tree_gets: AtomicUsize::new(0),
             page_puts: AtomicUsize::new(0),
             page_gets: AtomicUsize::new(0),
+            change_request_reads: AtomicUsize::new(0),
         }
     }
     /// Trees written, however many calls wrote them.
@@ -173,6 +175,10 @@ impl<'a> CountingMeta<'a> {
     }
     pub fn changeset_reads(&self) -> usize {
         self.changeset_reads.load(Ordering::Relaxed)
+    }
+    /// `get_change_request` calls.
+    pub fn change_request_reads(&self) -> usize {
+        self.change_request_reads.load(Ordering::Relaxed)
     }
     /// Calls of any kind, each one Postgres round trip on a real store.
     pub fn queries(&self) -> usize {
@@ -323,6 +329,7 @@ impl MetadataStore for CountingMeta<'_> {
         id: u64,
     ) -> scion_store::Result<Option<ChangeRequest>> {
         self.queries.fetch_add(1, Ordering::Relaxed);
+        self.change_request_reads.fetch_add(1, Ordering::Relaxed);
         self.inner.get_change_request(repo, id).await
     }
 
