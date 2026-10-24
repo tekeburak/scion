@@ -15,6 +15,11 @@
 # The workspace persists between jobs and the disk is shared with another
 # runner, so every job first checks free space and drops `target/` when it is
 # low: a full disk fails a build with "No space left on device".
+#
+# A pull request from a fork never runs on those machines: they keep their
+# workspace between jobs and the job user has sudo, so code nobody here wrote
+# would run there. Fork pull requests run on GitHub's hosted runners instead
+# (free for a public repository), and only after the owner approves the run.
 name: CI
 
 on:
@@ -38,7 +43,7 @@ env:
 jobs:
   check:
     name: fmt + clippy + test
-    runs-on: [self-hosted, linux, konuq-ci]
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || fromJSON('["self-hosted","linux","konuq-ci"]') }}
     timeout-minutes: 45
     steps:
       - name: free disk
@@ -73,7 +78,7 @@ jobs:
 
   integration:
     name: store integration (postgres + s3)
-    runs-on: [self-hosted, linux, konuq-ci]
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || fromJSON('["self-hosted","linux","konuq-ci"]') }}
     timeout-minutes: 45
     services:
       postgres:
@@ -123,7 +128,7 @@ jobs:
 
   server:
     name: server end-to-end (scn + scion-server on postgres + s3)
-    runs-on: [self-hosted, linux, konuq-ci]
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || fromJSON('["self-hosted","linux","konuq-ci"]') }}
     timeout-minutes: 45
     services:
       postgres:
@@ -180,7 +185,7 @@ jobs:
     # `test` step above replays the checked-in corpus on every pull request.
     name: fuzz ${{ matrix.target }}
     if: github.event_name != 'pull_request'
-    runs-on: [self-hosted, linux, konuq-ci]
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || fromJSON('["self-hosted","linux","konuq-ci"]') }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -226,7 +231,7 @@ jobs:
     # The install script against release directories served from disk; the
     # shellcheck image pins the linter so the runner needs nothing installed.
     name: install script
-    runs-on: [self-hosted, linux, konuq-ci]
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || fromJSON('["self-hosted","linux","konuq-ci"]') }}
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
@@ -239,7 +244,7 @@ jobs:
 
   deny:
     name: cargo-deny
-    runs-on: [self-hosted, linux, konuq-ci]
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || fromJSON('["self-hosted","linux","konuq-ci"]') }}
     timeout-minutes: 15
     steps:
       - name: free disk

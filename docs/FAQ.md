@@ -121,23 +121,23 @@ store while git writes local packfiles. The comparison favours git where it can:
 sparse clone, its normal case.
 
 The measurements, medians of three runs on the 600-commit slice `scripts/bench-real` imports
-(4 vCPU, the compose Postgres + RustFS stack, one fresh bucket per run, taken after cold path
-history began to be walked in lockstep and blame to answer from the file alone in 10.7): a cold
-import, into an empty bucket, takes 13,188 ms against git's 1,639 ms (8.0×), where the object
-store's write rate is the bound and the 10× criterion is met; a warm import, with the objects
-already stored, takes 3,143 ms against 1,481 ms (2.1×). The README quotes the cold row. A full
-clone takes 902 ms against git's 1,931 ms (0.47×) and a sparse clone 76 ms against 671 ms
-(0.11×); `status` takes 10 ms against 209 ms. `log` and `blame` are measured cold (the first
-call for a new repository), warm, and once more from a second clone (server warm, client cold).
-Warm `blame` of one file at the tip takes 14 ms against git's 73 ms (0.19×), and warm path `log`
-26 ms against 26 ms (1.0×, at git's time); from a second clone they take 14 ms against 59 ms and
-29 ms against 30 ms. Cold, the path `log` takes 105 ms against git's 29 ms (3.6×; the criterion
-is 20×) and the `blame` 67 ms against 65 ms (1.0×; the criterion is 5×). A single
-`scn commit --land` takes 60 ms against git's 49 ms (1.2×), above the at-or-below-git target:
-it is one round trip to land, but still a change request and the land worker. Sixteen writers
-landing at once, each editing a different file, all land in 434 ms against 3,604 ms for git's
-fetch-rebase-push retry loop (p50 per land 282 ms against 2,426 ms, p99 419 ms against
-3,588 ms): the server rebases each request in turn, so no writer pays another's round trips.
+(4 vCPU, the compose Postgres + RustFS stack, one fresh bucket per run, taken at `bd0786b`,
+after `status` began to list only changed directories in 10.8): a cold import, into an empty
+bucket, takes 14,306 ms against git's 1,286 ms (11.1×), where the object store's write rate is
+the bound, just above the 10× criterion; a warm import, with the objects already stored, takes
+3,061 ms against 1,223 ms (2.5×). The README quotes the cold row. A full clone takes 736 ms
+against git's 1,642 ms (0.45×) and a sparse clone 36 ms against 506 ms (0.07×); `status` takes
+8 ms against 165 ms (0.05×). `log` and `blame` are measured cold (the first call for a new
+repository), warm, and once more from a second clone (server warm, client cold). Warm `blame`
+of one file at the tip takes 10 ms against git's 74 ms (0.14×), and warm path `log` 17 ms
+against 24 ms (0.71×); from a second clone they take 9 ms against 52 ms and 22 ms against
+24 ms. Cold, the path `log` takes 109 ms against git's 24 ms (4.5×; the criterion is 20×) and
+the `blame` 66 ms against 52 ms (1.3×; the criterion is 5×). A single `scn commit --land` takes
+61 ms against git's 43 ms (1.4×), above the at-or-below-git target: it is one round trip to
+land, but still a change request and the land worker. Sixteen writers landing at once, each
+editing a different file, all land in 457 ms against 4,511 ms for git's fetch-rebase-push retry
+loop (p50 per land 303 ms against 3,444 ms, p99 438 ms against 4,492 ms): the server rebases
+each request in turn, so no writer pays another's round trips.
 
 ## What are the known limits today?
 
