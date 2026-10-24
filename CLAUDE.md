@@ -72,6 +72,9 @@ Each item is checkable in code review.
   - `Invariant kept:` which numbered invariant above the change touches and how it is preserved.
   - `Could be simpler:` where the change could have been simpler and why it is not.
 - No direct pushes to `main`. Every change arrives via a PR with green CI.
+- Only the owner and the owner's agents work in this repository. A PR whose head is a fork or
+  whose author is not the owner is never merged, approved, rebased, updated, commented on or
+  CI-approved by an agent or routine; it is left for the owner.
 - Commit messages explain *why*; the diff already shows *what*.
 - Reviews read intent and invariants first, lines second. A review comment that asks for a
   defensive check against our own code is answered by pointing at the Simplicity rules.
