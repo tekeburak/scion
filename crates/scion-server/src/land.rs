@@ -1,7 +1,7 @@
 //! The serial land worker. Each repository with change requests gets one
 //! task, started by its first submit (or at server start if requests are
 //! waiting) and woken by every later one. It takes pending requests in
-//! submission order, rebases each head onto `main` through [`rebase`] and
+//! submission order, rebases each head onto `main` through [`rebase`](crate::control::rebase) and
 //! moves `main` with one compare-and-swap. Submitting returns at once, so
 //! landers never queue behind each other's round trips; the worker never
 //! waits on a client. A client that asks to wait is told when its request
@@ -19,7 +19,7 @@ use tokio::sync::Notify;
 use tonic::{Request, Status};
 
 use crate::auth::{Scope, authorize, principal};
-use crate::control::{MAX_LOG_LIMIT, Rebased, rebase};
+use crate::control::{MAX_LOG_LIMIT, Rebased, replay, spawn_history};
 use crate::store_status;
 
 /// Longest a waiting `SubmitChangeRequest` or `GetChangeRequest` holds its
@@ -151,7 +151,7 @@ async fn work(
     let mut resume = true;
     loop {
         worker.wake.notified().await;
-        resume = match land_pending(&*meta, &*objects, &repo, resume, &worker.finished).await {
+        resume = match land_pending(&meta, &objects, &repo, resume, &worker.finished).await {
             Ok(()) => false,
             Err(e) => {
                 eprintln!("scion-server: land worker for {repo:?}: {e}");
@@ -162,8 +162,8 @@ async fn work(
 }
 
 async fn land_pending(
-    meta: &dyn MetadataStore,
-    objects: &dyn ObjectStore,
+    meta: &Arc<dyn MetadataStore>,
+    objects: &Arc<dyn ObjectStore>,
     repo: &str,
     resume: bool,
     finished: &Notify,
@@ -174,11 +174,8 @@ async fn land_pending(
             .await
             .map_err(store_status)?
         {
-            let outcome = land(meta, objects, repo, &cr, true).await?;
-            meta.finish_change_request(repo, cr.id, outcome)
-                .await
-                .map_err(store_status)?;
-            finished.notify_waiters();
+            let outcome = land(&**meta, &**objects, repo, &cr, true).await?;
+            finish(meta, objects, repo, &cr, outcome, finished).await?;
         }
     }
     while let Some(cr) = meta
@@ -186,11 +183,33 @@ async fn land_pending(
         .await
         .map_err(store_status)?
     {
-        let outcome = land(meta, objects, repo, &cr, false).await?;
-        meta.finish_change_request(repo, cr.id, outcome)
-            .await
-            .map_err(store_status)?;
-        finished.notify_waiters();
+        let outcome = land(&**meta, &**objects, repo, &cr, false).await?;
+        finish(meta, objects, repo, &cr, outcome, finished).await?;
+    }
+    Ok(())
+}
+
+/// Record `cr`'s `outcome` and tell the clients waiting on it. Nothing a
+/// land waits on derived the path history of what landed, so a task
+/// stores it now.
+async fn finish(
+    meta: &Arc<dyn MetadataStore>,
+    objects: &Arc<dyn ObjectStore>,
+    repo: &str,
+    cr: &ChangeRequest,
+    outcome: LandOutcome,
+    finished: &Notify,
+) -> Result<(), Status> {
+    let landed = match outcome {
+        LandOutcome::Landed(id) => Some(id),
+        _ => None,
+    };
+    meta.finish_change_request(repo, cr.id, outcome)
+        .await
+        .map_err(store_status)?;
+    finished.notify_waiters();
+    if let Some(id) = landed {
+        spawn_history(meta.clone(), objects.clone(), repo.to_owned(), id);
     }
     Ok(())
 }
@@ -230,7 +249,7 @@ async fn land(
             .await
             .map_err(store_status)?
             .ok_or_else(|| Status::not_found(format!("ref \"main\" in {repo:?}")))?;
-        let rebased = match rebase(meta, objects, repo, head, main.target, &scope).await? {
+        let rebased = match replay(meta, objects, repo, (head, main.target), &scope, false).await? {
             Rebased::Denied { paths } => {
                 return Ok(LandOutcome::Denied(
                     paths.iter().map(|p| p.as_str().to_owned()).collect(),
@@ -258,7 +277,7 @@ async fn land(
 /// walk down `main`'s first-parent line stops at `cr.base`'s generation, so
 /// it reads only what landed since the request was submitted. A merge on
 /// top of the stack whose other parents `main` has already replays as
-/// nothing (see [`rebase`]), so the land's tip is the copy of the merge's
+/// nothing (see [`rebase`](crate::control::rebase)), so the land's tip is the copy of the merge's
 /// first parent: that copy counts too, down a run of merges. Only a
 /// rebased copy of it: a replay below the head always changes its parent,
 /// so the first parent itself on `main` is history the request was built
@@ -315,7 +334,7 @@ async fn landed_copy(
     Ok(None)
 }
 
-/// Whether `landed` is `head` or `head` replayed by [`rebase`], which keeps
+/// Whether `landed` is `head` or `head` replayed by [`rebase`](crate::control::rebase), which keeps
 /// everything but the parents and the file changes.
 async fn is_copy(
     meta: &dyn MetadataStore,
