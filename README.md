@@ -425,25 +425,25 @@ a workload one of them cannot express reads `unsupported`.
 <!-- bench-real:start (scripts/render-assets.py writes this table) -->
 | Workload | git, ms | scion, ms | impl-a, ms | impl-b, ms | scion / git |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| import, cold | 1,286 | 14,306 | 237,267 | unsupported | 11.1× |
-| import, warm | 1,223 | 3,061 | 245,383 | unsupported | 2.5× |
-| clone | 1,642 | 736 | 1,475 | 302 | 0.45× |
-| sparse clone | 506 | 36 | 177 | 37 | 0.07× |
-| status | 165 | 8 | 12 | unsupported | 0.05× |
-| path log, cold | 24 | 109 | 2,050 | unsupported | 4.5× |
-| path log, warm | 24 | 17 | 1,408 | unsupported | 0.71× |
-| blame, cold | 52 | 66 | 1,443 | unsupported | 1.3× |
-| blame, warm | 74 | 10 | 29 | unsupported | 0.14× |
-| path log, server warm, client cold | 24 | 22 | 1,348 | unsupported | 0.92× |
-| blame, server warm, client cold | 52 | 9 | 35 | unsupported | 0.17× |
-| commit + land | 43 | 61 | 209 | 9 | 1.4× |
-| land, 16 writers at once | 4,511 | 457 | 4,605 | unsupported | 0.10× |
-| land, 16 writers: p50 per land | 3,444 | 303 | 2,997 | unsupported | 0.09× |
-| land, 16 writers: p99 per land | 4,492 | 438 | 4,583 | unsupported | 0.10× |
+| import, cold | 1,451 | 12,093 | 193,144 | unsupported | 8.3× |
+| import, warm | 1,377 | 2,797 | 201,079 | unsupported | 2.0× |
+| clone | 1,738 | 663 | 1,182 | 280 | 0.38× |
+| sparse clone | 560 | 61 | 155 | 41 | 0.11× |
+| status | 189 | 7 | 9 | unsupported | 0.04× |
+| path log, cold | 23 | 82 | 1,531 | unsupported | 3.6× |
+| path log, warm | 26 | 17 | 1,005 | unsupported | 0.65× |
+| blame, cold | 53 | 58 | 1,070 | unsupported | 1.1× |
+| blame, warm | 59 | 8 | 23 | unsupported | 0.14× |
+| path log, server warm, client cold | 28 | 18 | 1,014 | unsupported | 0.64× |
+| blame, server warm, client cold | 63 | 10 | 24 | unsupported | 0.16× |
+| commit + land | 41 | 49 | 172 | 8 | 1.2× |
+| land, 16 writers at once | 3,253 | 424 | 3,905 | unsupported | 0.13× |
+| land, 16 writers: p50 per land | 2,237 | 290 | 2,449 | unsupported | 0.13× |
+| land, 16 writers: p99 per land | 3,238 | 408 | 3,890 | unsupported | 0.13× |
 
 Repository: library/ of the public repository pinned in scripts/bench-real, first-parent commits since 2026-01-01 up to 91e9c2688eb23af9a5b77f056156e756550c7c99 (600 commits, 2330 files at the tip).  
 Machine: Linux 6.18.44-fc-v153 x86_64; Intel(R) Xeon(R) Processor @ 2.10GHz; 4 cpus; 15 GiB.  
-Run: git version 2.43.0; scion bd0786b; 3 runs; 2026-10-23T09:21:24Z.  
+Run: git version 2.43.0; scion 53da42f; 3 runs; 2026-10-24T02:26:17Z.  
 impl-a: another implementation of the design, at 7d445a0744e30f4dcb36a794b0ce42648157e1b9 over CockroachDB v24.3.5 + the same S3.  
 impl-b: another implementation of the design, at 00e92ab9c2a9985f39a64636b4b6c5c4bb583916 in memory.
 <!-- bench-real:end -->
@@ -452,19 +452,19 @@ Read these numbers with their limits:
 
 - **Import** writes one immutable object per blob, tree and history page to a remote object
   store, where git writes a local packfile; parity with git's push is not a goal. The figure to
-  quote is the cold row, 11.1× git on this run: into an empty bucket the object store's write rate is the
-  bound. Warm, with the objects already stored, it is 2.5× git.
+  quote is the cold row, 8.3× git: into an empty bucket the object store's write rate is the
+  bound. Warm, with the objects already stored, it is 2.0× git.
 - **Cold `log` and `blame`**, the first call after import with nothing cached on the server,
-  take 4.5× and 1.3× git: a path's history is walked in lockstep, one read per step, and blame
+  take 3.6× and 1.1× git: a path's history is walked in lockstep, one read per step, and blame
   answers from the file's own history. Warm, both are answered from memory: `blame` is 0.14×
-  git and a path log 0.71×. Clone is 0.45× git and a sparse clone 0.07×.
+  git and a path log 0.65×. Clone is 0.38× git and a sparse clone 0.11×.
 - **`status`** lists only the directories whose entries changed, so a clean `status` reads no
-  file and the row (0.05× git) is mostly the cost of starting a process; see
+  file and the row (0.04× git) is mostly the cost of starting a process; see
   [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 - **A single commit + land** (`scn commit --land`, one round trip to land) still goes through a
   change request and the serial land worker, so on its own it takes longer than git's local
-  commit and push (61 ms against 43 ms). The worker pays off under contention: 16 writers
-  landing at once finish in 0.10× git's time, because no writer repeats another's fetch, rebase
+  commit and push (49 ms against 41 ms). The worker pays off under contention: 16 writers
+  landing at once finish in 0.13× git's time, because no writer repeats another's fetch, rebase
   and push.
 - **The other implementations** ran on the same machine and stack, at the commits named under
   the table; `unsupported` marks a workload one of them has no command for.
