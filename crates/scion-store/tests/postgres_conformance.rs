@@ -141,8 +141,12 @@ async fn refs_and_grants_memos_follow_notified_writes() {
     eventually(|| async { server.grants_for("r", "sp:a").await.unwrap() == [grant("x")] }).await;
     eventually(|| async { server.get_ref("r", "main").await.unwrap() == Some(at(3, 2)) }).await;
 
+    // A ref write, and the notification it sends, leave the grants memo be.
+    silently(add_grant("y")).await;
     server.move_ref("r", "main", 2, id(4)).await.unwrap();
     assert_eq!(server.get_ref("r", "main").await.unwrap(), Some(at(4, 3)));
+    tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+    assert_eq!(server.grants_for("r", "sp:a").await.unwrap(), [grant("x")]);
 
     sqlx::query(
         "SELECT pg_terminate_backend(pid) FROM pg_stat_activity \

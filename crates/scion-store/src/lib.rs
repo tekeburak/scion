@@ -31,7 +31,7 @@ use std::time::SystemTime;
 
 use async_trait::async_trait;
 use bytes::Bytes;
-use scion_types::{BlobId, Changeset, ChangesetId, Tree, TreeId};
+use scion_types::{BlobId, Changeset, ChangesetId, Encode, Tree, TreeId};
 
 pub use memory::MemoryStore;
 pub use object::{ObjectStorage, ZSTD_LEVEL};
@@ -281,6 +281,22 @@ pub trait MetadataStore: Send + Sync {
             out.push(self.get_changeset(repo, *id).await?);
         }
         Ok(out)
+    }
+
+    /// The canonical encodings of changesets by id, in the order of `ids`:
+    /// what [`MetadataStore::get_changesets`] returns, encoded. A backend
+    /// that stores the encoding returns it without decoding it.
+    async fn get_encoded_changesets(
+        &self,
+        repo: &str,
+        ids: &[ChangesetId],
+    ) -> Result<Vec<Option<Vec<u8>>>> {
+        Ok(self
+            .get_changesets(repo, ids)
+            .await?
+            .into_iter()
+            .map(|cs| cs.map(|cs| cs.encode_to_vec()))
+            .collect())
     }
 
     /// The generation number of a changeset (`max(parent gen) + 1`, roots are

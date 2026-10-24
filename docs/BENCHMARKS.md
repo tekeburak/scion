@@ -5,6 +5,15 @@ The headline numbers, measured on a slice of a real repository's history, are in
 the CSV with every sample is [`bench-real.csv`](bench-real.csv). This page keeps the older
 synthetic workloads, which exercise the client library directly against an in-process server.
 
+## Other implementations
+
+`BENCH_PEERS=<dir>[:<dir>...] scripts/bench-real` also runs every workload against checkouts
+of other public implementations of the same design, on the same slice and machine. The script
+builds each checkout with its own toolchain, picks the adapter its binaries match, and records
+its rows under that adapter's neutral label (`impl-a`, `impl-b`), with `unsupported` for a
+workload it cannot express; the CSV header records the commit each checkout is at. Without
+`BENCH_PEERS` it measures git and Scion only, and the README table says so.
+
 ## Where the time goes
 
 `SCION_TRACE=1 scripts/bench-real 1` makes every Scion process print one line per finished
@@ -21,7 +30,7 @@ than git:
 | --- | ---: | --- | --- |
 | import, cold | 8.7× | blob `put`: 76 s summed over 7,955 uploads in flight; `create` is 4.4 s (wall 11.6 s) | One object-store `PUT` per blob (`store` is one `INSERT` per batch since 10.3); the stack serves about 1,100 `PUT`/s, so blobs alone take about 7 s. See #168. |
 | import, warm | 2.2× | `has_blobs`: 24 s summed, one `HEAD` per blob (7,955) | Mapping went from 4.9 s on one thread to about 1.8 s of work on two (10.4: rename scoring counts each file's lines once, delta-base cache); what is left is one `HEAD` per blob for a repository whose blobs another one stored. See #168. |
-| path log, cold | 3.6× | `walk`: about 60 ms of the 85 ms `PathLog` (10.7) | Every page read now comes from Postgres (10.3), and since 10.7 the segments of the chain and its next anchor advance together, one `get_pages` per step: about 43 queries for 428 changes instead of about 450 single-page queries queued on a 16-connection pool. What is left is the chain's shape: 27 anchors read one after another, then the last segment's 16 steps, each about 1–1.5 ms for up to 230 kB of pages (about 5 MB in all). `read` is one `get_changesets` (about 20 ms: 8 ms of query, the rest decoding, which since 10.7 runs on several cores). |
+| path log, cold | 4.0× | `walk`: about 60 ms of the 85 ms `PathLog` (10.7) | Every page read now comes from Postgres (10.3), and since 10.7 the segments of the chain and its next anchor advance together, one `get_pages` per step: about 43 queries for 428 changes instead of about 450 single-page queries queued on a 16-connection pool. What is left is the chain's shape: 27 anchors read one after another, then the last segment's 16 steps, each about 1–1.5 ms for up to 230 kB of pages (about 5 MB in all). Since the second 10.7 step pages (and trees) are stored with lz4 instead of Postgres' default pglz, which makes each step's read about a fifth faster (0.95 → 0.75 ms for 16 pages, measured on the bench's own pages), and `read` is one query that returns the stored canonical bytes as they are instead of decoding 428 changesets and encoding them again. Together, measured on `main` and on this change in one session: 101 → 87 ms. |
 | blame, cold | 1.03× | `attribute`: about 60 ms, the requested file's own version chain | Until 10.7 the reply waited on the blame node of the changeset that last touched `alloc/src/vec/mod.rs`, which holds every file that changeset changed: 272 versions along 13 chains, each version one object-store `GET` and one diff, with every query waiting behind RustFS. The reply now waits on that file's chain only; a task stores the node afterwards, one file and one version at a time, and the server remembers the reply meanwhile. |
 | commit + land | 1.2× | `CommitAndLand`: 23 ms, then `PutBlobs`: 7 ms | Since 10.6 `scn commit --land` is one process and three RPCs (`HasBlobs`, `PutBlobs`, `CommitAndLand`) where `commit` + `land` were two processes and four. Inside `CommitAndLand`, the create is 8 ms (the skip list's 7 ms of ancestor reads on a memo the importer, not the server, filled), then about six Postgres commits in a row (insert, pointers, submit, claim, `main`'s CAS, finish; 1–1.5 ms each); the path history is stored after the reply. `PutBlobs` is RustFS's `PUT` of one small blob. On a warm server and a small repository the whole command is about 25 ms. |
 
@@ -40,6 +49,19 @@ ten for the blobs) and a counting test holds it there. A sparse clone fetches th
 way to each listed path one level at a time and each listed directory with everything beneath
 it at once. `scn commit` hashes its files locally, asks `HasBlobs`, and sends only the missing
 ones in one `PutBlobs` stream.
+
+The land worker's own steps have spans too (`claim`, `scope`, `main`, `rebase`, `cas`,
+`finish`, and `worker` around one land). In a traced `land 16 writers` run its serial time was
+about 16 ms per request: 10.5 ms to land (rebase 6.6 ms, of which creating the rebased changeset
+is most), 3.7 ms to claim and 1.8 ms to finish. Two things on that path were not needed. Every
+move of `main` dropped the repository's grants memo with its refs, so the worker read the
+submitter's grants from Postgres on every request (2 ms); refs and grants now have memos and
+notification channels of their own. And the worker derived the path history of each rebased
+changeset before moving `main`, which nothing a land waits on reads; a task stores it once the
+request is finished. The worker's summed time went from 168 to 129 ms of the run's 358 ms
+traced wall time; untraced, over six runs per side on one machine, `land 16 writers` measured
+372 ms against 392 ms on `main`, inside that machine's run-to-run noise. What is left per
+land is about six Postgres commits in a row, each with its WAL flush.
 
 Since 10.8 a clean `status` on the sparse clone (322 files, about 70 directories) lists no
 directory and reads no file: it makes one `statx` per directory and file, on several threads

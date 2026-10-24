@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 
 use bytes::Bytes;
 use scion_types::{
-    BlobId, Changeset, ChangesetId, FileChange, FileType, Identity, PathComponent, RepoPath,
-    Timestamp, Tree, TreeEntry,
+    BlobId, Changeset, ChangesetId, Encode, FileChange, FileType, Identity, PathComponent,
+    RepoPath, Timestamp, Tree, TreeEntry,
 };
 
 use crate::{
@@ -128,8 +128,24 @@ pub async fn changesets<S: MetadataStore>(s: &S) {
         s.get_changesets(REPO, &[merge.id(), unknown, root_id, merge.id()])
             .await
             .unwrap(),
-        [Some(merge.clone()), None, Some(root), Some(merge)],
+        [
+            Some(merge.clone()),
+            None,
+            Some(root.clone()),
+            Some(merge.clone())
+        ],
         "in order, repeats and unknown ids included"
+    );
+    assert_eq!(
+        s.get_encoded_changesets(REPO, &[merge.id(), unknown, root_id])
+            .await
+            .unwrap(),
+        [
+            Some(merge.encode_to_vec()),
+            None,
+            Some(root.encode_to_vec())
+        ],
+        "the same changesets, encoded"
     );
     assert_eq!(
         s.get_changesets("other-repo", &[root_id]).await.unwrap(),
