@@ -504,6 +504,9 @@ def bench_real_table():
     if len(tools) == 2:
         note[-1] += "  "
         note.append("Other implementations of the design: not measured in this run.")
+    for tool in tools[2:]:
+        note[-1] += "  "
+        note.append(f"{tool}: another implementation of the design, at {meta[tool]}.")
     return "\n".join(out + note)
 
 
