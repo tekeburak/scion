@@ -369,7 +369,7 @@ pub struct Remote {
 }
 
 impl Remote {
-    /// Connect to `server` (e.g. `http://127.0.0.1:7070`). Every request
+    /// Connect to `server` (e.g. `http://127.0.0.1:7420`). Every request
     /// carries the server's token (see [`token_path`]) if there is one.
     pub async fn connect(server: &str) -> Result<Self, RemoteError> {
         match token_for(server)? {
