@@ -28,8 +28,8 @@ use scion_store::{
     Grant, MetadataStore, ObjectStore, Role, SERVER_GRANTS, StoreError, is_allowed_ref_name,
 };
 use scion_types::{
-    BlobId, Changeset, ChangesetId, Decode, Encode, FileChange, Identity, RepoPath, Timestamp,
-    TreeEntry, TreeId,
+    BlobId, Changeset, ChangesetId, Decode, FileChange, Identity, RepoPath, Timestamp, TreeEntry,
+    TreeId,
 };
 use tonic::{Request, Response, Status};
 
@@ -114,14 +114,13 @@ impl ControlServer {
     async fn encoded(&self, repo: &str, ids: Vec<ChangesetId>) -> Result<Vec<Vec<u8>>, Status> {
         let found = self
             .meta
-            .get_changesets(repo, &ids)
+            .get_encoded_changesets(repo, &ids)
             .await
             .map_err(store_status)?;
         ids.iter()
             .zip(found)
             .map(|(id, cs)| {
-                cs.map(|cs| cs.encode_to_vec())
-                    .ok_or_else(|| Status::data_loss(format!("indexed changeset {id} is missing")))
+                cs.ok_or_else(|| Status::data_loss(format!("indexed changeset {id} is missing")))
             })
             .collect()
     }
