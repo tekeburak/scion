@@ -140,8 +140,8 @@ What works today:
   with a stable code (`conflict`, `needs_rebase`, `dirty`, `permission_denied`, …) and the paths
   it is about. `scn explain-conflict` names, for each path that keeps the head from rebasing onto
   `main`, the changesets on both sides that changed it since the merge base. Every binary
-  prints its version and the commit it was built from with `--version`; `GET /api/v1/version`
-  and the web interface's footer show the server's.
+  prints its version with `--version`, and a release build also names the commit it was built
+  from; `GET /api/v1/version` and the web interface's footer show the server's.
 - **Release binaries**: pushing a `v*` tag builds `scn`, `scion-server`, `scion-ingest`
   and `scion-mcp` as static `x86_64` and `aarch64` musl executables, and `scn` for macOS,
   packs one archive per target with a `SHA256SUMS` file and opens a draft GitHub release.

@@ -189,14 +189,16 @@ def architecture_svg():
         b.append(t(1180, 312 + i * 32, "• " + s, 18, TEXT))
 
     # stores
-    b.append(box(1150, 560, 180, 150, stroke=AMBER))
+    # what each store holds, as in DATA_MODEL.md "Where things live"
+    b.append(box(1150, 560, 180, 170, stroke=AMBER))
     b.append(t(1240, 600, "Postgres", 22, TEXT, 700, "middle"))
-    for i, s in enumerate(["changeset WAL", "file_changes", "refs (CAS)", "derived pointers"]):
-        b.append(t(1240, 630 + i * 21, s, 14, MUTED, 400, "middle", mono=True))
-    b.append(box(1350, 560, 180, 150, stroke=TEAL))
+    for i, s in enumerate(["changeset WAL", "file_changes", "refs (CAS)", "trees, pages",
+                           "derived pointers"]):
+        b.append(t(1240, 630 + i * 20, s, 14, MUTED, 400, "middle", mono=True))
+    b.append(box(1350, 560, 180, 170, stroke=TEAL))
     b.append(t(1440, 600, "object store", 22, TEXT, 700, "middle"))
-    for i, s in enumerate(["blobs/{id}", "trees/{id}", "snapshots/…", "S3-compatible"]):
-        b.append(t(1440, 630 + i * 21, s, 14, MUTED, 400, "middle", mono=True))
+    for i, s in enumerate(["blobs/{id}", "blame nodes", "snapshots · planned", "S3-compatible"]):
+        b.append(t(1440, 630 + i * 20, s, 14, MUTED, 400, "middle", mono=True))
 
     # control plane: both clients -> server
     b.append(arrow(364, 228, 1144, 228, AMBER))
@@ -303,7 +305,7 @@ def changeset_svg():
         b.append(f'<circle cx="{x}" cy="{y}" r="13" fill="{VIOLET if changed else PANEL}" '
                  f'stroke="{VIOLET}" stroke-width="2.5"/>')
     b.append(t(tx, dy + 246, "filled = rewritten", 14, MUTED, 400, "middle"))
-    types = [("RootTree", "trees/{id}; pointer in derived table"), ("PathHistory", "per-path last change"),
+    types = [("RootTree", "trees table; pointer in derived table"), ("PathHistory", "per-path last change"),
              ("Blame", "line → changeset"), ("SkipList", "bounded ancestry, merge-base")]
     for i, (k, v) in enumerate(types):
         y = dy + 118 + i * 34
