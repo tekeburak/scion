@@ -7,6 +7,33 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-10-24
+
+The GitHub search API answered this run, both for "scion source control" (sorted by last
+update, 20 repositories, none new to these notes) and for repositories created since
+2026-10-22 (none). `bnsd55/open-scion` no longer appears in search results but still answers
+anonymous git reads, so its commits come from a clone under the scratchpad; its stars were not
+read. Nothing below was read beyond each repository's page metadata and commit subjects.
+
+| Repository | Stars / forks | Since the last run | Noted |
+|---|---|---|---|
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 237 / 18 | no commits | Quiet since 2026-10-16. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 113 / 18 | no commits | Quiet since 2026-10-14. |
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 980 / 96 | last push 2026-10-23 | Built on git; its homepage field points at the Anthropic post. |
+| [OpenCSGs/scion](https://github.com/OpenCSGs/scion) | 3 / 0 | 10 commits, tag `v0.1.10` | A release note per tag, then a design document and the work for a git gateway (clone, fetch, push over smart HTTP; partial and shallow clones). |
+| [bnsd55/open-scion](https://github.com/bnsd55/open-scion) | not read | 26 commits | Tests, CI coverage per backend, a "production audit" with a v1.0 blocker list, and a roadmap line marking Postgres experimental. No tag. |
+| `TheDancingDeveloper-org/graft` | 0 / 0 | updated 2026-10-24 | Still "design stage" in its description. |
+| `adrianchifor/scn`, `rizaust/open-scion`, `kianaaa19/scionhub` | 1 / 3 / 0 | none | Quiet. |
+
+### What it means for Scion
+
+- **Release notes per tag** are the visible face of one project's cadence. Scion has no tag
+  yet; when its first release comes, a short note per tag is worth copying as a technique.
+- **A public "blocker list" before 1.0** is a presentation choice that states plainly what is
+  missing. Scion's README says "alpha" and links `docs/ROADMAP.md`, which serves the same
+  purpose; no change.
+- **Git gateway:** the git wire protocol is a non-goal for Scion (`CLAUDE.md`); noted only.
+
 ## 2026-10-23
 
 The repository pages answered this run (the API did not), so star and fork counts are back,
