@@ -191,7 +191,18 @@ another writer (`MoveRef`, an import) moved `main`, so the rebased stack is repl
 new `main`; every retry follows a move of `main`, never a timer. A conflict finishes the
 request `needs_rebase` with its paths; nothing retries blindly.
 
-**Crash recovery.** A request found `landing` when the server starts is landed again first.
+**Pipelining.** While one request's compare-and-swap and its bookkeeping are in flight, the
+worker already claims the next request and rebases it onto the `main` that swap will make.
+When the swap succeeds, that rebase is the next request's starting point, so each land costs
+one rebase rather than a rebase followed by the previous request's swap. When the swap is lost,
+what was prepared for the next request assumed a `main` that never existed: it is dropped, the
+current request is replayed onto the new `main` first, and requests still land strictly in
+submission order. A finished request is broadcast to the clients waiting on it, so a waiting
+`scn land` does not read it back from Postgres.
+
+**Crash recovery.** Requests found `landing` when the server starts (with pipelining, the
+request whose swap was in flight and the one claimed behind it) are landed again first, oldest
+first.
 That is idempotent because rebased changesets are content-addressed: a request stopped before
 its CAS recreates the same ids, and one stopped after it first looks for its head, or the
 rebased copy of it, on `main`'s first-parent line above the request's base (`main` may have
