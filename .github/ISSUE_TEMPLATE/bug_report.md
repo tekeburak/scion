@@ -12,6 +12,7 @@ labels: bug
 <!-- Commands, a minimal repository or test, and the output. -->
 
 **Environment**
-- Scion commit:
+- Version: <!-- `scn --version` and `scion-server --version` (or the web interface's footer); both name the commit -->
+- Surface: `scn` / web interface / HTTP/JSON API / MCP server / `scion-ingest`
 - OS:
-- Storage: in-memory / Postgres + S3 (compose stack) / other
+- Storage: in-memory / Postgres + S3 (compose stack) / production compose profile / other
