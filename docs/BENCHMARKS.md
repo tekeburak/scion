@@ -41,6 +41,19 @@ way to each listed path one level at a time and each listed directory with every
 it at once. `scn commit` hashes its files locally, asks `HasBlobs`, and sends only the missing
 ones in one `PutBlobs` stream.
 
+The land worker's own steps have spans too (`claim`, `scope`, `main`, `rebase`, `cas`,
+`finish`, and `worker` around one land). In a traced `land 16 writers` run its serial time was
+about 16 ms per request: 10.5 ms to land (rebase 6.6 ms, of which creating the rebased changeset
+is most), 3.7 ms to claim and 1.8 ms to finish. Two things on that path were not needed. Every
+move of `main` dropped the repository's grants memo with its refs, so the worker read the
+submitter's grants from Postgres on every request (2 ms); refs and grants now have memos and
+notification channels of their own. And the worker derived the path history of each rebased
+changeset before moving `main`, which nothing a land waits on reads; a task stores it once the
+request is finished. The worker's summed time went from 168 to 129 ms of the run's 358 ms
+traced wall time; untraced, over six runs per side on one machine, `land 16 writers` measured
+372 ms against 392 ms on `main`, inside that machine's run-to-run noise. What is left per
+land is about six Postgres commits in a row, each with its WAL flush.
+
 Since 10.8 a clean `status` on the sparse clone (322 files, about 70 directories) lists no
 directory and reads no file: it makes one `statx` per directory and file, on several threads
 once there are more than 128 of either, about 0.7 ms in all. The index records each file's
