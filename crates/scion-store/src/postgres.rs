@@ -41,11 +41,17 @@ const PAGE_MEMO_BYTES: usize = 64 << 20;
 const REF_MEMO_BYTES: usize = 1 << 20;
 /// Bytes of repositories' grants kept in memory while listening.
 const GRANT_MEMO_BYTES: usize = 4 << 20;
-/// The channel on which every write to `refs` or `grants` names its
-/// repository, in the writing transaction.
-const INVALIDATE_CHANNEL: &str = "scion_invalidate";
+/// The channel on which every write to `refs` names its repository, in the
+/// writing transaction.
+const REFS_CHANNEL: &str = "scion_refs";
+/// The channel on which every write to `grants` names its repository, in the
+/// writing transaction.
+const GRANTS_CHANNEL: &str = "scion_grants";
 /// Pause before reconnecting a listener whose connection was lost.
 const RELISTEN_DELAY: Duration = Duration::from_secs(1);
+
+/// A repository's refs, by name.
+type Refs = Arc<Vec<(String, RefState)>>;
 
 type DerivedKey = (String, String, u32, ChangesetId);
 
@@ -63,27 +69,28 @@ pub struct PostgresStore {
     derived: Arc<Recent<DerivedKey, Vec<u8>>>,
     trees: Arc<Recent<(String, TreeId), Tree>>,
     pages: Arc<Recent<(String, BlobId), Bytes>>,
-    mutable: Arc<Mutable>,
+    refs: Arc<Memo<Refs>>,
+    grants: Arc<Memo<Arc<Vec<Grant>>>>,
 }
 
-/// Memos of each repository's refs and grants, which other processes write
-/// too. They serve reads only while a listener receives the notifications
-/// those writes send; each notification drops its repository's entries.
+/// A memo of each repository's refs or grants, which other processes write
+/// too. It serves reads only while a listener receives the notifications
+/// those writes send; each notification drops its repository's entry. Refs
+/// and grants have one each, so landing, which moves `main` every time,
+/// leaves the grants every request reads in memory.
 #[derive(Debug)]
-struct Mutable {
-    refs: Recent<String, Arc<Vec<(String, RefState)>>>,
-    grants: Recent<String, Arc<Vec<Grant>>>,
+struct Memo<V> {
+    entries: Recent<String, V>,
     /// Bumped by every invalidation, and whether a listener is connected.
     /// A read remembers its result only if no invalidation happened since
     /// it started, so a result older than a write is never kept after it.
     epoch: Mutex<(u64, bool)>,
 }
 
-impl Mutable {
-    fn new() -> Self {
+impl<V: Clone + Send + Sync + 'static> Memo<V> {
+    fn new(bytes: usize) -> Self {
         Self {
-            refs: Recent::new(REF_MEMO_BYTES),
-            grants: Recent::new(GRANT_MEMO_BYTES),
+            entries: Recent::new(bytes),
             epoch: Mutex::new((0, false)),
         }
     }
@@ -108,43 +115,41 @@ impl Mutable {
         }
     }
 
-    /// Drop `repo`'s entries.
+    /// Drop `repo`'s entry.
     fn forget(&self, repo: &str) {
         let mut state = self.state();
         state.0 += 1;
-        self.refs.remove(&repo.to_owned());
-        self.grants.remove(&repo.to_owned());
+        self.entries.remove(&repo.to_owned());
     }
 
     /// Drop every entry, and use the memos from now on only if `listening`.
     fn reset(&self, listening: bool) {
         let mut state = self.state();
         *state = (state.0 + 1, listening);
-        self.refs.clear();
-        self.grants.clear();
+        self.entries.clear();
     }
-}
 
-/// `repo`'s memoised value in `memo`, or `read` and remember it, weighed by
-/// `weight`, while the memos are in use.
-async fn memoized<V: Clone + Send + Sync + 'static>(
-    mutable: &Mutable,
-    memo: &Recent<String, V>,
-    repo: &str,
-    weight: impl FnOnce(&V) -> usize,
-    read: impl Future<Output = Result<V>>,
-) -> Result<V> {
-    let Some(epoch) = mutable.epoch() else {
-        return read.await;
-    };
-    if let Some(hit) = memo.get(&repo.to_owned()).await {
-        return Ok(hit);
+    /// `repo`'s memoised value, or `read` and remember it, weighed by
+    /// `weight`, while the memo is in use.
+    async fn get(
+        &self,
+        repo: &str,
+        weight: impl FnOnce(&V) -> usize,
+        read: impl Future<Output = Result<V>>,
+    ) -> Result<V> {
+        let Some(epoch) = self.epoch() else {
+            return read.await;
+        };
+        if let Some(hit) = self.entries.get(&repo.to_owned()).await {
+            return Ok(hit);
+        }
+        let value = read.await?;
+        self.remember(epoch, || {
+            self.entries
+                .insert(repo.to_owned(), value.clone(), repo.len() + weight(&value));
+        });
+        Ok(value)
     }
-    let value = read.await?;
-    mutable.remember(epoch, || {
-        memo.insert(repo.to_owned(), value.clone(), repo.len() + weight(&value));
-    });
-    Ok(value)
 }
 
 /// Rows of `changesets.canonical` one blocking task decodes: a larger read
@@ -231,7 +236,8 @@ impl PostgresStore {
             derived: Arc::new(Recent::new(DERIVED_MEMO_BYTES)),
             trees: Arc::new(Recent::new(TREE_MEMO_BYTES)),
             pages: Arc::new(Recent::new(PAGE_MEMO_BYTES)),
-            mutable: Arc::new(Mutable::new()),
+            refs: Arc::new(Memo::new(REF_MEMO_BYTES)),
+            grants: Arc::new(Memo::new(GRANT_MEMO_BYTES)),
         }
     }
 
@@ -250,9 +256,13 @@ impl PostgresStore {
                     // `Ok(None)` and `Err` both mean the connection is gone,
                     // with whatever was sent meanwhile.
                     while let Ok(Some(n)) = l.try_recv().await {
-                        store.mutable.forget(n.payload());
+                        if n.channel() == REFS_CHANNEL {
+                            store.refs.forget(n.payload());
+                        } else {
+                            store.grants.forget(n.payload());
+                        }
                     }
-                    store.mutable.reset(false);
+                    store.reset(false);
                 }
                 tokio::time::sleep(RELISTEN_DELAY).await;
                 listener = store.listener().await.ok();
@@ -261,17 +271,23 @@ impl PostgresStore {
         Ok(())
     }
 
-    /// A connection listening on [`INVALIDATE_CHANNEL`], outside the pool,
-    /// after which the memos start out empty.
+    /// A connection listening on [`REFS_CHANNEL`] and [`GRANTS_CHANNEL`],
+    /// outside the pool, after which the memos start out empty.
     async fn listener(&self) -> Result<PgListener> {
         let pool = PgPoolOptions::new()
             .max_connections(1)
             .connect_lazy_with((*self.pool.connect_options()).clone());
         let mut listener = PgListener::connect_with(&pool).await?;
         listener.eager_reconnect(false);
-        listener.listen(INVALIDATE_CHANNEL).await?;
-        self.mutable.reset(true);
+        listener.listen_all([REFS_CHANNEL, GRANTS_CHANNEL]).await?;
+        self.reset(true);
         Ok(listener)
+    }
+
+    /// Empty both memos, and use them from now on only if `listening`.
+    fn reset(&self, listening: bool) {
+        self.refs.reset(listening);
+        self.grants.reset(listening);
     }
 
     /// Apply pending migrations.
@@ -536,14 +552,13 @@ fn decode_tree(id: TreeId, bytes: &[u8]) -> Result<Tree> {
 
 impl PostgresStore {
     /// Every ref of `repo`, by name, memoised while listening.
-    async fn refs(&self, repo: &str) -> Result<Arc<Vec<(String, RefState)>>> {
-        let weight = |refs: &Arc<Vec<(String, RefState)>>| {
-            refs.iter().map(|(name, _)| name.len() + 48).sum()
-        };
-        memoized(&self.mutable, &self.mutable.refs, repo, weight, async {
-            Ok(Arc::new(self.select_refs(repo).await?))
-        })
-        .await
+    async fn refs(&self, repo: &str) -> Result<Refs> {
+        let weight = |refs: &Refs| refs.iter().map(|(name, _)| name.len() + 48).sum();
+        self.refs
+            .get(repo, weight, async {
+                Ok(Arc::new(self.select_refs(repo).await?))
+            })
+            .await
     }
 
     async fn select_refs(&self, repo: &str) -> Result<Vec<(String, RefState)>> {
@@ -577,10 +592,11 @@ impl PostgresStore {
                 .map(|g| g.principal.len() + g.path_prefix.len() + 8)
                 .sum()
         };
-        memoized(&self.mutable, &self.mutable.grants, repo, weight, async {
-            Ok(Arc::new(self.select_grants(repo).await?))
-        })
-        .await
+        self.grants
+            .get(repo, weight, async {
+                Ok(Arc::new(self.select_grants(repo).await?))
+            })
+            .await
     }
 
     async fn select_grants(&self, repo: &str) -> Result<Vec<Grant>> {
@@ -968,14 +984,14 @@ impl MetadataStore for PostgresStore {
         .bind(repo_id)
         .bind(name)
         .bind(target.as_bytes().as_slice())
-        .bind(INVALIDATE_CHANNEL)
+        .bind(REFS_CHANNEL)
         .bind(repo)
         .fetch_optional(&self.pool)
         .await?;
         if inserted.is_none() {
             return Err(StoreError::RefExists(name.to_owned()));
         }
-        self.mutable.forget(repo);
+        self.refs.forget(repo);
         Ok(RefState { target, version: 0 })
     }
 
@@ -1008,11 +1024,11 @@ impl MetadataStore for PostgresStore {
         .bind(name)
         .bind(new_target.as_bytes().as_slice())
         .bind(expected)
-        .bind(INVALIDATE_CHANNEL)
+        .bind(REFS_CHANNEL)
         .fetch_optional(&self.pool)
         .await?;
         // On a mismatch the memo may predate the write that won.
-        self.mutable.forget(repo);
+        self.refs.forget(repo);
         if let Some((version, _)) = updated {
             return Ok(RefState {
                 target: new_target,
@@ -1406,11 +1422,11 @@ impl MetadataStore for PostgresStore {
         .bind(&grant.principal)
         .bind(&grant.path_prefix)
         .bind(grant.role.as_str())
-        .bind(INVALIDATE_CHANNEL)
+        .bind(GRANTS_CHANNEL)
         .bind(repo)
         .execute(&self.pool)
         .await?;
-        self.mutable.forget(repo);
+        self.grants.forget(repo);
         Ok(())
     }
 
@@ -1424,11 +1440,11 @@ impl MetadataStore for PostgresStore {
         .bind(repo_id)
         .bind(principal)
         .bind(path_prefix)
-        .bind(INVALIDATE_CHANNEL)
+        .bind(GRANTS_CHANNEL)
         .bind(repo)
         .fetch_optional(&self.pool)
         .await?;
-        self.mutable.forget(repo);
+        self.grants.forget(repo);
         Ok(done.is_some())
     }
 
