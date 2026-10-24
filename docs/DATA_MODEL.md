@@ -247,6 +247,42 @@ base          = "d41c…"          # last known merge-base with main (a cache)
   server rebases the head onto `main` and moves `main`, and the working copy follows the
   landed changeset.
 
+## The working copy
+
+A working copy is a directory with a `.scn/` folder. Nothing in it leaves the machine or is
+hashed into a changeset; a fresh `scn clone` writes a new one.
+
+| File | Holds | Format |
+|---|---|---|
+| `config` | server address and repository name | TOML |
+| `state` | `current_head`, `base` and local labels (above) | TOML |
+| `sparse` | the sparse profile: one path per line, `#` comments; empty for the whole repository | text |
+| `index` | every checked-out file and the directories that hold nothing else | binary, below |
+| `added` | untracked paths `scn add` marked for the next commit, one per line | text |
+| `conflicts` | paths `scn update --conflicts` left with conflict markers, one per line | text |
+
+The index reuses the canonical primitives for a strict, compact form, though it is never
+hashed:
+
+```text
+magic    4 bytes "SCIX"
+version  u16     2
+entries  seq(str path, id blob, u8 kind, u64 size, i64 mtime_ns, i64 ctime_ns, u64 ino)
+         strictly increasing by path
+dirs     seq(str path, i64 mtime_ns)
+         strictly increasing by path, "" for the root
+```
+
+`scn status` compares the working copy with the index without reading unchanged files: a file
+whose kind, size, mtime, ctime and inode match its entry is unchanged, and any other file is
+rehashed. A directory recorded in `dirs` is listed, to find untracked files, only when its
+mtime differs from the recorded one, since adding, removing or renaming an entry changes it.
+A recorded time counts only when it is older than the `index` file itself, so an edit made in
+the same clock tick as the checkout is still seen. Directories and files are examined on up to
+eight threads. Version 1 of the index had neither ctime, inode nor `dirs`; it is still read,
+and its files are rehashed until the index is next written. There are no ignore files: every
+file outside `.scn/` that the index does not know is untracked unless it was added.
+
 ## Generation numbers
 
 Every changeset row stores `generation = max(parent.generation) + 1` (roots are 0). Together with
