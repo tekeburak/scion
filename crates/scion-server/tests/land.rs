@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use futures_util::future::join_all;
-use scion_derived::test_util::{REPO, changeset, tracked};
+use scion_derived::test_util::{CountingMeta, REPO, changeset, tracked};
 use scion_proto::v1::{
     ChangeRequest, ChangeRequestStatus, FindLandingRequest, GetChangeRequestRequest, GetRefRequest,
     LogRequest, SubmitChangeRequestRequest,
@@ -150,6 +150,44 @@ async fn concurrent_requests_all_land_on_a_linear_main() {
             "request {i}'s landed changeset carries its change"
         );
     }
+}
+
+/// Phase 10.9: a client waiting on its request reads it twice and is then
+/// sent it when it is finished, instead of reading it again after every
+/// other request's finish.
+#[tokio::test]
+async fn waiting_clients_read_their_request_once() {
+    const N: usize = 16;
+    let (shared, root) = repository().await;
+    let store: &'static MemoryStore = Box::leak(Box::new(shared.clone()));
+    let mut heads = Vec::new();
+    for i in 0..N {
+        heads.push(commit(store, root, &format!("f{i}.txt")).await);
+    }
+    let counting = Arc::new(CountingMeta::new(store));
+    let c = common::control(common::serve(counting.clone(), shared).await);
+
+    let done = join_all(heads.iter().map(|head| {
+        let mut c = c.clone();
+        async move {
+            c.submit_change_request(SubmitChangeRequestRequest {
+                repo: REPO.into(),
+                head: head.as_bytes().to_vec(),
+                wait: true,
+            })
+            .await
+            .unwrap()
+            .into_inner()
+        }
+    }))
+    .await;
+    assert!(
+        done.iter()
+            .all(|cr| cr.status() == ChangeRequestStatus::Landed)
+    );
+    // One read to see the request is open, one after subscribing, so a
+    // finish in between is not missed.
+    assert_eq!(counting.change_request_reads(), 2 * N);
 }
 
 #[tokio::test]

@@ -63,6 +63,15 @@ traced wall time; untraced, over six runs per side on one machine, `land 16 writ
 372 ms against 392 ms on `main`, inside that machine's run-to-run noise. What is left per
 land is about six Postgres commits in a row, each with its WAL flush.
 
+Since 10.9 two of those commits are off the worker's line: while one request's CAS and finish
+are in flight, the worker claims the next request and rebases it onto the `main` that CAS will
+make; a lost CAS drops what was prepared. Each finished request is also sent to the clients
+waiting on it, where before every finish woke every waiting `CommitAndLand` and each read its
+request from Postgres again, on the pool the worker uses; a counting test holds a waiting
+client at two reads. In one session, alternating `bench-real 3` runs gave `land 16 writers`
+358 and 373 ms on `main` against 342 and 310 ms with the pipeline (0.092× and 0.083× git, p99
+0.089× and 0.080×).
+
 Since 10.8 a clean `status` on the sparse clone (322 files, about 70 directories) lists no
 directory and reads no file: it makes one `statx` per directory and file, on several threads
 once there are more than 128 of either, about 0.7 ms in all. The index records each file's
