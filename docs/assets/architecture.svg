@@ -25,18 +25,19 @@
 <text x="1180" y="344" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="18" fill="#e8edf5" font-weight="400" text-anchor="start">• object origin</text>
 <text x="1180" y="376" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="18" fill="#e8edf5" font-weight="400" text-anchor="start">• derived-data computation</text>
 <text x="1180" y="408" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="18" fill="#e8edf5" font-weight="400" text-anchor="start">• serial land worker</text>
-<rect x="1150" y="560" width="180" height="150" rx="14" fill="#151d2e" stroke="#f5b545" stroke-width="2"/>
+<rect x="1150" y="560" width="180" height="170" rx="14" fill="#151d2e" stroke="#f5b545" stroke-width="2"/>
 <text x="1240" y="600" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="22" fill="#e8edf5" font-weight="700" text-anchor="middle">Postgres</text>
 <text x="1240" y="630" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">changeset WAL</text>
-<text x="1240" y="651" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">file_changes</text>
-<text x="1240" y="672" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">refs (CAS)</text>
-<text x="1240" y="693" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">derived pointers</text>
-<rect x="1350" y="560" width="180" height="150" rx="14" fill="#151d2e" stroke="#2dd4bf" stroke-width="2"/>
+<text x="1240" y="650" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">file_changes</text>
+<text x="1240" y="670" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">refs (CAS)</text>
+<text x="1240" y="690" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">trees, pages</text>
+<text x="1240" y="710" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">derived pointers</text>
+<rect x="1350" y="560" width="180" height="170" rx="14" fill="#151d2e" stroke="#2dd4bf" stroke-width="2"/>
 <text x="1440" y="600" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="22" fill="#e8edf5" font-weight="700" text-anchor="middle">object store</text>
 <text x="1440" y="630" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">blobs/{id}</text>
-<text x="1440" y="651" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">trees/{id}</text>
-<text x="1440" y="672" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">snapshots/…</text>
-<text x="1440" y="693" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">S3-compatible</text>
+<text x="1440" y="650" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">blame nodes</text>
+<text x="1440" y="670" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">snapshots · planned</text>
+<text x="1440" y="690" font-family="'JetBrains Mono', 'SFMono-Regular', Menlo, Consolas, 'Liberation Mono', monospace" font-size="14" fill="#93a1b8" font-weight="400" text-anchor="middle">S3-compatible</text>
 <line x1="364" y1="228" x2="1144" y2="228" stroke="#f5b545" stroke-width="3" marker-end="url(#a-amber)"/>
 <text x="560" y="214" font-family="Inter, 'Segoe UI', -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif" font-size="17" fill="#f5b545" font-weight="600" text-anchor="start">control plane: changesets, refs, log, diff, blame, land</text>
 <path d="M364,580 C410,580 400,630 450,630 L1080,630 C1110,630 1110,610 1110,580 L1110,460 C1110,435 1120,425 1144,425" fill="none" stroke="#f5b545" stroke-width="2.5" marker-end="url(#a-amber)"/>
