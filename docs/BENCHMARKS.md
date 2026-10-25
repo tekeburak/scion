@@ -21,17 +21,18 @@ stage (`crates/scion-proto/src/trace.rs`) and sums them per workload into
 `target/bench-real/results-trace.csv`, as `client` (`scn`, or `scion-ingest`, which runs the
 shared create path in process) and `server` stages. Spans of concurrent calls add up, so a
 stage can exceed its workload's wall time; the critical-path stage is the one to attack.
-The baseline below is the 2026-10-21 run in [`bench-real.csv`](bench-real.csv) (medians of 3)
-with the stages of one traced run on the same machine; the import rows are from the Phase 10.4
-run (mapper on two threads), the path log and blame rows from the Phase 10.7 run. Rows slower
+The ratios below are from the run in [`bench-real.csv`](bench-real.csv) behind the README
+table (2026-10-24, medians of 3). The stages come from earlier traced runs on the same
+machine: the import rows from the Phase 10.4 run (mapper on two threads), the path log and
+blame rows from the Phase 10.7 run, the commit + land row from the Phase 10.6 run. Rows slower
 than git:
 
 | Row | scion / git | Most expensive stage | What it is |
 | --- | ---: | --- | --- |
-| import, cold | 8.7× | blob `put`: 76 s summed over 7,955 uploads in flight; `create` is 4.4 s (wall 11.6 s) | One object-store `PUT` per blob (`store` is one `INSERT` per batch since 10.3); the stack serves about 1,100 `PUT`/s, so blobs alone take about 7 s. See #168. |
-| import, warm | 2.2× | `has_blobs`: 24 s summed, one `HEAD` per blob (7,955) | Mapping went from 4.9 s on one thread to about 1.8 s of work on two (10.4: rename scoring counts each file's lines once, delta-base cache); what is left is one `HEAD` per blob for a repository whose blobs another one stored. See #168. |
-| path log, cold | 4.0× | `walk`: about 60 ms of the 85 ms `PathLog` (10.7) | Every page read now comes from Postgres (10.3), and since 10.7 the segments of the chain and its next anchor advance together, one `get_pages` per step: about 43 queries for 428 changes instead of about 450 single-page queries queued on a 16-connection pool. What is left is the chain's shape: 27 anchors read one after another, then the last segment's 16 steps, each about 1–1.5 ms for up to 230 kB of pages (about 5 MB in all). Since the second 10.7 step pages (and trees) are stored with lz4 instead of Postgres' default pglz, which makes each step's read about a fifth faster (0.95 → 0.75 ms for 16 pages, measured on the bench's own pages), and `read` is one query that returns the stored canonical bytes as they are instead of decoding 428 changesets and encoding them again. Together, measured on `main` and on this change in one session: 101 → 87 ms. |
-| blame, cold | 1.03× | `attribute`: about 60 ms, the requested file's own version chain | Until 10.7 the reply waited on the blame node of the changeset that last touched `alloc/src/vec/mod.rs`, which holds every file that changeset changed: 272 versions along 13 chains, each version one object-store `GET` and one diff, with every query waiting behind RustFS. The reply now waits on that file's chain only; a task stores the node afterwards, one file and one version at a time, and the server remembers the reply meanwhile. |
+| import, cold | 8.4× | blob `put`: 76 s summed over 7,955 uploads in flight; `create` is 4.4 s (wall 11.6 s) | One object-store `PUT` per blob (`store` is one `INSERT` per batch since 10.3); the stack serves about 1,100 `PUT`/s, so blobs alone take about 7 s. See #168. |
+| import, warm | 1.9× | `has_blobs`: 24 s summed, one `HEAD` per blob (7,955) | Mapping went from 4.9 s on one thread to about 1.8 s of work on two (10.4: rename scoring counts each file's lines once, delta-base cache); what is left is one `HEAD` per blob for a repository whose blobs another one stored. See #168. |
+| path log, cold | 3.6× | `walk`: about 60 ms of the 85 ms `PathLog` (10.7) | Every page read now comes from Postgres (10.3), and since 10.7 the segments of the chain and its next anchor advance together, one `get_pages` per step: about 43 queries for 428 changes instead of about 450 single-page queries queued on a 16-connection pool. What is left is the chain's shape: 27 anchors read one after another, then the last segment's 16 steps, each about 1–1.5 ms for up to 230 kB of pages (about 5 MB in all). Since the second 10.7 step pages (and trees) are stored with lz4 instead of Postgres' default pglz, which makes each step's read about a fifth faster (0.95 → 0.75 ms for 16 pages, measured on the bench's own pages), and `read` is one query that returns the stored canonical bytes as they are instead of decoding 428 changesets and encoding them again. Together, measured on `main` and on this change in one session: 101 → 87 ms. |
+| blame, cold | 1.1× | `attribute`: about 60 ms, the requested file's own version chain | Until 10.7 the reply waited on the blame node of the changeset that last touched `alloc/src/vec/mod.rs`, which holds every file that changeset changed: 272 versions along 13 chains, each version one object-store `GET` and one diff, with every query waiting behind RustFS. The reply now waits on that file's chain only; a task stores the node afterwards, one file and one version at a time, and the server remembers the reply meanwhile. |
 | commit + land | 1.2× | `CommitAndLand`: 23 ms, then `PutBlobs`: 7 ms | Since 10.6 `scn commit --land` is one process and three RPCs (`HasBlobs`, `PutBlobs`, `CommitAndLand`) where `commit` + `land` were two processes and four. Inside `CommitAndLand`, the create is 8 ms (the skip list's 7 ms of ancestor reads on a memo the importer, not the server, filled), then about six Postgres commits in a row (insert, pointers, submit, claim, `main`'s CAS, finish; 1–1.5 ms each); the path history is stored after the reply. `PutBlobs` is RustFS's `PUT` of one small blob. On a warm server and a small repository the whole command is about 25 ms. |
 
 Every other row is already faster than git. Warm path log became one of them in 10.7: a head's history never
@@ -81,7 +82,7 @@ made in the same clock tick as the checkout is still rehashed, and a proptest ov
 sets checks the result against a full re-hash. The row is now about the cost of starting a
 process: `scn status` takes about 3.3 ms when run alone on the benchmark machine, of which
 `scn --version` takes 2.1 ms and `/bin/true` 1.4 ms, and `bench-real`'s timer reads 4 ms for an
-empty command. So 7 ms against git's 172 ms is 0.04×, and the 0.03× target (about 5 ms) sits
+empty command. So 7 ms against git's 161 ms, in the run behind the README table, is 0.04×, and the 0.03× target (about 5 ms) sits
 below what the timer measures for any process. Since 10.8, `bench-real` also runs `scn` in its
 working copy from its own shell, as git runs with `-C`, instead of through `sh -c "cd … && scn"`,
 which had charged every `scn` row in a working copy a second shell.
