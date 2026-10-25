@@ -18,6 +18,16 @@ online and whose commits come mostly from coding agents.</b></p>
 > It is not an official Anthropic project and is not affiliated with or endorsed by Anthropic.
 
 <p align="center">
+  <a href="docs/ARCHITECTURE.md">Architecture</a> ·
+  <a href="docs/DATA_MODEL.md">Data model</a> ·
+  <a href="#getting-started">Getting started</a> ·
+  <a href="#benchmarks">Benchmarks</a> ·
+  <a href="docs/FAQ.md">FAQ</a> ·
+  <a href="docs/ROADMAP.md">Roadmap</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+<p align="center">
   <img src="docs/assets/banner.svg" width="800" alt="Scion: changesets, derived trees and content-addressed blobs behind a single main branch">
 </p>
 
