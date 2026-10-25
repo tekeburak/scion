@@ -340,6 +340,9 @@ On a machine with Docker whose DNS name points at it and whose ports 80 and 443 
 from a checkout of this repository:
 
 ```sh
+# no release is tagged yet, so there is no image to pull: build one from this
+# checkout and set SCION_VERSION=local in prod.env
+docker build -f deploy/scion-server.Dockerfile -t ghcr.io/tekeburak/scion-server:local .
 cp deploy/prod.env.example prod.env   # fill in every value; keep it private
 docker compose -f deploy/compose.prod.yml --env-file prod.env up -d
 # the first admin: sign in with GitHub (needs the OAuth app in prod.env), then
@@ -349,8 +352,10 @@ scn login https://scion.example.com   # the SCION_DOMAIN from prod.env
 scn init https://scion.example.com demo
 ```
 
-The bucket must already exist; Caddy obtains and renews the certificate itself. To upgrade,
-change `SCION_VERSION` in `prod.env` and run the same `up -d`; Postgres keeps its volume.
+The bucket must already exist; Caddy obtains and renews the certificate itself. Once releases
+are tagged, `SCION_VERSION` names one (`ghcr.io/tekeburak/scion-server:<version>`, pulled on
+`up`) and the build step goes away. To upgrade, change `SCION_VERSION` in `prod.env` (or
+rebuild the `local` image) and run the same `up -d`; Postgres keeps its volume.
 
 ## Web interface
 
