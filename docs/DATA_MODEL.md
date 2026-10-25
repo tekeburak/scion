@@ -154,8 +154,10 @@ not a patch.
 
 Everything in the object store and in the `trees` and `pages` tables is immutable, addressed
 by hash and append-only: a row is inserted once (`ON CONFLICT DO NOTHING`) and never updated
-or deleted. Objects in the store are zstd-compressed; the object store holds blobs only.
-Garbage collection is a non-goal for now.
+or deleted. Objects in the store are zstd-compressed, and the store holds only blobs: file
+contents and the encoded blame nodes, which are written as blobs too. Rows of `trees` and
+`pages` are compressed by Postgres with lz4 (rows written before that keep the default pglz;
+both read the same). Garbage collection is a non-goal for now.
 
 ### Trees in the metadata database
 
