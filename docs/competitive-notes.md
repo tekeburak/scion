@@ -20,6 +20,21 @@ subjects only, for everything since the later reading of 2026-10-24.
 | `TheDancingDeveloper-org/graft` | 12 commits | Trial write-ups on real repositories, ignore files honoured by its client, a status fix for resolved conflicts. |
 | [CarterT27/scion](https://github.com/CarterT27/scion), [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion), [OpenCSGs/scion](https://github.com/OpenCSGs/scion), [feder-cr/git-ai](https://github.com/feder-cr/git-ai), `adrianchifor/scn`, `rizaust/open-scion`, `kianaaa19/scionhub` | none | Quiet. |
 
+**Later reading, 05:20 UTC.** The GitHub API and repository pages still refused this session
+(no stars, no search). Anonymous clones under the scratchpad, commit subjects only, since the
+first run today: only `TheDancingDeveloper-org/graft` moved, with 8 commits: a one-command
+repository onboarding in its deploy scripts (the first deploy waits for the new repository's
+initial import), short changeset ids resolved by its CLI, a stale-base refusal that reports the
+current tip and the paths involved, and more on its git-mirror batch PRs. No new tag anywhere
+(the newest tags, `OpenCSGs/scion` `v0.1.10`, `adrianchifor/scn` `0.2.0` from 2026-10-17 and
+`feder-cr/git-ai` `v0.4.0` from 2026-10-23, predate this run).
+
+- **One-command onboarding** is the same goal as Scion's roadmap step 9.11 (five-minute
+  quickstart, in progress); no issue, the step already covers it.
+- **Short changeset ids** and **a stale-base refusal that names the current tip** are CLI
+  presentation details worth checking against `scn` when Phase 9 polishes the quickstart;
+  noted only.
+
 ### What it means for Scion
 
 - **Numbers tied to a named run.** One project publishes its capacity figures with the id of
