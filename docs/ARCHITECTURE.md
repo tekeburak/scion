@@ -196,7 +196,9 @@ submit. It claims the oldest `pending` request, rebases the head onto `main` thr
 rebase as `scn update`, and moves `main` with one compare-and-swap. A lost CAS happens only when
 another writer (`MoveRef`, an import) moved `main`, so the rebased stack is replayed onto the
 new `main`; every retry follows a move of `main`, never a timer. A conflict finishes the
-request `needs_rebase` with its paths; nothing retries blindly.
+request `needs_rebase` with its paths; nothing retries blindly. Moving `main` needs only the
+rebased changesets' root trees and skip lists, so the worker derives just those; the path
+history of what landed is stored by a task once the request is finished, off the worker's line.
 
 **Pipelining.** While one request's compare-and-swap and its bookkeeping are in flight, the
 worker already claims the next request and rebases it onto the `main` that swap will make.
@@ -318,7 +320,10 @@ caller's grants in the working copy's repository.
 Tokens are not revocable: one stays valid until its expiry (30 days for `scn login`, the
 `--ttl` of `scion-server token`), and cutting someone off means revoking their grants, which
 takes effect on their next request, since grants are read on every request and not cached in
-the token. Tokens are checked once, at the server boundary; tiers below the server will forward
+the token. A server keeps each repository's grants, and separately its refs, in memory, but only
+while it listens on Postgres `LISTEN` for the notification every grant or ref write sends, from
+any process: a notification drops that repository's entry, and while the listening connection
+is lost the server reads from Postgres and remembers nothing. Tokens are checked once, at the server boundary; tiers below the server will forward
 them and never decide access themselves. Authorization is repo- and directory-scoped (`repo` is part of
 every rule, invariant 7); moving `main` and `release/*` requires admin.
 
