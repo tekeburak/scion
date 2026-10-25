@@ -63,16 +63,20 @@ enforced (daemon → cache → server) to isolate failure domains: a regional ca
 turn into a thundering herd on the origin.
 
 The negotiation is deliberately simple. The client never tells the server what it already has.
-Starting from a root tree id it requests missing trees recursively, then missing blobs. Every
-request names a specific immutable object, so any tier can answer from cache, the exchange is
+Starting from a root tree id it requests missing trees, then missing blobs, in batches:
+`GetObjects` takes up to 256 ids per call and, for a directory the sparse profile takes whole,
+returns every tree beneath it too, so a full clone of the 2,330-file benchmark slice is 12
+requests. A commit goes the other way: the client hashes its files, asks `HasBlobs` which
+contents the server already holds and sends only the rest in one `PutBlobs` stream. Every
+request names specific immutable objects, so any tier can answer from cache, the exchange is
 resumable, and there is no delta compression or packfile generation anywhere.
 
 ### Storage
 
 - **Metadata** (Postgres; CockroachDB is a drop-in target): the changeset write-ahead log,
   `file_changes`, refs (one row each, moved by compare-and-swap on a version column), derived
-  data pointers, trees and path-history pages (immutable, content-addressed rows), change
-  requests, ingestion checkpoints. Schema: `migrations/`.
+  data pointers, trees and path-history pages (immutable, content-addressed rows, their bytes
+  stored with Postgres's lz4 column compression), change requests, ingestion checkpoints. Schema: `migrations/`.
 - **Objects** (S3-compatible via the `object_store` crate; GCS/Azure/local disk also work):
   `blobs/{id}`, `snapshots/{repo}/{changeset}.manifest`. All keys are immutable and
   zstd-compressed.
@@ -115,17 +119,19 @@ skip lists (pointers only) are derived. Its derived-data pointers follow in one 
 so no pointer names a missing object, and a batch costs a few round trips however many
 changesets it holds. `PathHistory` mirrors the
 root tree with one history node per directory, but the nodes one changeset rewrites are stored
-together, children before parents, in pages of about 16 KiB, one object per page: a one-file
-change writes one history object however deep the file is.
+together, children before parents, in pages of about 16 KiB, one row of the `pages` table
+per page: a one-file change writes one history page however deep the file is.
 
 Every history entry also names the node its last change replaced (its directory's node at
 that changeset's first parent), carried along unchanged while the entry is. A path's log is
-therefore one lookup at the head and then one object read per change to that path, with no
-metadata read. Those reads need not wait on each other: an entry also counts the changes
-before it on its chain and names the node holding the change at the last multiple of 16 below
-it (its anchor, computed from the previous entry without a read). A log follows the anchors
-and walks the segments between them concurrently, so a thousand changes cost about 80 reads in
-sequence rather than a thousand.
+therefore one lookup at the head and then one history-node read per change to that path,
+never a scan of the changeset log. Those reads need not wait on each other: an entry also
+counts the changes before it on its chain and names the node holding the change at the last
+multiple of 16 below it (its anchor, computed from the previous entry without a read). A log
+follows the anchors and advances the segments between them in lockstep, reading every page a
+step needs in one query, so a thousand changes cost about 80 queries in sequence rather than a
+thousand. A head's history never changes, so the server also remembers each `PathLog` reply
+(up to 64 MiB of them) and answers a repeated log from memory.
 
 `Blame` does not read its parents' values, so deriving it skips the ancestor walk that other
 types need. A changeset's blame node holds the files it changed; each is attributed along its
@@ -143,7 +149,8 @@ changeset touched, not the history.
 the outcome in the same call: the server holds the reply until the land worker finishes the
 request, up to 20 seconds (below the client's 30-second deadline), and a client still waiting
 after that asks again with `GetChangeRequest`. A fast-forward therefore lands in one round
-trip, through the same worker as everything else. A head the worker rebased lands as a new
+trip, through the same worker as everything else; `scn commit --land` goes further and creates
+the changeset and submits it in one `CommitAndLand` call. A head the worker rebased lands as a new
 changeset, and the working copy moves to it so the next commit builds on what landed. A
 conflict prints the paths and leaves `main` and the working copy untouched; `--no-wait`
 prints the request id and `scn land --status <id>` reads it. `scn update` rebases ahead of
@@ -324,14 +331,16 @@ status 0.03×, warm path log 0.3×, warm blame 0.1×, commit + land 0.5×, 16 wr
 import 0.5× and cold import at or below git. The cold, first-call `log` and `blame` of a
 freshly started server are held within 2× git, because each pointer hop is a round trip to a
 store that git reads from a local packfile; production servers are rarely cold, so the table
-also reports "server warm, client cold". A regression of more than 20% on any row is a bug
-and fails the nightly benchmark job. The workloads cover import, full and sparse checkout,
+also reports "server warm, client cold". A regression of more than 20% on any row is a bug;
+a nightly benchmark job that fails on one is planned. The workloads cover import, full and sparse checkout,
 status, one-file commit, land, 16 writers landing at once, log and blame; the results are the
 Benchmarks table and chart in `README.md`, rendered from `docs/bench-real.csv`, and the
-measurement script (`scripts/bench-real`) stays in the repository. To reach the bar, trees
-and history pages move from the object store to the metadata database (as the reference design
-keeps them), the object plane gains streaming batch RPCs, and landing becomes one round trip
-(`docs/ROADMAP.md`, Phase 10).
+measurement script (`scripts/bench-real`) stays in the repository. Toward the bar, trees
+and history pages moved from the object store to the metadata database (as the reference design
+keeps them), the object plane gained batch RPCs (`GetObjects`, `HasBlobs`, `PutBlobs`), landing
+became one round trip (`CommitAndLand`, behind `scn commit --land`) and the land worker
+prepares the next request while the previous one lands. Not every row meets the bar yet; the
+Benchmarks table shows which, and `docs/ROADMAP.md` (Phase 10) lists the remaining steps.
 
 ### Web interface and agent API
 
