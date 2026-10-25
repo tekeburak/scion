@@ -7,6 +7,48 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-10-25
+
+The GitHub API refused this session (search and every repository outside this one), so no
+star counts, no topics and no search for new projects; `competitive-stars.csv` gets no row
+today. Commits come from anonymous shallow clones under the scratchpad, read as commit
+subjects only, for everything since the later reading of 2026-10-24.
+
+| Repository | Since the last run | Noted |
+|---|---|---|
+| [bnsd55/open-scion](https://github.com/bnsd55/open-scion) | 13 commits | Mostly tests and CI hygiene (every action at one version, service containers pinned by digest), plus documentation passes that close gaps an operator walk-through found, and a "published envelope" of capacity numbers tied to one CI run id. Its "Try it" README section was corrected to walk the repository it names. |
+| `TheDancingDeveloper-org/graft` | 12 commits | Trial write-ups on real repositories, ignore files honoured by its client, a status fix for resolved conflicts. |
+| [CarterT27/scion](https://github.com/CarterT27/scion), [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion), [OpenCSGs/scion](https://github.com/OpenCSGs/scion), [feder-cr/git-ai](https://github.com/feder-cr/git-ai), `adrianchifor/scn`, `rizaust/open-scion`, `kianaaa19/scionhub` | none | Quiet. |
+
+**Later reading, 05:20 UTC.** The GitHub API and repository pages still refused this session
+(no stars, no search). Anonymous clones under the scratchpad, commit subjects only, since the
+first run today: only `TheDancingDeveloper-org/graft` moved, with 8 commits: a one-command
+repository onboarding in its deploy scripts (the first deploy waits for the new repository's
+initial import), short changeset ids resolved by its CLI, a stale-base refusal that reports the
+current tip and the paths involved, and more on its git-mirror batch PRs. No new tag anywhere
+(the newest tags, `OpenCSGs/scion` `v0.1.10`, `adrianchifor/scn` `0.2.0` from 2026-10-17 and
+`feder-cr/git-ai` `v0.4.0` from 2026-10-23, predate this run).
+
+- **One-command onboarding** is the same goal as Scion's roadmap step 9.11 (five-minute
+  quickstart, in progress); no issue, the step already covers it.
+- **Short changeset ids** and **a stale-base refusal that names the current tip** are CLI
+  presentation details worth checking against `scn` when Phase 9 polishes the quickstart;
+  noted only.
+
+### What it means for Scion
+
+- **Numbers tied to a named run.** One project publishes its capacity figures with the id of
+  the CI run that produced them. Scion's README table already names the commit, machine and
+  timestamp of its run (written by `scripts/render-assets.py` from `bench-real.csv`); no
+  change.
+- **The concurrency claim is now measured.** The 2026-10-23 note said a 16-writer land chart
+  waits until the benchmark exists. `land 16 writers` is now a row of `bench-real.csv` and of
+  the README table; whether it earns a place on the first screen is a later call, and the
+  first screen stays as the rules set it.
+- **A "Try it" section that runs as written** is the technique behind one project's fix. Scion's
+  Getting started is the same idea; keep its commands exact.
+- **Ignore files** are a non-goal for Scion (`CLAUDE.md`); noted only.
+
 ## 2026-10-24
 
 The GitHub search API answered this run, both for "scion source control" (sorted by last

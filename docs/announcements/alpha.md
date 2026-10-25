@@ -4,8 +4,8 @@
 access control, the hermetic simulation and the fuzz targets, Scion now has a web interface
 where writers land change requests, an HTTP/JSON API, an MCP server for agents, release
 binaries and a server image built on a `v*` tag (none tagged yet), an install script, `https://`
-from `scn`, and a production compose profile behind TLS. It replaces the previous version of
-this file and [`phase-6-benchmark.md`](phase-6-benchmark.md), whose numbers are out of date.
+from `scn`, and a production compose profile behind TLS. It is the only announcement draft;
+the earlier MVP and first-benchmark drafts were removed because their numbers were out of date.
 Every number below is a median from the README's [Benchmarks](../../README.md#benchmarks)
 table (`docs/bench-real.csv`, the run re-taken in #211 with Phase 10.9's pipelined land worker,
 three runs, 2026-10-24); re-check them against the README before posting. Like the README,

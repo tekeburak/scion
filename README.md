@@ -18,6 +18,16 @@ online and whose commits come mostly from coding agents.</b></p>
 > It is not an official Anthropic project and is not affiliated with or endorsed by Anthropic.
 
 <p align="center">
+  <a href="docs/ARCHITECTURE.md">Architecture</a> ·
+  <a href="docs/DATA_MODEL.md">Data model</a> ·
+  <a href="#getting-started">Getting started</a> ·
+  <a href="#benchmarks">Benchmarks</a> ·
+  <a href="docs/FAQ.md">FAQ</a> ·
+  <a href="docs/ROADMAP.md">Roadmap</a> ·
+  <a href="CONTRIBUTING.md">Contributing</a>
+</p>
+
+<p align="center">
   <img src="docs/assets/banner.svg" width="800" alt="Scion: changesets, derived trees and content-addressed blobs behind a single main branch">
 </p>
 
@@ -281,7 +291,8 @@ the roles and what each request needs are in
 `scion-ingest` copies a git history into Scion: one changeset per commit, file changes
 against the first parent, renames and copies kept for `blame`, the git sha kept in the
 changeset's `extra`, and `main` pointed at the imported tip. It imports into a repository
-created with `scn init` and never creates one. The rules, and what it refuses, are in
+created with `scn init` and never creates one; the example below uses its own repository,
+`imported`, so it also runs on a stack that still holds `demo` from above. The rules, and what it refuses, are in
 [Ingestion](docs/ARCHITECTURE.md#ingestion). On the local compose stack, from a checkout of
 this repository:
 
@@ -310,13 +321,13 @@ git -C demo add -A && git -C demo commit -qm "add notes"
 git -C demo mv notes.txt README.txt && printf 'four\n' >>demo/README.txt
 git -C demo commit -qam "rename notes, add a line"
 
-scn init http://127.0.0.1:7420 demo  # an empty repository; import never creates one
+scn init http://127.0.0.1:7420 imported  # an empty repository; import never creates one
 
-scion-ingest import demo demo main   # git dir, Scion repository, git revision
-scion-ingest verify demo demo        # every imported tree against git ls-tree
+scion-ingest import demo imported main   # git dir, Scion repository, git revision
+scion-ingest verify demo imported        # every imported tree against git ls-tree
 
-scn clone http://127.0.0.1:7420 demo demo-scn
-cd demo-scn && scn log && scn blame README.txt   # "one" to "three" blame to "add notes"
+scn clone http://127.0.0.1:7420 imported imported-scn
+cd imported-scn && scn log && scn blame README.txt   # "one" to "three" blame to "add notes"
 ```
 
 Run `import` again after new git commits and it imports only those and fast-forwards `main`;
