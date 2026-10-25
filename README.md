@@ -551,11 +551,15 @@ The detailed plan, with acceptance criteria per step, is [`docs/ROADMAP.md`](doc
 cargo test --workspace                     # includes 200 seeds of scion-sim
 SCION_SIM_SEED=42 cargo test -p scion-sim --test seeds   # replay one simulation seed
 cargo test -p scion-sim --test corpus      # replay the fuzz corpus on stable
+cargo fmt --all -- --check                 # fix with: cargo fmt --all
+cargo clippy --workspace --all-targets --all-features -- -D warnings
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps
+# dependency bans, licenses, sources and advisories (cargo install cargo-deny --locked)
+cargo deny check bans licenses sources advisories
 
 # fuzzing needs a nightly toolchain and cargo-fuzz:
 #   rustup toolchain install nightly && cargo +nightly install cargo-fuzz --locked
-cd crates/scion-sim/fuzz && cargo +nightly fuzz run request -- -max_total_time=300
-cargo clippy --workspace --all-targets -- -D warnings
+(cd crates/scion-sim/fuzz && cargo +nightly fuzz run request -- -max_total_time=300)
 
 # poke the MCP server by hand with the MCP inspector (needs Node.js: apt-get install nodejs npm /
 # brew install node); point it at a server started with --web
