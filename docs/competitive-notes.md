@@ -7,6 +7,33 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-10-25
+
+The GitHub API refused this session (search and every repository outside this one), so no
+star counts, no topics and no search for new projects; `competitive-stars.csv` gets no row
+today. Commits come from anonymous shallow clones under the scratchpad, read as commit
+subjects only, for everything since the later reading of 2026-10-24.
+
+| Repository | Since the last run | Noted |
+|---|---|---|
+| [bnsd55/open-scion](https://github.com/bnsd55/open-scion) | 13 commits | Mostly tests and CI hygiene (every action at one version, service containers pinned by digest), plus documentation passes that close gaps an operator walk-through found, and a "published envelope" of capacity numbers tied to one CI run id. Its "Try it" README section was corrected to walk the repository it names. |
+| `TheDancingDeveloper-org/graft` | 12 commits | Trial write-ups on real repositories, ignore files honoured by its client, a status fix for resolved conflicts. |
+| [CarterT27/scion](https://github.com/CarterT27/scion), [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion), [OpenCSGs/scion](https://github.com/OpenCSGs/scion), [feder-cr/git-ai](https://github.com/feder-cr/git-ai), `adrianchifor/scn`, `rizaust/open-scion`, `kianaaa19/scionhub` | none | Quiet. |
+
+### What it means for Scion
+
+- **Numbers tied to a named run.** One project publishes its capacity figures with the id of
+  the CI run that produced them. Scion's README table already names the commit, machine and
+  timestamp of its run (written by `scripts/render-assets.py` from `bench-real.csv`); no
+  change.
+- **The concurrency claim is now measured.** The 2026-10-23 note said a 16-writer land chart
+  waits until the benchmark exists. `land 16 writers` is now a row of `bench-real.csv` and of
+  the README table; whether it earns a place on the first screen is a later call, and the
+  first screen stays as the rules set it.
+- **A "Try it" section that runs as written** is the technique behind one project's fix. Scion's
+  Getting started is the same idea; keep its commands exact.
+- **Ignore files** are a non-goal for Scion (`CLAUDE.md`); noted only.
+
 ## 2026-10-24
 
 The GitHub search API answered this run, both for "scion source control" (sorted by last
