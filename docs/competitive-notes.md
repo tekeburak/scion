@@ -39,6 +39,64 @@ Also seen, not a project: a Chinese-language explainer repository about the post
   `monorepo`, `coding-agents`, …) do not, and adding a topic is a repository setting, not a file;
   left to the owner, noted only.
 
+### 2026-10-26, second run (03:30 UTC)
+
+Repository search answered; per-repository API calls stayed refused, so commits and tags come
+from anonymous shallow clones under the scratchpad (subjects only) and features from each
+README as the project states them. Window: since the 2026-10-25 later reading.
+
+| Repository | Stars / forks | Since the last reading | Noted |
+|---|---|---|---|
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30 / 3 | 33 commits, no tag | Back in search under this name (the earlier `open-scion` spelling). Tests and docs hardening again: a cache refuses tickets no key signed, an empty auth token refused everywhere, a `gc --dry-run`, archive restore in bounded transactions, every measured number names its run and commit, the writable mount leaves the default build. |
+| [OpenCSGs/scion](https://github.com/OpenCSGs/scion) | 3 / 0 | 2 commits, **tag `v0.1.11`** | Release 0.1.11 is **a git gateway** (`git clone`, `fetch`, `push` against the server). README already offers an install script (systemd/launchd), a one-container Docker image on SQLite + local directory, and a Postgres + S3 production image. |
+| `TheDancingDeveloper-org/graft` | 0 | ~30 commits, **tag `v0.1.0`** (first release) | `graft serve --dev`, a zero-config dev server that prints the clone command; a local in-process mode; clone by URL; named servers with `graft login`; one binary for serve/node/mirror; one-line MCP registration for three agent clients; a published bench chart. AGPL-3.0: nothing copied. |
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 988 / 97 | none (tags up to `v0.4.0`) | Quiet since 2026-10-23. |
+| [CarterT27/scion](https://github.com/CarterT27/scion), [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion), [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub) | 245, 119, 0 | none | Quiet; no tags. |
+
+No new repository created after 2026-10-13 reached 5 stars (the largest newcomer has 2).
+
+**Direction.** Packaging is where the field moved this week: two projects tagged releases with
+binaries and images, and three offer a first try with no external services (a dev server, one
+container on a single-file store, or an install script). One added a git gateway, which stays a
+Scion non-goal (git wire protocol). Issue #265 proposes the one gap worth a step: a dev server
+on the memory stores so a first try needs no Docker.
+
+**The post itself.** The post now lives at `/research/redesigning-source-control` (the old
+`/engineering/` address answers with a permanent redirect; the link above follows it). Its note
+"Updated October 15" adds credit to Sapling/Mononoke for techniques Scion uses; Scion's README
+already lists them under "Prior art". Two points of the post that the table below does not
+cover, recorded for later runs: tools that run on the source-control API alone, its example
+being automated bisect and revert after a post-merge test failure (one project above states a
+test-after-land, bisect-and-revert tool), and the statement that the system is not offered
+publicly, so every project here, Scion included, is an independent reading of it.
+
+### Weekly: ahead / behind (2026-10-26)
+
+From each README and docs as stated today; ✓ stated, – absent or stated as not done, ? not
+stated. Scion's column is from its own README and `docs/ROADMAP.md`.
+
+| Feature | Scion | CarterT27 | tinyhumansai | bnsd55 | kianaaa19 | OpenCSGs | graft | feder-cr |
+|---|---|---|---|---|---|---|---|---|
+| CLI | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Server-side land | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Persistent store | ✓ Postgres + S3 | ✓ CockroachDB + S3 | ✓ SQLite, files (memory reference) | ✓ SQLite + files (Postgres exp.) | ✓ SQLite | ✓ SQLite or Postgres + S3 | ? | ✓ SQLite or Postgres + object store |
+| Derived data | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ? | ✓ |
+| Daemon / cache tier | – (Phase 4) | ✓ | ✓ | ✓ | – | ✓ | ✓ node | ✓ |
+| Git import | ✓ | ✓ | ? | ✓ | ? | ? | ✓ | ✓ shadow mode |
+| Git gateway | – non-goal | – | – | – | – | ✓ v0.1.11 | – export only | ? |
+| Auth | ✓ GitHub, SPs, ACLs | ✓ tokens | ? | ✓ tokens, tickets | ✓ passwords, tokens | ✓ tokens, OIDC/GitHub | ✓ tokens | ✓ per-agent tokens |
+| Web UI | ✓ | ? | ✓ | ? | ✓ | ? | ? | ? |
+| HTTP API | ✓ | ? | ✓ | ? | ✓ | ? | ? | ? |
+| MCP | ✓ | ? | ? | ? | – | ? | ✓ (+ LSP) | ? |
+| Benchmark | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ | ✓ |
+| Release | – (Phase 9) | – | – workflow only | – | – | ✓ v0.1.11, image | ✓ v0.1.0 | ✓ v0.4.0 |
+
+**Ahead:** the full agent surface (web UI, HTTP API and MCP together) with GitHub sign-in and
+directory ACLs on a Postgres + S3 store; no other project states all three plus that store.
+**Behind:** no daemon/cache tier yet (Phase 4, planned; five projects state one), no tagged
+release or image (Phase 9 in progress; three projects ship one), and the heaviest first try
+(compose stack) — #265.
+
 ## 2026-10-25
 
 The GitHub API refused this session (search and every repository outside this one), so no
