@@ -3,6 +3,9 @@
 This document is normative for everything that is hashed. The executable form of this
 specification is the golden fixture set in `crates/scion-types/tests/golden/`; if the two ever
 disagree, that is a bug in one of them and must be fixed before anything else.
+"The reference design" is the internal system Anthropic describes in
+[*Redesigning source control at Anthropic*](https://www.anthropic.com/research/redesigning-source-control);
+see [the FAQ](FAQ.md#how-does-scion-relate-to-anthropics-post).
 
 ## Identifiers
 

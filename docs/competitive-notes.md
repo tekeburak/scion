@@ -1,11 +1,43 @@
 # Competitive notes
 
 Other open-source projects inspired by Anthropic's
-[*Redesigning source control at Anthropic*](https://www.anthropic.com/engineering/redesigning-source-control).
+[*Redesigning source control at Anthropic*](https://www.anthropic.com/research/redesigning-source-control).
 This file records only how they **present** themselves, to learn presentation technique.
 Scion takes no code, design decision or architecture from them, and copies no text or image
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
+
+## 2026-10-26
+
+The GitHub API answered this session again (repository search; READMEs of repositories outside
+this one stayed refused, so the three new projects below were read from anonymous shallow
+clones under the scratchpad, README first screen only). A search for repositories about Scion
+or source control, sorted by last update, found three projects these notes had not listed.
+Stars are from the search API today; `competitive-stars.csv` gets today's rows.
+
+| Repository | Stars (2026-10-24 → today) | Noted |
+|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 980 → 987 | Still the most-starred; topics now include `scion`. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 237 → 245 | Pushed on 2026-10-25. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 113 → 119 | Pushed on 2026-10-25; 13 open issues. |
+| [OpenCSGs/scion](https://github.com/OpenCSGs/scion), [rizaust/open-scion](https://github.com/rizaust/open-scion), [adrianchifor/scn](https://github.com/adrianchifor/scn), `kianaaa19/scionhub` | 3, 3, 1, 0 (unchanged) | Only `OpenCSGs/scion` was pushed since the last run. |
+| `TheDancingDeveloper-org/graft` | 0 | Pushed today; AGPL-3.0, so nothing is copied from it. |
+| [bnsd55/open-scion](https://github.com/bnsd55/open-scion) | not read | Missing from search results today although `git ls-remote` still reaches it. |
+| **new:** [hermes98761234/sgit](https://github.com/hermes98761234/sgit) | 0 | Go, MIT, created 2026-10-14. Scion-style client and server layered over git on the server. First screen: one sentence, the link to Anthropic's post, then a **Features** list with a bold lead word per bullet. Eight topics, `scion-style` among them. |
+| **new:** [yumaitau/yuma-agent-git](https://github.com/yumaitau/yuma-agent-git) | 0 | TypeScript on one hosted edge platform, created 2026-10-14, 72 open issues. First screen: a bold one-line tagline, the inspiration sentence with the post's link, a **Why** section, then numbered "core principles" restating the post. |
+| **new:** `MeroZemory/scion-clone` | 0 | A `docs/` directory only; no code yet. |
+
+Also seen, not a project: a Chinese-language explainer repository about the post (no code).
+
+### What it means for Scion
+
+- **Bold lead words in the feature list.** One new project opens every feature bullet with a
+  bolded term, the same technique Scion's "What works today" list already uses; no change.
+- **A "Why" section right after the tagline** is on both new READMEs' first screen, as on
+  Scion's ("Why Scion"); the order the rules set already matches.
+- **Topics.** Two projects carry `scion` as a topic; Scion's topics (`source-control`,
+  `monorepo`, `coding-agents`, …) do not, and adding a topic is a repository setting, not a file;
+  left to the owner, noted only.
 
 ## 2026-10-25
 
