@@ -131,8 +131,9 @@ synthetic workloads against an in-process server are in [`BENCHMARKS.md`](BENCHM
 targets are set in `docs/ROADMAP.md`: import within ten times git's time (6.11); warm `log` and
 `blame` and commit + `land` at or below git's time, cold `blame` within 5× git and cold path
 `log` within 20× (6.12); and, in Phase 10, every row a multiple faster than git. Import is not
-expected to match git, because Scion writes every blob and tree as its own object to a remote
-store while git writes local packfiles. The comparison favours git where it can: git runs
+expected to match git, because Scion writes every blob as its own object to a remote store,
+and every tree and history page to the metadata database over the network, while git writes
+local packfiles. The comparison favours git where it can: git runs
 `status`, `log`, `blame` and `land` in a full clone, its best case, while `scn` runs them in a
 sparse clone, its normal case.
 
