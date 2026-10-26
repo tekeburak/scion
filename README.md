@@ -14,7 +14,7 @@ online and whose commits come mostly from coding agents.</b></p>
 </p>
 
 > Scion is an independent open-source project inspired by the internal version control system
-> Anthropic describes in [*Redesigning source control at Anthropic*](https://www.anthropic.com/engineering/redesigning-source-control).
+> Anthropic describes in [*Redesigning source control at Anthropic*](https://www.anthropic.com/research/redesigning-source-control).
 > It is not an official Anthropic project and is not affiliated with or endorsed by Anthropic.
 
 <p align="center">
@@ -588,7 +588,9 @@ specification's executable form; see `docs/DATA_MODEL.md` before touching them.
 ## Prior art
 
 - Google **Piper** (and CitC): a centralized monorepo on Spanner.
-- Meta **Sapling / Mononoke / EdenFS**: bonsai changesets, derived data, virtual checkouts.
+- Meta **Sapling / Mononoke / EdenFS**: bonsai changesets (the model Scion's changeset follows),
+  derived data, virtual checkouts. Anthropic's post credits Mononoke with pioneering many of
+  the techniques Scion uses.
 - **jj (Jujutsu)**: anonymous heads, operations as first-class data.
 - Microsoft **VFS for Git / Scalar**: virtualized and cache-served git.
 
