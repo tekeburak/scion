@@ -1,7 +1,7 @@
 # Competitive notes
 
 Other open-source projects inspired by Anthropic's
-[*Redesigning source control at Anthropic*](https://www.anthropic.com/engineering/redesigning-source-control).
+[*Redesigning source control at Anthropic*](https://www.anthropic.com/research/redesigning-source-control).
 This file records only how they **present** themselves, to learn presentation technique.
 Scion takes no code, design decision or architecture from them, and copies no text or image
 from any of them (several are GPL-licensed). None of these names or links belong in the

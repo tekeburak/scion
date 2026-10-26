@@ -593,7 +593,9 @@ specification's executable form; see `docs/DATA_MODEL.md` before touching them.
 ## Prior art
 
 - Google **Piper** (and CitC): a centralized monorepo on Spanner.
-- Meta **Sapling / Mononoke / EdenFS**: bonsai changesets, derived data, virtual checkouts.
+- Meta **Sapling / Mononoke / EdenFS**: bonsai changesets (the model Scion's changeset follows),
+  derived data, virtual checkouts. Anthropic's post credits Mononoke with pioneering many of the
+  techniques its system uses.
 - **jj (Jujutsu)**: anonymous heads, operations as first-class data.
 - Microsoft **VFS for Git / Scalar**: virtualized and cache-served git.
 
