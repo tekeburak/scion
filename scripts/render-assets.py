@@ -9,9 +9,9 @@ bytes, so a diff in docs/assets/ always means the figure changed on purpose.
 
 Every figure is a schematic of what docs/ARCHITECTURE.md and docs/DATA_MODEL.md describe.
 The numbers drawn come from the fixture a test asserts on (see `changeset_svg` and
-`commit_cost_svg`) or from docs/bench-real.csv, the output of one `scripts/bench-real` run
-(see `bench_real_svg` and `bench_real_table`, which also fills the README between its
-bench-real markers). Update ROADMAP below
+`commit_cost_svg`) or from docs/bench-real.csv and docs/bench-real-large.csv, the output of
+one `scripts/bench-real` run on each slice (see `bench_real_svg` and `bench_real_table`, which
+also fills the README between each slice's markers). Update ROADMAP below
 when a phase changes status; nothing else here should need touching for that.
 """
 
@@ -26,9 +26,15 @@ from xml.sax.saxutils import escape
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "docs" / "assets"
 BENCH_CSV = ROOT / "docs" / "bench-real.csv"
+BENCH_LARGE_CSV = ROOT / "docs" / "bench-real-large.csv"
 README = ROOT / "README.md"
-TABLE_START = "<!-- bench-real:start (scripts/render-assets.py writes this table) -->"
-TABLE_END = "<!-- bench-real:end -->"
+# The README markers each slice's table is written between, by its CSV.
+TABLES = [
+    (BENCH_CSV, "<!-- bench-real:start (scripts/render-assets.py writes this table) -->",
+     "<!-- bench-real:end -->"),
+    (BENCH_LARGE_CSV, "<!-- bench-real-large:start (scripts/render-assets.py writes this table) -->",
+     "<!-- bench-real-large:end -->"),
+]
 W = 1600
 
 # One palette for every figure. Dark card on a transparent page, so it reads on both of
@@ -443,12 +449,12 @@ BENCH_WORKLOADS = [
 ]
 
 
-def bench_real():
-    """`(meta, medians)` from BENCH_CSV: the `# key: value` header lines, and the median
+def bench_real(path=BENCH_CSV):
+    """`(meta, medians)` from the CSV at `path`: the `# key: value` header lines, and the median
     milliseconds of the `ok` samples per `(workload, tool)` (the lower middle sample, as the
     script's own summary takes it); `"unsupported"` where a tool could not run a workload."""
     meta, samples, medians = {}, {}, {}
-    lines = BENCH_CSV.read_text(encoding="utf-8").splitlines()
+    lines = path.read_text(encoding="utf-8").splitlines()
     for line in lines:
         if line.startswith("# "):
             key, _, value = line[2:].partition(": ")
@@ -483,8 +489,8 @@ def ratio(ms, git_ms):
     return f"{r:.2f}\u00d7" if r < 1 else f"{r:.1f}\u00d7"
 
 
-def bench_real_table():
-    meta, medians = bench_real()
+def bench_real_table(path):
+    meta, medians = bench_real(path)
     tools = bench_tools(medians)
     head = ["Workload"] + [f"{tool}, ms" for tool in tools] + ["scion / git"]
     out = ["| " + " | ".join(head) + " |", "| --- |" + " ---: |" * (len(head) - 1)]
@@ -553,8 +559,10 @@ def bench_real_svg():
 
 
 def readme_with_table(readme):
-    start, end = readme.index(TABLE_START) + len(TABLE_START), readme.index(TABLE_END)
-    return readme[:start] + "\n" + bench_real_table() + "\n" + readme[end:]
+    for path, start_marker, end_marker in TABLES:
+        start, end = readme.index(start_marker) + len(start_marker), readme.index(end_marker)
+        readme = readme[:start] + "\n" + bench_real_table(path) + "\n" + readme[end:]
+    return readme
 
 
 def badge_svg(label, value, color):

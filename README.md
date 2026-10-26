@@ -437,6 +437,9 @@ Given checkouts of other public implementations of the same design (`BENCH_PEERS
 [docs/BENCHMARKS.md](docs/BENCHMARKS.md#other-implementations)), the script runs every
 workload against them too, on the same machine, and the table lists them under neutral labels;
 a workload one of them cannot express reads `unsupported`.
+`BENCH_SLICE=large` runs the same workloads on a larger slice, about 6,000 commits of the
+same project's `compiler/` directory; its table follows the first. A nightly CI job runs both
+slices and fails when a row's scion / git ratio grows more than 20% against these tables.
 
 <p align="center">
   <img src="docs/assets/bench-real.svg" width="100%"
@@ -469,6 +472,33 @@ impl-a: another implementation of the design, at 7d445a0744e30f4dcb36a794b0ce426
 impl-b: another implementation of the design, at 00e92ab9c2a9985f39a64636b4b6c5c4bb583916 in memory.
 <!-- bench-real:end -->
 
+The larger slice (`BENCH_SLICE=large`; sparse clone of `rustc_middle/`):
+
+<!-- bench-real-large:start (scripts/render-assets.py writes this table) -->
+| Workload | git, ms | scion, ms | scion / git |
+| --- | ---: | ---: | ---: |
+| import, cold | 17,556 | 167,752 | 9.6× |
+| import, warm | 17,861 | 31,253 | 1.7× |
+| clone | 18,076 | 905 | 0.05× |
+| sparse clone | 3,391 | 17 | 0.01× |
+| status | 180 | 7 | 0.04× |
+| path log, cold | 99 | 296 | 3.0× |
+| path log, warm | 107 | 48 | 0.45× |
+| blame, cold | 394 | 499 | 1.3× |
+| blame, warm | 447 | 12 | 0.03× |
+| path log, server warm, client cold | 102 | 56 | 0.55× |
+| blame, server warm, client cold | 421 | 13 | 0.03× |
+| commit + land | 56 | 62 | 1.1× |
+| land, 16 writers at once | 3,859 | 551 | 0.14× |
+| land, 16 writers: p50 per land | 2,552 | 367 | 0.14× |
+| land, 16 writers: p99 per land | 3,842 | 528 | 0.14× |
+
+Repository: compiler/ of the public repository pinned in scripts/bench-real, first-parent commits since 2023-02-01 up to 91e9c2688eb23af9a5b77f056156e756550c7c99 (6008 commits, 2978 files at the tip).  
+Machine: Linux 6.18.44-fc-v153 x86_64; Intel(R) Xeon(R) Processor @ 2.80GHz; 4 cpus; 15 GiB.  
+Run: git version 2.43.0; scion e1ee623; 3 runs; 2026-10-24T05:12:42Z.  
+Other implementations of the design: not measured in this run.
+<!-- bench-real-large:end -->
+
 Read these numbers with their limits:
 
 - **Import** writes one immutable object per blob, tree and history page to a remote object
@@ -490,7 +520,8 @@ Read these numbers with their limits:
 - **The other implementations** ran on the same machine and stack, at the commits named under
   the table; `unsupported` marks a workload one of them has no command for.
 - One machine, three runs, shared cloud VM: medians move by several milliseconds between
-  runs. The CSV with every sample is [docs/bench-real.csv](docs/bench-real.csv); render it with
+  runs. The CSVs with every sample are [docs/bench-real.csv](docs/bench-real.csv) and
+  [docs/bench-real-large.csv](docs/bench-real-large.csv); render them with
   `python3 scripts/render-assets.py`. Older synthetic workloads against an in-process server
   are in [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md).
 

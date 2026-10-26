@@ -14,6 +14,28 @@ its rows under that adapter's neutral label (`impl-a`, `impl-b`), with `unsuppor
 workload it cannot express; the CSV header records the commit each checkout is at. Without
 `BENCH_PEERS` it measures git and Scion only, and the README table says so.
 
+## Larger slice and nightly
+
+`BENCH_SLICE=large scripts/bench-real` runs the same workloads on about 6,000 first-parent
+commits of the same project's `compiler/` directory (since 2023-02-01, 2,978 files at the tip),
+with a sparse clone of `rustc_middle/`, a path log of `rustc_middle/src` and blame of
+`rustc_middle/src/ty/context.rs`; its CSV is [`bench-real-large.csv`](bench-real-large.csv).
+
+The `bench` job in `.github/workflows/ci.yml` runs both slices every night and when started by
+hand (`workflow_dispatch`), against its own Postgres and S3 services (`DATABASE_URL` and
+`AWS_ENDPOINT` given, so the script starts no compose stack). It keeps each run's CSV as an
+artifact, then [`scripts/bench-check.py`](../scripts/bench-check.py) compares it with the CSV
+on `main`: a row whose scion / git ratio grew more than 20%, or that Scion failed, turns the
+job red. Ratios, not milliseconds, because the CI machine is not the one the CSVs were taken
+on; a change of under 5 ms is not counted, since a 6 ms row moves by that much between runs.
+
+How much a ratio moves without a code change, measured with `scripts/bench-check.py` on one
+4-vCPU VM (2.80 GHz) on 2026-10-24: three `bench-real 3` runs of the small slice, two on
+e1ee623 and one on e3687a5 (whose server differs only in the land worker), differ from each
+other by up to 25% on `import warm`, `log warm`, `blame cold` and `log warm client cold`, and
+from the CSV on `main`, taken on a 2.10 GHz VM, by up to 64% on the cold `log` and `blame`
+rows. A 20% bar on medians of three runs is crossed by that noise alone.
+
 ## Where the time goes
 
 `SCION_TRACE=1 scripts/bench-real 1` makes every Scion process print one line per finished

@@ -227,6 +227,79 @@ jobs:
           path: crates/scion-sim/fuzz/artifacts/
           if-no-files-found: ignore
 
+  bench:
+    # scripts/bench-real on each slice, nightly and by hand, not per pull request: the
+    # larger slice holds a machine for about forty minutes. The run uses this job's
+    # Postgres and S3 services; scripts/bench-check.py then fails the job when a row's
+    # scion / git ratio grew more than 20% against the CSV on main. The CSV is kept
+    # either way.
+    name: bench ${{ matrix.slice }}
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository) && 'ubuntu-latest' || fromJSON('["self-hosted","linux","konuq-ci"]') }}
+    timeout-minutes: 150
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - slice: small
+            csv: docs/bench-real.csv
+          - slice: large
+            csv: docs/bench-real-large.csv
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: scion
+          POSTGRES_PASSWORD: scion
+          POSTGRES_DB: scion
+        ports: ["5432"]
+        options: >-
+          --health-cmd "pg_isready -U scion -d scion"
+          --health-interval 5s --health-timeout 3s --health-retries 10
+      rustfs:
+        image: rustfs/rustfs:latest
+        env:
+          RUSTFS_ACCESS_KEY: scion
+          RUSTFS_SECRET_KEY: scionscion
+          RUSTFS_VOLUMES: /data
+          RUSTFS_ADDRESS: ":9000"
+        ports: ["9000"]
+    steps:
+      - name: free disk
+        run: |
+          df -h / | tail -1
+          if [ "$(df --output=avail -BG / | tail -1 | tr -dc 0-9)" -lt 8 ]; then
+            echo "under 8 GB free: dropping target/, stopped containers and dangling images"
+            rm -rf "$GITHUB_WORKSPACE/target"
+            # Not -a: the runner has already built this job's action images.
+            docker system prune -f >/dev/null 2>&1 || true
+            df -h / | tail -1
+          fi
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: arduino/setup-protoc@v3  # scion-proto's build script runs protoc
+        with:
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: Swatinem/rust-cache@v2
+      - name: bench-real ${{ matrix.slice }}
+        env:
+          BENCH_SLICE: ${{ matrix.slice == 'large' && 'large' || '' }}
+          DATABASE_URL: postgres://scion:scion@127.0.0.1:${{ job.services.postgres.ports['5432'] }}/scion
+          AWS_ENDPOINT: http://127.0.0.1:${{ job.services.rustfs.ports['9000'] }}
+        run: scripts/bench-real 3 "$RUNNER_TEMP/bench-real-${{ matrix.slice }}.csv"
+      - name: keep the CSV
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bench-real-${{ matrix.slice }}
+          path: ${{ runner.temp }}/bench-real-${{ matrix.slice }}.csv
+          if-no-files-found: ignore
+      - name: compare with main
+        run: |
+          git fetch -q --depth 1 origin main
+          git show "origin/main:${{ matrix.csv }}" >"$RUNNER_TEMP/main.csv"
+          python3 scripts/bench-check.py "$RUNNER_TEMP/main.csv" "$RUNNER_TEMP/bench-real-${{ matrix.slice }}.csv"
+
   install:
     # The install script against release directories served from disk; the
     # shellcheck image pins the linter so the runner needs nothing installed.
