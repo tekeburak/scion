@@ -72,7 +72,10 @@ blame, skip lists), `scion-core` and `scion-diff3` (diff, merge-base, rebase, th
 and an HTTP/JSON API on `axum`, no JavaScript build), `scion-mcp` (an MCP server on `rmcp`),
 `scion-ingest` (git importer with `gix`), `scion-sim` and the `scn` CLI. A `v*` tag builds
 static musl binaries for `x86_64` and `aarch64` Linux and `scn` for macOS, all cross-compiled
-on Linux runners.
+on Linux runners. It is an independent Apache-2.0 project inspired by Anthropic's post
+"Redesigning source control at Anthropic"
+(https://www.anthropic.com/research/redesigning-source-control), not an official Anthropic
+project and not affiliated with Anthropic.
 
 Two pieces may interest Rust folks. `scion-sim` runs the real server in process on the memory
 stores with seeded clients and injected faults (land workers stopped, server restarts), and 200
@@ -102,7 +105,10 @@ production-ready; feedback on the derived-data design and the benchmark method i
 
 Scion, ajanların commit attığı ve istemcilerin hep çevrimiçi olduğu tek bir çok büyük monorepo
 için Rust ile yazılmış, Apache-2.0 lisanslı, metaveriyi ve ağaçları Postgres'te, blob'ları S3
-uyumlu bir depoda tutan sunucu merkezli bir sürüm kontrol sistemi.
+uyumlu bir depoda tutan sunucu merkezli bir sürüm kontrol sistemi; Anthropic'in
+"Redesigning source control at Anthropic" yazısından
+(https://www.anthropic.com/research/redesigning-source-control) esinlenmiş bağımsız bir proje,
+resmî bir Anthropic projesi değil ve Anthropic ile bağlantısı yok.
 Her istek sunucunun imzaladığı bir token ve repoda (istenirse bir dizinle sınırlı) bir rol
 istiyor; insanlar GitHub ile giriyor, sunucu aynı rollerle bir web arayüzü, bir HTTP/JSON API
 ve ajanlar için bir MCP sunucusu sunuyor.
