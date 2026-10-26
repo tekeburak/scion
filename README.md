@@ -14,7 +14,7 @@ online and whose commits come mostly from coding agents.</b></p>
 </p>
 
 > Scion is an independent open-source project inspired by the internal version control system
-> Anthropic describes in [*Redesigning source control at Anthropic*](https://www.anthropic.com/engineering/redesigning-source-control).
+> Anthropic describes in [*Redesigning source control at Anthropic*](https://www.anthropic.com/research/redesigning-source-control).
 > It is not an official Anthropic project and is not affiliated with or endorsed by Anthropic.
 
 <p align="center">
