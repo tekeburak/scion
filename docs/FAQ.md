@@ -13,6 +13,20 @@ no repository maintenance. Hashes are BLAKE3 over Scion's own canonical encoding
 git SHAs. A git history can be imported one way (see below); git wire compatibility is a
 non-goal.
 
+## How does Scion relate to Anthropic's post?
+
+Scion is an independent project inspired by the internal system Anthropic describes in
+[*Redesigning source control at Anthropic*](https://www.anthropic.com/research/redesigning-source-control);
+it is not an Anthropic project and is not affiliated with Anthropic. These documents call that
+system "the reference design". Scion follows its shape: an authoritative server over a metadata
+database and an object store, changesets that record only what changed against the first
+parent, trees and history as derived data, sparse thin clients, a cache hierarchy in front of
+the server (planned) and a single `main`. It departs in two places: ids are BLAKE3 over Scion's
+own canonical encoding, never a protobuf encoding, and the server accepts no ref other than
+`main` and `release/*`. Its metadata database is Postgres where the reference design uses
+Spanner. The post credits Meta's Mononoke with pioneering many of the techniques it describes;
+Scion's changeset follows Mononoke's bonsai changeset model.
+
 ## Why are there no branches?
 
 Server refs are only `main` and `release/*`. Everything else is an **anonymous head**: a
