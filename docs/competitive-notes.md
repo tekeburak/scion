@@ -1,7 +1,7 @@
 # Competitive notes
 
 Other open-source projects inspired by Anthropic's
-[*Redesigning source control at Anthropic*](https://www.anthropic.com/engineering/redesigning-source-control).
+[*Redesigning source control at Anthropic*](https://www.anthropic.com/research/redesigning-source-control).
 This file records only how they **present** themselves, to learn presentation technique.
 Scion takes no code, design decision or architecture from them, and copies no text or image
 from any of them (several are GPL-licensed). None of these names or links belong in the
@@ -60,6 +60,15 @@ binaries and images, and three offer a first try with no external services (a de
 container on a single-file store, or an install script). One added a git gateway, which stays a
 Scion non-goal (git wire protocol). Issue #265 proposes the one gap worth a step: a dev server
 on the memory stores so a first try needs no Docker.
+
+**The post itself.** The post now lives at `/research/redesigning-source-control` (the old
+`/engineering/` address answers with a permanent redirect; the link above follows it). Its note
+"Updated October 15" adds credit to Sapling/Mononoke for techniques Scion uses; Scion's README
+already lists them under "Prior art". Two points of the post that the table below does not
+cover, recorded for later runs: tools that run on the source-control API alone, its example
+being automated bisect and revert after a post-merge test failure (one project above states a
+test-after-land, bisect-and-revert tool), and the statement that the system is not offered
+publicly, so every project here, Scion included, is an independent reading of it.
 
 ### Weekly: ahead / behind (2026-10-26)
 
