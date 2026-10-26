@@ -1,8 +1,11 @@
 # Architecture
 
 This document describes the target architecture. Phase numbers refer to the roadmap in
-`README.md`. Anything that does not exist yet is marked *planned* with its phase; everything
-else is built.
+[`ROADMAP.md`](ROADMAP.md). Anything that does not exist yet is marked *planned* with its phase;
+everything else is built. "The reference design" is the internal system Anthropic describes in
+[*Redesigning source control at Anthropic*](https://www.anthropic.com/research/redesigning-source-control),
+which inspired Scion; [the FAQ](FAQ.md#how-does-scion-relate-to-anthropics-post) says where
+Scion follows it and where it departs.
 
 ## Principles
 
