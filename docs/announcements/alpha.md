@@ -28,8 +28,9 @@ and a role in the repository, optionally limited to a
 directory; people sign in with GitHub and agents use service tokens. The same server serves a
 web interface (files, log, blame, diffs, change requests that writers land or reject), an
 HTTP/JSON API and, through `scion-mcp`, MCP tools for agents. It is an independent project
-inspired by Anthropic's post "Redesigning source control at Anthropic", and is not affiliated
-with Anthropic.
+inspired by Anthropic's post "Redesigning source control at Anthropic"
+(https://www.anthropic.com/research/redesigning-source-control), and is not affiliated with
+Anthropic.
 
 What is different from git: a commit is created on the server, so there is no push, no
 packfile and no repository maintenance. A changeset records only the files that changed
