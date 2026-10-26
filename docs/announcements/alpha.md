@@ -1,6 +1,7 @@
 # Announcement drafts: the alpha (self-hosting, web interface, agent API, current benchmark)
 
-**Status: draft. Not posted anywhere.** Rewritten after Phase 9.8 (#187) merged: on top of
+**Status: draft. Not posted anywhere.** Written after Phase 9.8 (#187) merged and checked
+against main after Phase 10.9 (#211), the latest merged step: on top of
 access control, the hermetic simulation and the fuzz targets, Scion now has a web interface
 where writers land change requests, an HTTP/JSON API, an MCP server for agents, release
 binaries and a server image built on a `v*` tag (none tagged yet), an install script, `https://`
@@ -30,7 +31,8 @@ web interface (files, log, blame, diffs, change requests that writers land or re
 HTTP/JSON API and, through `scion-mcp`, MCP tools for agents. It is an independent project
 inspired by Anthropic's post "Redesigning source control at Anthropic"
 (https://www.anthropic.com/research/redesigning-source-control), and is not affiliated with
-Anthropic.
+Anthropic. Its changeset follows the bonsai changeset model of Meta's Mononoke, which the post
+credits with pioneering many of the techniques it describes.
 
 What is different from git: a commit is created on the server, so there is no push, no
 packfile and no repository maintenance. A changeset records only the files that changed
