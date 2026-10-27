@@ -7,6 +7,38 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-10-27
+
+Repository search answered; the one new project was read from an anonymous shallow clone under
+the scratchpad (README first screen only). A search for repositories created since 2026-10-20
+and a search for repositories mentioning Scion pushed since 2026-10-25 found one project these
+notes had not listed. Stars are from the search API today; `competitive-stars.csv` gets today's
+rows.
+
+| Repository | Stars (2026-10-26 → today) | Noted |
+|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 988 → 1000 | Pushed on 2026-10-26; one open issue. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 245 → 246 | Pushed on 2026-10-26. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 119 → 121 | Pushed on 2026-10-26. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30 → 31 | Pushed on 2026-10-26. |
+| [OpenCSGs/scion](https://github.com/OpenCSGs/scion), [adrianchifor/scn](https://github.com/adrianchifor/scn) | 3 → 4, 1 → 2 | Both pushed since the last run. |
+| [rizaust/open-scion](https://github.com/rizaust/open-scion), `kianaaa19/scionhub`, [hermes98761234/sgit](https://github.com/hermes98761234/sgit), [yumaitau/yuma-agent-git](https://github.com/yumaitau/yuma-agent-git) | 3, 0, 0, 0 (unchanged) | Quiet. |
+| `TheDancingDeveloper-org/graft` | 0 | Pushed today; topics now include `scion`. AGPL-3.0: nothing copied. |
+| **new:** [Lvstw1205/scion-lite](https://github.com/Lvstw1205/scion-lite) | 0 | Python, MIT, created 2026-10-21, no dependencies, ships a desktop app. First screen, all centred: a small icon, the name, a bold one-line tagline with a second line saying what the server does, five badges (tests, Python version, "dependencies: none", license, a link to a Korean README), a **screenshot of the desktop app**, then a quoted "Independent project" note with the post's link. Next come **Why** with a small SVG comparing a git-style retry loop to a server-side rebase, and **Results**: two charts side by side plus a table of one named workload. |
+
+### What it means for Scion
+
+- **A product screenshot on the first screen.** The newcomer shows its app before any text
+  section. Scion has real web UI screenshots (`docs/assets/web-*.png`) lower on the page; the
+  first screen the rules set (logo, one sentence, badges, inspiration note, "Why Scion",
+  architecture figure) stays as it is.
+- **A "Why" figure that contrasts the old loop with the new one.** Scion's "Why Scion" is text
+  followed by the architecture figure; a small before/after figure (client-side rebase-and-retry
+  against a server-side land) is a candidate for a later run, drawn by
+  `scripts/render-assets.py` like the other figures.
+- **The workload is named next to the numbers.** Same practice as Scion's Benchmarks section,
+  which names the repository, machine and run; no change.
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
