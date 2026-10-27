@@ -7,6 +7,37 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-10-27, second run
+
+An earlier run today (#273) took star counts and searched for new projects. This run's GitHub
+API refused every repository outside this one, so it adds no star rows and no search.
+Commits and tags come from anonymous clones under the scratchpad, commit subjects only, for the
+24 hours since the second run of 2026-10-26; features as each README states them.
+
+| Repository | Since the last reading | Noted |
+|---|---|---|
+| `TheDancingDeveloper-org/graft` | ~126 commits, no new tag (`v0.1.0`) | A **post-land check mode**: an attester skips ahead, **bisects** the lands since the last green one, retries, and **reverts the first bad land**, the revert carrying the failed check run. Also HMAC-signed outbound webhooks from its land journal, review-queue routes and MCP tools for review and attestation, a GitHub OIDC token exchange for CI, shell completions, and release archives for Linux (musl) and macOS. AGPL-3.0: nothing copied. |
+| [OpenCSGs/scion](https://github.com/OpenCSGs/scion) | 28 commits, **tag `v0.1.12`** | Release 0.1.12: "git's everyday commands" (`stash`, `clean`, `reflog`, `switch --detach`, `log --follow`, annotated tags through its git gateway), automatic incremental repack, then `scn mcp` (the repository as MCP tools, no checkout) and `scn workspace` (several working copies, like `git worktree`). README now links a production compose and a multi-node cluster guide. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30 commits, no tag yet | A `release/v0.1.0` branch with release notes: the first tag looks close. Work is hardening: private data directories under any umask, the server refuses a group-readable one, checkout refuses `.`/NUL/`/` names from a hostile tree, fsck and mutation-testing passes. |
+| [CarterT27/scion](https://github.com/CarterT27/scion), [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion), [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub), [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | none on the default branch | Quiet; no new tags. |
+
+**Direction.** Two pulls this week: git-compatibility depth (one project now wraps most of
+git's daily commands and a gateway; both stay Scion non-goals beyond what `scn` already does)
+and **verification after land**. The post names automated bisect and revert after a post-merge
+test failure as a tool the source-control API makes possible (noted on 2026-10-26); one
+project now ships it. Scion has the pieces (`FindLanding`, `ListChangeRequests`, server-side
+`Revert`, `scn checkout`) but no command that strings them together: #274 proposes
+`scn bisect` over landed change requests as one step.
+
+### What it means for Scion
+
+- **Post-land bisect** → #274. It walks change requests, not the changeset log,
+  so invariant 1 holds; the revert stays the existing `scn revert`.
+- **Land webhooks** are the push form of #212 (`scn watch`); no new issue.
+- **MCP without a checkout** is what `scion-mcp` already does (Phase 11.4); no change.
+- **A first tag** is about to exist in a third project; Scion's Phase 9 release steps remain the
+  gap the 2026-10-26 table names.
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
