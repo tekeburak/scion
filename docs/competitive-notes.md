@@ -36,10 +36,11 @@ source control.
   the extreme form of a practice Scion already follows: the README marks unbuilt tiers as
   planned and puts its measured numbers next to the machine and run that produced them.
 
-**Note on this repository's CI.** Since the 2026-10-26 advisory-database update, `cargo-deny`
-fails on main (RUSTSEC-2026-0391, RUSTSEC-2026-0403 and RUSTSEC-2026-0410 on `zstd` 0.14.2,
-`zstd-safe` 8.1.0 and `zstd-sys` 2.1.1 in `Cargo.lock`), so every open PR is red on that job.
-The fix is a lockfile update, which is outside the documentation routine's files.
+**Note on this repository's CI.** Since main's scheduled run of 2026-10-27, `cargo-deny` fails
+on RustSec advisories against the `zstd` crates in `Cargo.lock` (RUSTSEC-2026-0391 on `zstd`
+0.14.2, RUSTSEC-2026-0398 and RUSTSEC-2026-0403 on `zstd-safe` 8.1.0, RUSTSEC-2026-0410 on
+`zstd-sys` 2.1.1), so every open PR is red on that job. The fix is a lockfile update, which is
+outside the documentation routine's files.
 
 ### 2026-10-28, second run (05:20 UTC)
 
