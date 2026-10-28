@@ -41,6 +41,31 @@ fails on main (RUSTSEC-2026-0391, RUSTSEC-2026-0403 and RUSTSEC-2026-0410 on `zs
 `zstd-safe` 8.1.0 and `zstd-sys` 2.1.1 in `Cargo.lock`), so every open PR is red on that job.
 The fix is a lockfile update, which is outside the documentation routine's files.
 
+### 2026-10-28, second run (05:20 UTC)
+
+Repository search answered again; stars match the first run, so `competitive-stars.csv` gets no
+new rows. This run read commit activity from anonymous partial clones under the scratchpad
+(subjects only; a full-depth fetch, not `--shallow-since`, which failed on quiet repositories
+and probably explains the first run's gap). Window: the 24 hours to 05:17 UTC.
+
+| Repository | Last commit | Last 24 h | Noted |
+|---|---|---|---|
+| [OpenCSGs/scion](https://github.com/OpenCSGs/scion) | 2026-10-27 | 9 commits, no new tag (latest `v0.1.11`) | **Land dry run** (what a land would do, nothing landed); `scn workspace` (more working copies in seconds, like `git worktree`); `scn undo` with an **operation log** and restore for the working copy; **server-side edits** (replace text in a file without uploading it); **agent metadata as commit trailers**, searchable with `log --grep`/`--author`; a README status checklist; status timings on a 50,000-file working copy. |
+| `TheDancingDeveloper-org/graft` | 2026-10-27 | ~20 commits, no new tag (`v0.1.0`) | **Post-land checks**: per-land check refs on a mirror, an "attester" that runs checks on a CI service and records verdicts, a bench for post-land observer times; `diff --name-only` and unified diffs. AGPL-3.0: nothing copied. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 2026-10-26 | none | Quiet since the first run's reading. |
+| [CarterT27/scion](https://github.com/CarterT27/scion), [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion), `kianaaa19/scionhub`, [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 2026-10-16, 10-14, 10-18, 10-23 | none | Default branches unchanged; search "updated" times move with stars, not pushes. |
+
+**Direction.** The two active projects push in opposite directions: one widens the agent-facing
+client (worktree-style workspaces, undo, server-side text edits, metadata trailers, a land
+preview), the other builds the post-land loop (test after land, record a verdict per land),
+which issue #274 (bisect) already points at for Scion.
+
+**Where Scion stands.** A land preview is already reachable: the `Rebase` RPC runs the same
+`scion_core::rebase` path as the land worker and names the conflicting changeset without moving
+`main`, and the changesets it creates are content-addressed and harmless (invariant 9). Agent
+identity lives in `author`/`committer`; trailers in the message need no new field (invariant 4).
+Undo/op log and server-side partial edits are not on `docs/ROADMAP.md`; noted, no issue this run.
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
