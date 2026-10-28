@@ -7,6 +7,40 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-10-28
+
+Repository search answered; the one new project was read from an anonymous shallow clone under
+the scratchpad (README first screen only). Anonymous clones of the three largest projects
+returned default branches that end days before their last recorded push, so this run records
+no commit activity. Stars are from the search API today;
+`competitive-stars.csv` gets today's rows. The 2026-10-27 sections are in #273 and #275, which
+wait on main's CI (see the note at the end of this section).
+
+| Repository | Stars (2026-10-26 → today) | Noted |
+|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 988 → 1010 | Latest tag still `v0.4.0`. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 245 → 252 | Activity not read today. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 119 → 123 | Activity not read today; 14 open issues. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion), [OpenCSGs/scion](https://github.com/OpenCSGs/scion), [adrianchifor/scn](https://github.com/adrianchifor/scn) | 30 → 31, 3 → 4, 1 → 2 | Activity not read today. |
+| [rizaust/open-scion](https://github.com/rizaust/open-scion), `kianaaa19/scionhub`, [hermes98761234/sgit](https://github.com/hermes98761234/sgit), [yumaitau/yuma-agent-git](https://github.com/yumaitau/yuma-agent-git), [Lvstw1205/scion-lite](https://github.com/Lvstw1205/scion-lite), `TheDancingDeveloper-org/graft` | 3, 0, 0, 0, 0, 0 | Stars unchanged. graft is AGPL-3.0: nothing copied. |
+| **new:** `CompleteTech-Infrastructure/scion-recreation` | 0 | Go, created 2026-10-15, 148 open issues, no license file. The README is three lines under the name "Canopy": it says no capability is verified yet and points at a task board outside the repository. No first screen to learn from. |
+
+No repository created after 2026-10-24 matched a search for the post, Scion or server-centric
+source control.
+
+### What it means for Scion
+
+- **Nothing new to adopt.** The only new project has no first screen yet, and no new release
+  tag showed up in the projects read.
+- **Stating what is unverified.** The newcomer's single line saying nothing is verified yet is
+  the extreme form of a practice Scion already follows: the README marks unbuilt tiers as
+  planned and puts its measured numbers next to the machine and run that produced them.
+
+**Note on this repository's CI.** Since the 2026-10-26 advisory-database update, `cargo-deny`
+fails on main (RUSTSEC-2026-0391, RUSTSEC-2026-0403 and RUSTSEC-2026-0410 on `zstd` 0.14.2,
+`zstd-safe` 8.1.0 and `zstd-sys` 2.1.1 in `Cargo.lock`), so every open PR is red on that job.
+The fix is a lockfile update, which is outside the documentation routine's files.
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
