@@ -7,6 +7,66 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-10-28
+
+Repository search answered; the one new project was read from an anonymous shallow clone under
+the scratchpad (README first screen only). Anonymous clones of the three largest projects
+returned default branches that end days before their last recorded push, so this run records
+no commit activity. Stars are from the search API today;
+`competitive-stars.csv` gets today's rows. The 2026-10-27 sections are in #273 and #275, which
+wait on main's CI (see the note at the end of this section).
+
+| Repository | Stars (2026-10-26 → today) | Noted |
+|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 988 → 1010 | Latest tag still `v0.4.0`. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 245 → 252 | Activity not read today. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 119 → 123 | Activity not read today; 14 open issues. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion), [OpenCSGs/scion](https://github.com/OpenCSGs/scion), [adrianchifor/scn](https://github.com/adrianchifor/scn) | 30 → 31, 3 → 4, 1 → 2 | Activity not read today. |
+| [rizaust/open-scion](https://github.com/rizaust/open-scion), `kianaaa19/scionhub`, [hermes98761234/sgit](https://github.com/hermes98761234/sgit), [yumaitau/yuma-agent-git](https://github.com/yumaitau/yuma-agent-git), [Lvstw1205/scion-lite](https://github.com/Lvstw1205/scion-lite), `TheDancingDeveloper-org/graft` | 3, 0, 0, 0, 0, 0 | Stars unchanged. graft is AGPL-3.0: nothing copied. |
+| **new:** `CompleteTech-Infrastructure/scion-recreation` | 0 | Go, created 2026-10-15, 148 open issues, no license file. The README is three lines under the name "Canopy": it says no capability is verified yet and points at a task board outside the repository. No first screen to learn from. |
+
+No repository created after 2026-10-24 matched a search for the post, Scion or server-centric
+source control.
+
+### What it means for Scion
+
+- **Nothing new to adopt.** The only new project has no first screen yet, and no new release
+  tag showed up in the projects read.
+- **Stating what is unverified.** The newcomer's single line saying nothing is verified yet is
+  the extreme form of a practice Scion already follows: the README marks unbuilt tiers as
+  planned and puts its measured numbers next to the machine and run that produced them.
+
+**Note on this repository's CI.** Since main's scheduled run of 2026-10-27, `cargo-deny` fails
+on RustSec advisories against the `zstd` crates in `Cargo.lock` (RUSTSEC-2026-0391 on `zstd`
+0.14.2, RUSTSEC-2026-0398 and RUSTSEC-2026-0403 on `zstd-safe` 8.1.0, RUSTSEC-2026-0410 on
+`zstd-sys` 2.1.1), so every open PR is red on that job. The fix is a lockfile update, which is
+outside the documentation routine's files.
+
+### 2026-10-28, second run (05:20 UTC)
+
+Repository search answered again; stars match the first run, so `competitive-stars.csv` gets no
+new rows. This run read commit activity from anonymous partial clones under the scratchpad
+(subjects only; a full-depth fetch, not `--shallow-since`, which failed on quiet repositories
+and probably explains the first run's gap). Window: the 24 hours to 05:17 UTC.
+
+| Repository | Last commit | Last 24 h | Noted |
+|---|---|---|---|
+| [OpenCSGs/scion](https://github.com/OpenCSGs/scion) | 2026-10-27 | 9 commits, no new tag (latest `v0.1.11`) | **Land dry run** (what a land would do, nothing landed); `scn workspace` (more working copies in seconds, like `git worktree`); `scn undo` with an **operation log** and restore for the working copy; **server-side edits** (replace text in a file without uploading it); **agent metadata as commit trailers**, searchable with `log --grep`/`--author`; a README status checklist; status timings on a 50,000-file working copy. |
+| `TheDancingDeveloper-org/graft` | 2026-10-27 | ~20 commits, no new tag (`v0.1.0`) | **Post-land checks**: per-land check refs on a mirror, an "attester" that runs checks on a CI service and records verdicts, a bench for post-land observer times; `diff --name-only` and unified diffs. AGPL-3.0: nothing copied. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 2026-10-26 | none | Quiet since the first run's reading. |
+| [CarterT27/scion](https://github.com/CarterT27/scion), [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion), `kianaaa19/scionhub`, [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 2026-10-16, 10-14, 10-18, 10-23 | none | Default branches unchanged; search "updated" times move with stars, not pushes. |
+
+**Direction.** The two active projects push in opposite directions: one widens the agent-facing
+client (worktree-style workspaces, undo, server-side text edits, metadata trailers, a land
+preview), the other builds the post-land loop (test after land, record a verdict per land),
+which issue #274 (bisect) already points at for Scion.
+
+**Where Scion stands.** A land preview is already reachable: the `Rebase` RPC runs the same
+`scion_core::rebase` path as the land worker and names the conflicting changeset without moving
+`main`, and the changesets it creates are content-addressed and harmless (invariant 9). Agent
+identity lives in `author`/`committer`; trailers in the message need no new field (invariant 4).
+Undo/op log and server-side partial edits are not on `docs/ROADMAP.md`; noted, no issue this run.
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
