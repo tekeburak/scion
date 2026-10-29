@@ -7,6 +7,36 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-10-29
+
+Repository search answered; per-repository API calls stayed refused, so commits and tags come
+from anonymous shallow clones under the scratchpad (subjects only). Window: the 24 hours
+before 05:00 UTC today. Stars and forks are from the search API.
+
+| Repository | Stars / forks (2026-10-26 → today) | Last 24 h | Noted |
+|---|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 988 → 1013 / 100 | none | Passed 1,000 stars; newest tag still `v0.4.0`. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 245 → 255 / 20 | none | Newest commit on its default branch is from 2026-10-16; no tags. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 119 → 125 / 18 | none | No tags. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30 → 31 / 4 | 28 commits, no tag | Making Postgres a full second engine: dozens of test suites now open their store "through the backend seam" and run on both SQLite and Postgres, CI's Postgres job covers the whole workspace (macOS jobs included), every script that starts a real server runs it on Postgres, restore resolves the Postgres URL from every source. Also a dependency bump for an advisory. |
+| `TheDancingDeveloper-org/graft` | 0 | none | Last commits 2026-10-27; tag `v0.1.0` unchanged. |
+| [adrianchifor/scn](https://github.com/adrianchifor/scn), [rizaust/open-scion](https://github.com/rizaust/open-scion), `kianaaa19/scionhub`, [hermes98761234/sgit](https://github.com/hermes98761234/sgit), [yumaitau/yuma-agent-git](https://github.com/yumaitau/yuma-agent-git) | 2, 3, 0, 0, 0 | none | Quiet. |
+| `OpenCSGs/scion` | – | not read | Missing from search, and an anonymous clone now asks for credentials: private or removed since 2026-10-26 (it had tagged `v0.1.11`, a git gateway). |
+
+No repository created after 2026-10-13 matching "scion" with "source control", "monorepo",
+"anthropic" or "redesigning source control" reached 5 stars; the largest newcomers seen
+(`garyships/kudzu`, `utopia-ia/elffuss-braid`) have 2.
+
+### What it means for Scion
+
+- **Postgres is where the third-largest Rust project is heading.** Scion is Postgres + S3
+  from the start, so this narrows a lead rather than opening a gap; no issue.
+- **Every test suite on the production engine** is the point of that work. Scion's
+  integration suites already run against the compose Postgres in CI; no change.
+- **The one project that shipped a git gateway is no longer public.** The gateway stays a
+  Scion non-goal either way; Monday's weekly table drops that column entry.
+- No issue this run: nothing new that Scion lacks and that the roadmap does not already cover.
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
