@@ -37,6 +37,24 @@ No repository created after 2026-10-13 matching "scion" with "source control", "
   Scion non-goal either way; Monday's weekly table drops that column entry.
 - No issue this run: nothing new that Scion lacks and that the roadmap does not already cover.
 
+### 2026-10-29, later reading
+
+A second search (repositories updated since 2026-10-26) found one project these notes had not
+listed; it was read from an anonymous shallow clone under the scratchpad, README first screen
+and commit subjects only.
+
+| Repository | Stars / forks | Noted |
+|---|---|---|
+| **new:** [stigenai/scion](https://github.com/stigenai/scion) | 0 / 0 | Rust, Apache-2.0, created 2026-10-27, 30 commits on its first day. Its README says it is built by OpenCSG, which suggests it is where the private `OpenCSGs/scion` continues. First screen: one sentence, an architecture PNG, then a **demo GIF of four agents landing on `main` at once** (with an MP4 and the scripts that record it), then benchmark tables against git and two other projects named here. English and Simplified Chinese READMEs; architecture as a Mermaid block. |
+
+Not a source-control project despite the name: `CompleteTech-Infrastructure/scion-recreation`
+(148 open issues) states that no capability is verified yet.
+
+- **A recorded demo of concurrent lands** is the strongest first-screen technique seen so far,
+  and it shows the claim the 2026-10-25 notes said Scion has not measured yet. Scion could
+  record one from real `scn` commands against the compose stack; a GIF of a real session is not
+  a measured number, so it would not break the README rules. Left as a candidate, not done.
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
