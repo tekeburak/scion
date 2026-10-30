@@ -7,6 +7,42 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-10-30
+
+Repository search answered; per-repository API calls stayed refused, so commits and tags come
+from anonymous shallow clones under the scratchpad (subjects only). Window: the 24 hours
+before 05:30 UTC today, plus what moved since the 2026-10-26 readings on main (the 2026-10-27
+to 2026-10-29 sections wait in open PRs #273, #275, #276 and #277). Stars and forks are from
+the search API.
+
+| Repository | Stars / forks (2026-10-26 → today) | Last 24 h | Noted |
+|---|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 988 → 1018 / 102 | none | Last push 2026-10-23; newest tag `v0.4.0`. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 245 → 261 / 21 | none | Default branch unchanged since 2026-10-16; no tags. Stars still climbing (~4 a day). |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 119 → 127 / 18 | none | Last push 2026-10-27 (not to its default branch, whose newest commit is 2026-10-14); 14 open issues. GPL-3.0. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30 / 4 | 32 commits, no tag (74 since 2026-10-26) | The Postgres-as-second-engine push finished: "every suite runs on Postgres" in CI. Then hardening of its mount (non-UTF-8 paths, a blob counted once when two reads race, any spelling of the mount directory), input refusals instead of panics, a demo container that makes its own secrets, a capacity table "checked as one run on main", and **a short README with operator detail moved into docs**. |
+| `TheDancingDeveloper-org/graft` | 0 | 1 commit | A deploy commit onboarding another real repository onto its hosted dev instance; `v0.1.0` still newest. AGPL-3.0: nothing copied. |
+| [stigenai/scion](https://github.com/stigenai/scion) | 0 / 0 | none | Carries the `v0.1.0`–`v0.1.12` tags of the now-private `OpenCSGs/scion`; `v0.1.12` (2026-10-27) is "git's everyday commands, history as git shows it, automatic repack". Quiet since 2026-10-27. |
+| [adrianchifor/scn](https://github.com/adrianchifor/scn), [rizaust/open-scion](https://github.com/rizaust/open-scion), `kianaaa19/scionhub` | 2, 3, 0 | none | Quiet. |
+
+No repository created after 2026-10-13 matching "scion" with "source control", "monorepo",
+"anthropic" or "redesigning source control" reached 5 stars apart from the two already listed;
+the newest seen (`SiLeader/kasu`, `Hanam824/scion`) have 0.
+
+### What it means for Scion
+
+- **README length.** The most active Rust project cut its README to a short page and moved
+  operator detail into docs, the same split Scion's README rules already make; no change.
+- **Land dry run.** The project now under `stigenai` shipped "what a land would do, with
+  nothing landed" on 2026-10-27; Scion's `scn land` (Phase 5.5) has no way to ask that without
+  submitting a change request. #278 proposes it as one step.
+- **Stars.** The two largest projects keep growing without commits (one has not pushed for a
+  week, the other for two); attention follows the first week's launch, not activity.
+- **This repository's CI.** Main's scheduled runs of 2026-10-27, 28 and 29 failed on
+  `cargo-deny` (the RustSec `zstd` advisories the 2026-10-28 notes list) and, on 2026-10-29,
+  `fmt + clippy + test` also stopped during its test step; the four notes PRs above, and this
+  one, cannot go green until a lockfile update lands, which is outside this routine's files.
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
