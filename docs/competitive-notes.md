@@ -7,6 +7,37 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-10-31
+
+Repository search answered; per-repository API calls stayed refused, so commits and tags come
+from anonymous shallow clones under the scratchpad (subjects only). Window: the 24 hours
+before 05:30 UTC today. Stars and forks are from the search API. The 2026-10-27 to 2026-10-30
+sections wait in open PRs #273, #275, #276, #277 and #279.
+
+| Repository | Stars / forks (2026-10-30 → today) | Last 24 h | Noted |
+|---|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 1018 → 1029 / 102 | none | Newest tag still `v0.4.0`. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 261 / 21 | none | Stars flat for the first time. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 127 → 129 / 18 | none | 14 open issues. GPL-3.0. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30 / 4 | 12 commits, no tag | **Postgres is now its only metadata store; the SQLite backend was removed**, with docs for backing up and upgrading the Postgres store. Also: a daemon counts as up when a connect succeeds, a stray merge marker fails its docs job, split arm64 CI jobs. |
+| `TheDancingDeveloper-org/graft` | 0 | 12 commits, `v0.1.0` still newest | Its mirror tool now re-lands an outside GitHub PR with co-author credit and closes it on merge, batching small lands; post-land flakes recorded on its pass attestation. AGPL-3.0: nothing copied. |
+| [stigenai/scion](https://github.com/stigenai/scion) | 0 / 0 | 4 commits | Image build hygiene only (a freshness check for source snapshots). |
+| [adrianchifor/scn](https://github.com/adrianchifor/scn), [rizaust/open-scion](https://github.com/rizaust/open-scion), `kianaaa19/scionhub` | 2, 3, 0 | none | Quiet. |
+
+No repository created after 2026-10-13 matching "scion" with "source control", "monorepo",
+"anthropic" or "redesigning source control" reached 5 stars apart from those already listed.
+
+### What it means for Scion
+
+- **Store choice converges.** The most active Rust project dropped its single-file store for
+  Postgres alone, the store Scion started on; nothing to change, and the "first try needs
+  Docker" gap (#265) now applies to that project too.
+- **No issue this run.** Nothing shipped in the window that Scion lacks and its roadmap wants;
+  the git-PR re-landing above is git-gateway territory, a non-goal.
+- **This repository's CI.** Main has been red on `cargo-deny` (RustSec `zstd` advisories in
+  `Cargo.lock`) since 2026-10-27, so this PR, like the five before it, cannot go green until a
+  lockfile update lands; that is outside this routine's files.
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
