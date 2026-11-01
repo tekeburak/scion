@@ -7,6 +7,41 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-01
+
+Repository search answered; per-repository API calls stayed refused, so commits and tags come
+from anonymous shallow clones under the scratchpad (subjects only, plus the release notes of the
+one Apache-2.0 release below). Window: since 05:30 UTC on 2026-10-31. Stars and forks are from
+the search API. The 2026-10-27 to 2026-10-31 sections wait in open PRs #273, #275, #276, #277,
+#279 and #280; this section repeats nothing from them. Sunday, so no weekly table.
+
+| Repository | Stars / forks (2026-10-31 → today) | Since the last reading | Noted |
+|---|---|---|---|
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30 / 4 | 2 commits; release commit `v0.1.0` (tag not yet on the remote) | **First release.** Four binaries for Linux x64 and macOS arm64, a source tarball, a CycloneDX SBOM per binary, a checksum and a GitHub build-provenance attestation per artifact; artifacts built twice on separate runners and compared byte for byte before publishing. Postgres 16–18 required (no SQLite). Its release notes list every CI gate that ran on the released commit, including that the README quick start ran end to end on each platform. |
+| `TheDancingDeveloper-org/graft` | 0 / 0 | 2 commits, **tag `v0.1.1`** | Patch release; the commits onboard more of its own repositories onto its dev server. AGPL-3.0: nothing copied. |
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 1029 → 1031 / 102 | none | Newest tag still `v0.4.0`. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 261 → 262 / 21 | none | Last push 2026-10-16. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 129 → 130 / 18 | none on the default branch | 14 open issues. GPL-3.0. |
+| [adrianchifor/scn](https://github.com/adrianchifor/scn), [rizaust/open-scion](https://github.com/rizaust/open-scion), `kianaaa19/scionhub`, `yumaitau/yuma-agent-git` | 2, 3, 0, 0 | none | Quiet. |
+| `OpenCSGs/scion` | – | – | Gone: absent from search and `git ls-remote` returns no refs (deleted or made private). |
+| `hermes98761234/sgit` | – | none | Absent from search (the API refuses it); `git ls-remote` shows tags up to `v0.3.0`, last commit 2026-10-15. |
+
+No repository created after 2026-10-13 matching "scion" with "source control", "monorepo",
+"anthropic" or "redesigning source control" reached 5 stars apart from those already listed.
+
+### What it means for Scion
+
+- **Release.** Three projects now ship a tagged release (the Rust one above, the AGPL one, and
+  `git-ai`); Scion's Phase 9 has the workflow but no tag yet. The roadmap already covers
+  the release itself; the one piece it lacks is provenance on the archives — #281 proposes one
+  step for it. SBOMs and double builds are not proposed.
+- **Release notes that say what was proven** (each claim tied to a gate that ran on the tagged
+  commit) is a presentation technique for roadmap step 9.10; noted only.
+- **This repository's CI.** Main is still red on `cargo-deny` (RustSec `zstd`, and now also
+  `pulldown-cmark` RUSTSEC-2026-0414, in `Cargo.lock`), and the 2026-10-31 main run also failed
+  most jobs with "No space left on device" on the self-hosted runners. Both are outside this
+  routine's files.
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
