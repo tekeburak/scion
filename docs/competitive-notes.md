@@ -7,6 +7,35 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-03
+
+Repository search answered; per-repository API calls stayed refused, so commits and tags come
+from anonymous shallow clones under the scratchpad (subjects only). Window: since 06:21 UTC on
+2026-11-02. Stars and forks are from the search API. Like yesterday's, this PR carries every
+section still waiting in open notes PRs (#273 to #283), unchanged, so merging this one is enough.
+
+| Repository | Stars / forks (2026-11-02 → today) | Since the last reading | Noted |
+|---|---|---|---|
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30 / 4 | 12 commits, no new tag | The README and roadmap now state a "v1 scope"; `create-repo` and `create-ref` make a repository and a ref without a git import; damaged stored data answers `DATA_LOSS`; one process-wide cap on stalled replies; a memory floor checked at start; blame reads one transaction per step; a RustSec advisory bump. Hardening and scope, no new user-facing feature. |
+| `TheDancingDeveloper-org/graft` | 0 / 0 | 4 commits | Its dev server moved to Kubernetes; its git mirror keeps a claimed author email only on allowed domains. AGPL-3.0: nothing copied. |
+| [stigenai/scion](https://github.com/stigenai/scion) | 0 / 0 | none | Correction to yesterday's table: the remote carries tag **`v0.1.12`** (dated 2026-10-27: everyday git-style commands, automatic repack), not `v0.1.9`. Since 2026-10-26 it also added `scn mcp`, land dry runs, an operation log with undo, extra working copies, agent trailers on commits, and re-authorization on every cache read and every watch batch. |
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 1044 → 1043 / 105 | none | Last push 2026-10-23. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 264 → 266 / 22 | none | Last commit 2026-10-16. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 133 → 135 / 18 | none | GPL-3.0. |
+| [adrianchifor/scn](https://github.com/adrianchifor/scn), [rizaust/open-scion](https://github.com/rizaust/open-scion), `kianaaa19/scionhub`, `yumaitau/yuma-agent-git`, `hermes98761234/sgit` | 2, 3, 0, 0, – | none | Quiet; `hermes98761234/sgit` still missing from search. |
+
+No repository created after 2026-10-13 matching "scion" with "source control", "monorepo",
+"anthropic" or "redesigning source control" reached 5 stars apart from those listed (the
+newcomers this week, a Rust "Git alternative for AI agents" and a few clones, have at most 1).
+
+### What it means for Scion
+
+- **Nothing new to propose.** Repository and ref creation without an import is what `scn init`
+  already does; land dry runs are #278; a release with attestations is #281. No issue opened.
+- **This repository's CI** is still the gap: main's scheduled run is red (last on 2026-11-02
+  16:33 UTC), so twelve notes PRs wait and no step has landed since #270. Outside this
+  routine's files.
+
 ## 2026-11-02
 
 Repository search answered; per-repository API calls stayed refused, so commits and tags come
@@ -58,7 +87,7 @@ column moved to Postgres only and tagged `v0.1.0`.
 | HTTP API | ✓ | ? | ✓ | ? | ✓ | ? | ? | ? |
 | MCP | ✓ | ? | ? | ? | – | ✓ | ✓ (+ LSP) | ? |
 | Benchmark | ✓ | ✓ | ✓ | ✓ | – | ✓ vs git and two others | ✓ | ✓ |
-| Release | – (Phase 9) | – | – workflow only | ✓ v0.1.0, attested | – | ✓ v0.1.9, image, install script | ✓ v0.1.1 | ✓ v0.4.0 |
+| Release | – (Phase 9) | – | – workflow only | ✓ v0.1.0, attested | – | ✓ v0.1.12, image, install script | ✓ v0.1.1 | ✓ v0.4.0 |
 
 **Ahead:** web UI, HTTP API and MCP together with GitHub sign-in and directory ACLs on a
 Postgres + S3 store; the `stigenai` project now states MCP, GitHub/OIDC sign-in and path ACLs, but no web UI.
