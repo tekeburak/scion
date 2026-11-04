@@ -7,6 +7,37 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-04
+
+First run since 2026-10-26 (no run in between merged its notes), so the window below is
+2026-10-26 → today, with the last 24 hours called out. Repository search answered; commits and
+tags come from anonymous blobless clones under `/tmp` (subjects only), PR and issue titles from
+issue search, features from each README as the project states it. Wednesday: no weekly table.
+
+| Repository | Stars / forks (10-26 → today) | Since the last reading | Noted |
+|---|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 988 → 1044 / 107 | no commits, no tag | One open PR states the GPL-2.0-only terms of the Git it bundles. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 245 → 272 / 23 | none | Stars still rising with no commit since 2026-10-16. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 119 → 136 / 18 | none on the default branch | Only a dependency-bump PR; 14 open issues. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30 / 4 | 138 commits, **tag `v0.1.0`** (2026-11-01, first release) | ~20 commits in the last 24 h. Direction: hardening before an outside security review (threat-model gaps closed; token flags and the database URL leave the command line), bounded failure everywhere (deadlines keep time for the reply, a connection over the cap fails fast, a hung database startup fails inside a bound, cancelled reads stop), land latency (derived reads in one statement, the finish reads off the write connection), and a measured supported size (directories up to 100,000 names, blob-count, fsck and inode costs). A rejected land now says why it can never succeed. |
+| `TheDancingDeveloper-org/graft` | 0 | 166 commits, **tag `v0.1.1`** (2026-10-31) | Runs its own deployment (mirrors that follow GitHub repositories, batched lands from a backlog). AGPL-3.0: nothing copied. |
+| `kianaaa19/scionhub`, `adrianchifor/scn`, `rizaust/open-scion` | 0, 2, 3 | none | Quiet. |
+| `OpenCSGs/scion`, `hermes98761234/sgit` | not read | — | Both now refused by repository search (gone or private); the first also refuses an anonymous clone, the second still clones (no commits since 2026-10-15). |
+| **new:** [yuchenZhangTG/graft](https://github.com/yuchenZhangTG/graft) | 9 / 0 | 3 commits, created 2026-11-02 | Rust, MIT/Apache-2.0. Different name, same idea, larger claims: a FUSE lower layer plus a native copy-on-write upper layer, workspaces "in < 50 ms" regardless of size, commit cost proportional to modified files, a syntax-tree merge for four languages, Cloud Spanner metadata, GCS storage, and a built-in web server with code search. The claims are stated, not measured in the repository. |
+
+Other new repositories since 2026-10-13 matching the search terms all have 0–2 stars.
+
+### What it means for Scion
+
+- **Secrets off the command line.** Scion already reads `DATABASE_URL` from the environment in
+  `scion-server` and the ingest tool; no gap.
+- **"Why can this land never succeed".** Scion's `needs_rebase` and refusals already carry a
+  reason; worth checking on a later run whether every refusal names a terminal cause. No issue.
+- **First releases.** Two of the projects now tag releases; release provenance is already
+  proposed in issue #281. No new issue this run: nothing seen is both missing in Scion and on its
+  roadmap without an open idea issue (the syntax-tree merge and the FUSE workspace are not on the
+  roadmap; the virtual working copy is Phase 4's daemon).
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
