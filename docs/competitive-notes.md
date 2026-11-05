@@ -7,6 +7,45 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-05
+
+Repository search answered; per-repository API calls stayed refused, so commits and tags come
+from anonymous shallow clones under the scratchpad (subjects only) and features from each
+README as the project states it. Window: since the 2026-10-26 runs (ten days), with the last
+24 hours called out. Today is a Thursday, so no weekly table.
+
+| Repository | Stars / forks (10-26 → today) | Since the last reading | Last 24 h |
+|---|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 988 / 97 → 1035 / 106 | 3 commits, no new tag (latest `v0.4.0`) | README claims re-checked against `main`; the bench headline now matches the README and says what was measured; flaky operation tests made speed-independent. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 245 / 19 → 276 / 23 | none (last push 2026-10-16) | none. Stars still climbing with no code changes. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 119 / 18 → 139 / 18 | none since 2026-10-27 | none. GPL-3.0. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30 / 3 → 30 / 4 | ~157 commits, **tag `v0.1.0`** (2026-11-01, first release; README links a release-verification page: signed tag, checksums, attestations) | ~25 commits, all server hardening: memory floor at start-up and per derive step, connections over a cap fail fast, schema migrates only when the operator asks, a transaction opens in one round trip, capacity table re-measured on `main`, a blob-count/inode budget bench. |
+| [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub) | 0 / 0 | none (last push 2026-10-18) | none. |
+| `TheDancingDeveloper-org/graft` | 0 / 0 | ~150 commits, **tag `v0.1.1`** (2026-10-31) | Token revocation in its admin API. Earlier in the window: outbound HMAC-signed webhooks on ref-tip moves (cursor saved before first delivery, survives a 5xx), a post-land check mode per line with required checks, MCP review/attestation tools, a post-land latency bench. AGPL-3.0: nothing copied. |
+| `OpenCSGs/scion` | not read | — | No longer in search results and an anonymous clone asks for credentials: private or removed. |
+| **new:** [yuchenZhangTG/graft](https://github.com/yuchenZhangTG/graft) | 14 / 0 | created 2026-11-02, 6 commits | Apache-2.0. Last 24 h: a daemon with a remote blob store, server-side merge, a local SQLite + S3-compatible mode. README claims workspaces at any commit in under 50 ms (FUSE lower layer + native copy-on-write upper layer), lazy hydration, and a syntax-tree semantic merge for four languages; the cloud profile is Spanner + GCS. No published benchmark data behind the numbers yet. |
+
+Also matched the search but not counted: a "lossy" source-control experiment with 23 stars that
+does not mention Scion or the post, and an Android/iOS project that shares the name.
+
+### What it means for Scion
+
+- **Releases.** Two more projects tagged first releases this window, one with signed tags and
+  attestations (Scion's #281 already proposes attestation). Scion's Phase 9 is in progress
+  with no tag yet; being the last of the active Rust projects without an installable release
+  is the clearest "behind" today.
+- **Daemon / virtual workspaces.** The new project leads with a sub-50 ms workspace claim from a
+  FUSE + copy-on-write daemon. Scion's daemon tier is Phase 4, planned after release; the
+  claim is unbenchmarked, so no change to order, noted for the next weekly table.
+- **Webhooks on ref moves.** One project added signed outbound webhooks; the need (react to
+  `main` moving without polling) is the one #212 (`scn watch`) already covers, so no new issue.
+- **CI gate before land.** One project added required checks before a land. Scion's Phase 5
+  states "no CI gate" deliberately; not proposed.
+- **Semantic merge.** Out of scope for Scion's first-parent changeset model; noted only.
+
+No issue opened this run: every gap found is either already an open idea (#212, #281, #265)
+or a deliberate non-goal.
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
