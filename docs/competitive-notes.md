@@ -7,6 +7,41 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-06
+
+Repository search answered; per-repository API calls stayed refused, so commits and tags come
+from anonymous shallow clones under the scratchpad (subjects only) and features from each
+README as the project states it. Window: since the 2026-11-05 run (06:20 UTC). Friday, so no
+weekly table.
+
+| Repository | Stars / forks (11-05 → today) | Last 24 h |
+|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 1035 / 106 → 1023 / 104 | ~40 commits, **tags `v0.4.1` and `v0.4.2`** (both 2026-11-05). Reference names over 1024 bytes and name pairs git cannot hold together are refused at push; a conformance harness that drives stock git clients and its agent RPCs together; a bounded Postgres connection pool; a concurrent-writer commit-rate bench; its bundled git moved to v2.56.0. README banner states a 50-agent race on one branch: git lands 100 of 250 changes, the project 200. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30 / 4 (unchanged) | 14 commits, no new tag (`v0.1.0`). A read-only `preflight` server command runs every first-boot check (memory, disk, store reachability) and names the fix for each; a land now costs 26 SQL statements; docs state **23–25 lands a second to one ref**, measured; blob count and its share of the supported ceiling are metrics with alerts; cancelled calls stop tree builds and derive walks at the next step. |
+| [yuchenZhangTG/graft](https://github.com/yuchenZhangTG/graft) | 14 / 0 → 16 / 0 | none (its last three commits, daemon + SQLite/S3 mode, landed before yesterday's run). |
+| `TheDancingDeveloper-org/graft` | 0 / 0 | A push at 05:51 UTC today but no commit dated inside the window on any of its 11 branches; latest tag still `v0.1.1`. |
+| [CarterT27/scion](https://github.com/CarterT27/scion), [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion), [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub) | 278 / 23, 142 / 18, 0 / 0 | none (last pushes 10-16, 10-27, 10-18). Stars of the first two keep climbing with no code change. |
+
+No repository created after 2026-10-13 newly reached 5 stars; the matches above 5 that are not
+listed share the name only (an Android kernel tree, a 2018 script).
+
+### What it means for Scion
+
+- **Land throughput: ahead.** The one project that publishes a single-ref land rate states
+  23–25 lands a second. Scion's `land 16 writers` row (16 lands in 310–373 ms on the bench
+  machine, about 45–50 a second, `docs/BENCHMARKS.md`) is roughly twice that, on different
+  hardware, so the comparison is indicative only. The other project's 250-change race is a
+  different workload (git as the baseline, conflicts counted); no change.
+- **First-boot preflight.** A read-only command that checks a fresh server's environment and
+  names each fix is a self-hosting aid for Phase 9 (9.7 production profile, 9.11 quickstart).
+  Not opened as an issue: Scion's server already fails at start-up on an unreachable store, and
+  the Simplicity rules ask for a roadmap reason before a new command. Revisit if 9.11's
+  five-minute job shows first-boot errors are where time goes.
+- **Releases.** The most-starred project shipped two patch releases in a day; Scion is still
+  the only active Rust project without a tag (Phase 9). Same "behind" as yesterday.
+
+No issue opened this run.
+
 ## 2026-11-05
 
 Repository search answered; per-repository API calls stayed refused, so commits and tags come
