@@ -7,6 +7,43 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-07
+
+Repository search answered; per-repository API calls stayed refused, so commits and tags come
+from anonymous shallow clones under the scratchpad (subjects only) and features from each
+README as the project states it. Window: since the 2026-11-06 run (about 06:20 UTC).
+Saturday, so no weekly table. This branch stacks on `watch/2026-11-06` (#287), which is still
+open: `main` is red on `cargo-deny` and `fmt + clippy + test`, so no notes PR since #267 could
+merge (#273–#287).
+
+| Repository | Stars / forks (11-06 → today) | Last 24 h |
+|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 1023 / 104 → 1028 / 104 | none; latest tag still `v0.4.2`. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30 / 4 (unchanged) | 22 commits, no new tag (`v0.1.0`). **A protocol transcript corpus** pins 25 behaviours on server, cache and daemon, and the transcripts replay against the previous release, gated by the version each file starts from. Statement counts keep falling (a land now costs 23 SQL statements, a changeset create 20); cancelled lands and creates free their permit and ref lock at the call's deadline; free-space and free-inode gauges with stale-sample alerts. |
+| `TheDancingDeveloper-org/graft` | 0 / 0 | ~40 commits, no new tag (`v0.1.1`). A mirror service: mirrors become repository settings (one table, encrypted per-row upstream credentials, a lease with epoch fencing, batch/rewind/purge requests, a mirror token kind frozen with golden vectors), replacing per-repository mirror containers; batch PRs now also to a Forgejo upstream; docs for a checkout-less loop over its MCP endpoint. AGPL-3.0: nothing copied. |
+| [yuchenZhangTG/graft](https://github.com/yuchenZhangTG/graft) | 16 / 0 → 19 / 0 | none (last commit 2026-11-05). |
+| [CarterT27/scion](https://github.com/CarterT27/scion), [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion), [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub) | 278 / 23 → 283 / 23, 142 / 18, 0 / 0 | none (last pushes 10-16, 10-27, 10-18). |
+
+No repository created after 2026-10-13 newly reached 5 stars. `hermes98761234/sgit` and
+`yumaitau/yuma-agent-git` no longer match the search queries; neither has a commit since
+mid-October.
+
+### What it means for Scion
+
+- **Protocol transcripts against the previous release.** Replaying recorded requests from an
+  older client against a new server only means something once there is an older release;
+  Scion has none yet (Phase 9). Worth revisiting after the first tag as part of the release
+  workflow, not before; no issue.
+- **Git mirrors to forges.** A git-facing mirror is git wire protocol, a Scion non-goal; noted
+  only.
+- **Checkout-less agent loop over MCP.** Scion's `scion-mcp` (11.4) already reads and writes
+  without a working copy; the documentation point (a worked agent loop with no checkout) is
+  something `docs/MCP.md` could show when Phase 11's docs step (11.8) is revisited; noted only.
+- **The gap that matters is ours, not theirs:** two other projects ship tagged releases while
+  Scion's CI on `main` has been red long enough to hold fifteen PRs open.
+
+No issue opened this run.
+
 ## 2026-11-06
 
 Repository search answered; per-repository API calls stayed refused, so commits and tags come
