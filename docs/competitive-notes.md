@@ -7,6 +7,45 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-08
+
+Repository search answered; per-repository API calls stayed refused, so commits and tags come
+from anonymous shallow clones under the scratchpad (subjects only) and features from each
+README as the project states it. Window: since the 2026-11-07 run (06:22 UTC). Sunday, so no
+weekly table. This branch stacks on `watch/2026-11-07` (#288). `main` is still red: the
+`cargo-deny` advisories check fails on a `zstd-sys` 2.1.1 advisory (fix: `zstd-sys` ≥ 2.1.2,
+`cargo update -p zstd-sys`) and warns that the `RUSTSEC-2026-0381` ignore in `deny.toml` no
+longer matches; `fmt + clippy + test` fails too (its log was not retrievable). A notes-only
+PR cannot fix either, so this PR will be red like #273–#288.
+
+| Repository | Stars / forks (11-07 → today) | Last 24 h |
+|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 1028 / 104 → 1036 / 104 | none; latest tag still `v0.4.2`. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30 / 4 (unchanged) | 35 commits, no new tag (`v0.1.0`). Mostly tests: more behaviours join the protocol transcripts replayed against the previous release (Log, Blame, Land, multi-part streams, cursors); mutation-testing gaps closed, a dispatch-only mutation workflow for the security-boundary files. Operations: the audit file reopens on SIGHUP for logrotate, with an alert while reopen fails; a refused token is recorded and counted on every service; a malformed database URL names the parse error and its source. Performance: the land's derived-row trim rides the verdict statement, so **a land costs 22 SQL statements** (23 yesterday). Docs: a v1 TLS trust model (short-lived certificates rotated by restart, no revocation). |
+| `TheDancingDeveloper-org/graft` | 0 / 0 | 12 commits, no new tag (`v0.1.1`). Mirror service hardening: lease-fenced imports, batch requests settled and excluded, an admin command to repair followed-mirror markers, the CLI tells connection failures from an unavailable server. AGPL-3.0: nothing copied. |
+| [yuchenZhangTG/graft](https://github.com/yuchenZhangTG/graft) | 19 / 0 → 21 / 0 | none (last commit 2026-11-05). |
+| [CarterT27/scion](https://github.com/CarterT27/scion), [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion), [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub) | 283 / 23 → 288 / 24, 142 / 18 → 142 / 19, 0 / 0 | none (last pushes 10-16, 10-27, 10-18). |
+
+No repository created after 2026-10-13 newly reached 5 stars (searches for "scion" with
+"source control", "monorepo" and "anthropic", and for "redesigning source control"). Matches
+above 5 not listed share the name only (an Android device tree). `OpenCSGs/scion` no longer
+appears in search and refuses anonymous clones (private or deleted).
+
+### What it means for Scion
+
+- **Audit log rotation and refused-token counts.** Scion's server has no audit file to rotate;
+  an auth-refusal counter belongs with Phase 7's boundary (7.5) if operators ask for it. Noted
+  only; the Simplicity rules ask for a roadmap reason first.
+- **Mutation testing of the security boundary.** A complement to Scion's fuzz targets (7.11);
+  not a roadmap step, noted only.
+- **Statement count per land** keeps falling on the one project that publishes it (22). Scion
+  publishes land latency, not statement counts; Phase 10's measurement baseline (10.1) is
+  where a comparable number would go. No change.
+- **Still the real gap:** red CI on `main` has held every notes PR open for 13 days, while two
+  other projects ship tagged releases. Fixing `main` is a code change outside this routine.
+
+No issue opened this run.
+
 ## 2026-11-07
 
 Repository search answered; per-repository API calls stayed refused, so commits and tags come
