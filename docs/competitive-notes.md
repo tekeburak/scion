@@ -7,6 +7,70 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-09
+
+Repository search answered; per-repository API calls stayed refused, so commits and tags come
+from anonymous shallow clones under the scratchpad (subjects only) and features from each
+README as the project states it. Window: since the 2026-11-08 run (06:22 UTC). Monday, so the
+weekly table follows. This branch stacks on `watch/2026-11-08` (#289). `main` is still red on
+`cargo-deny` and `fmt + clippy + test` (logs of the 11-08 run are no longer downloadable;
+`cargo fmt --check` passes on `main` here, clippy could not run without `protoc`), so
+#273–#289 stay open and this PR will be red too.
+
+| Repository | Stars / forks (11-08 → today) | Last 24 h |
+|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 1036 / 104 → 1042 / 104 | none; latest tag still `v0.4.2` (2026-11-05). |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30 / 4 (unchanged) | 17 commits, no new tag (`v0.1.0`, 2026-11-01). Land path again: the settle's reads run before its write transaction and its history nodes ride its write statement. The rest is tests (mutation gaps in the listener, graph, checkout and object paths; a changeset of one repository answers NotFound through another). Its CHANGELOG's Unreleased section now lists **explicit migrations**: only a `migrate` command (or `serve --migrate`) moves the schema, every other open refuses a database that is behind, and `migrate --check` exits 0/3/1 for current/pending/unreadable. |
+| [yuchenZhangTG/graft](https://github.com/yuchenZhangTG/graft) | 21 / 0 → 22 / 0 | none (last commit 2026-11-05). |
+| `TheDancingDeveloper-org/graft` | 0 / 0 | none (last push 2026-11-07; tag `v0.1.1`). AGPL-3.0: nothing copied. |
+| [CarterT27/scion](https://github.com/CarterT27/scion), [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion), [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub) | 288 / 24 → 293 / 25, 142 / 19 → 143 / 21, 0 / 0 | none (last pushes 10-16, 10-27, 10-18). |
+
+No repository created after 2026-10-13 newly reached 5 stars (searches for "scion" with
+"source control", "monorepo" and "anthropic", and for "redesigning source control"). Matches
+above 5 not listed share the name only (Android device trees). `yumaitau/yuma-agent-git` was
+pushed today on a non-default branch; its default branch has no commit since 2026-10-17.
+
+### What it means for Scion
+
+- **Explicit migrations.** `scion-server` runs `MIGRATOR` on every start
+  (`crates/scion-server/src/main.rs`), so the first new image that boots against the hosted
+  database migrates it, and 9.9's "roll back to the previous image" then meets a schema the old
+  binary does not know. A `migrate` subcommand with `--check`, and a server that refuses a
+  database behind its build, makes the upgrade order in `docs/HOSTING.md` explicit. #290 opened
+  (one step, before 9.9).
+- **Release tags.** Three projects now ship tagged releases (one with signed, reproducible,
+  attested binaries for server, cache, daemon and CLI); Scion has none. Phase 9's 9.2–9.5 are
+  the steps and #281 already covers provenance; they wait on a green `main`.
+
+### Weekly: ahead / behind (2026-11-09)
+
+From each README and docs as stated today; ✓ stated, – absent or stated as not done, ? not
+stated. Scion's column is from its own README and `docs/ROADMAP.md`. `OpenCSGs/scion` is gone
+from search and refuses anonymous clones, so its column is dropped; `yuchenZhangTG/graft`
+(22 stars, created 2026-11-02) is added.
+
+| Feature | Scion | CarterT27 | tinyhumansai | bnsd55 | kianaaa19 | graft (TDD) | yuchenZhangTG | feder-cr |
+|---|---|---|---|---|---|---|---|---|
+| CLI | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Server-side land | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ server-side merge | ✓ |
+| Persistent store | ✓ Postgres + S3 | ✓ CockroachDB + S3 | ✓ SQLite, files | ✓ Postgres | ✓ SQLite | ? | ✓ SQLite + S3 (Spanner + GCS stated) | ✓ SQLite or Postgres + object store |
+| Derived data | ✓ | ✓ | ✓ | ✓ | ✓ | ? | ? | ✓ |
+| Daemon / cache tier | – (Phase 4) | ✓ | ✓ | ✓ | – | ✓ node | ✓ daemon + FUSE workspaces | ✓ |
+| Git import | ✓ | ✓ | ? | ✓ | ? | ✓ | ✓ interop module | ✓ shadow mode |
+| Git gateway | – non-goal | – | – | – | – | – export, mirrors | ? | ✓ stock git clients |
+| Auth | ✓ GitHub, SPs, ACLs | ✓ tokens | ? | ✓ tokens, tickets | ✓ passwords, tokens | ✓ tokens | ? | ✓ per-agent tokens |
+| Web UI | ✓ | ? | ✓ | ? | ✓ | ? | ✓ | ? |
+| HTTP API | ✓ | ? | ✓ | ? | ✓ | ✓ | ✓ REST | ? |
+| MCP | ✓ | ? | ? | ? | – | ✓ | ? | ? |
+| Benchmark | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ claims (< 50 ms workspace) | ✓ |
+| Release | – (Phase 9) | – | – | ✓ v0.1.0, signed + attested | – | ✓ v0.1.1 | – | ✓ v0.4.2 |
+
+**Ahead:** still the only project stating web UI, HTTP API and MCP together with GitHub
+sign-in and directory ACLs on Postgres + S3.
+**Behind:** no release (three projects ship one, one of them signed and reproducible), no
+daemon/cache tier (Phase 4; six projects state one, one with FUSE workspaces, Phase 8 here), and
+a red `main` for two weeks that blocks every PR, Phase 9 included.
+
 ## 2026-11-08
 
 Repository search answered; per-repository API calls stayed refused, so commits and tags come
