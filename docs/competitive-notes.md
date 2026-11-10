@@ -7,6 +7,73 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-10
+
+First reading since 2026-10-26 (no run in between). Repository search answered; per-repository
+API calls stayed refused, so commits and tags come from anonymous blob-less clones under the
+scratchpad (subjects only) and features from each README as the project states it. Stars and
+forks are from the search API today; `competitive-stars.csv` gets today's rows.
+
+| Repository | Stars / forks (10-26 → today) | Last 24 h | Since 10-26 | Noted |
+|---|---|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 988 / 97 → 1008 / 100 | none | 59 commits, **tags `v0.4.1`, `v0.4.2`** (11-05) | Storage-core hardening: refuses ref-name pairs git cannot hold, bounded Postgres pool, a concurrent-writer commit-rate benchmark, bundled git 2.56.0. README opens with an animated banner: 50 agents on one branch, "git lands 100 of 250, this lands 200", and an AI-resolved rename/argument conflict. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 245 / 19 → 292 / 25 | none | none (last push 10-16) | Fastest-growing in stars while quiet. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 119 / 18 → 143 / 21 | none | none on the default branch (push 10-27) | 14 open issues; not readable this run. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30 / 3 → 31 / 4 | **15 commits** (10 test-only) | ~260 commits, **tag `v0.1.0`** (11-01, first release) | Last 24 h: resumable blame windows, preflight version line, archive verify, a RUSTSEC dependency bump (MSRV 1.89). Since 10-26: a land cut to ~22 SQL statements, a create to 20, audit-file SIGHUP reopen for logrotate, refused tokens counted on every service, mutation-testing workflows, a capacity table with push p99. README: Postgres quickstart, a release-verification page (signed tag, checksums, attestations), stability/compatibility promises. |
+| **new ≥ 5:** [yuchenZhangTG/graft](https://github.com/yuchenZhangTG/graft) | 22 / 0 | none | 6 commits (created 11-02) | Rust, Apache-2.0/MIT. FUSE lower layer + native copy-on-write upper layer for **workspaces "< 50 ms" at any size**; commit hashes only the upper layer; a daemon with a remote blob store; server-side three-way merge with a **syntax-tree semantic merge** (Rust, Python, Go, JS/TS: unions imports, merges adjacent function additions, scopes conflicts to one declaration); SQLite + S3 local mode, Spanner + GCS stated for production. No benchmark data published beyond the claim. |
+| `TheDancingDeveloper-org/graft` | 0 | none | ~200 commits, **tag `v0.1.1`** (10-31) | Mirror of external forges (Forgejo batch land), leased mirror imports, a checkout-less `/mcp` loop for agents, compose backup/restore guide. AGPL-3.0: nothing copied. |
+| `yumaitau/yuma-agent-git` | 0 | none | pushed 11-09 | 74 open issues. |
+| [rizaust/open-scion](https://github.com/rizaust/open-scion), [adrianchifor/scn](https://github.com/adrianchifor/scn), [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub) | 3, 2, 0 | none | none | Quiet. |
+| `OpenCSGs/scion`, `hermes98761234/sgit` | – | – | – | Missing from search today; the first no longer clones anonymously (private or removed). |
+
+Search for repositories created after 2026-10-13: besides the one above, only an unrelated
+mobile-OS project family named Scion reached 5 stars (not source control; not tracked).
+
+### What it means for Scion
+
+- **Releases are now the norm.** Four tracked projects have tagged releases (one with signed
+  tags and attestations, already #281); Scion still has none (Phase 9 in progress). This is
+  the largest visible gap.
+- **Virtualized workspaces** are a headline claim of the newcomer ("< 50 ms at any size").
+  Scion's equivalent is Phase 8 (planned, after Phase 4); sparse checkout is today's answer.
+  Recorded, no issue: the roadmap already orders it.
+- **Merging more than lines.** Two projects now advertise conflict resolution beyond a line
+  merge (a syntax-tree merge; an AI-resolved conflict in a banner). Scion merges server-side
+  with a line-level three-way merge (`scion-diff3`), so two agents appending different
+  functions at the same end of a file conflict. Proposed as a measured first step in an issue
+  (`idea: classify insert/insert conflicts`), since a parser dependency would need asking first.
+- **Statement counts as a performance story.** One project reports SQL statements per land and
+  per create in its commit subjects; Scion's `docs/BENCHMARKS.md` reports wall-clock only.
+  Noted for Phase 10, no issue.
+
+### Weekly: ahead / behind (2026-11-10, for the week of 11-09)
+
+From each README and docs as stated today; ✓ stated, – absent or stated as not done, ? not
+stated. Scion's column is from its own README and `docs/ROADMAP.md`. Unchanged cells from
+2026-10-26 were re-read from today's READMEs where reachable.
+
+| Feature | Scion | CarterT27 | tinyhumansai | bnsd55 | yuchenZhangTG | graft (TDD) | feder-cr |
+|---|---|---|---|---|---|---|---|
+| CLI | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Server-side land | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Persistent store | ✓ Postgres + S3 | ✓ CockroachDB + S3 | ✓ SQLite, files | ✓ Postgres (SQLite) | ✓ SQLite + S3; Spanner stated | ? | ✓ SQLite or Postgres + object store |
+| Derived data | ✓ | ✓ | ✓ | ✓ | ? | ? | ✓ |
+| Daemon / cache tier | – (Phase 4) | ✓ | ✓ | ✓ | ✓ | ✓ node | ✓ |
+| Git import | ✓ | ✓ | ? | ✓ | ? | ✓ + forge mirror | ✓ shadow mode |
+| Git gateway | – non-goal | – | – | – | – | – export only | ✓ git underneath |
+| Auth | ✓ GitHub, SPs, ACLs | ✓ tokens | ? | ✓ tokens, tickets, TLS | ? | ✓ tokens | ✓ per-agent tokens |
+| Web UI | ✓ | ? | ✓ | ? | – | ? | ? |
+| HTTP API | ✓ | ? | ✓ | ? | ✓ | ? | ? |
+| MCP | ✓ | ? | ? | ? | – | ✓ checkout-less | ? |
+| Virtual checkout | – (Phase 8) | ? | ? | ✓ writable mount (opt-in build) | ✓ FUSE + CoW | ? | – |
+| Benchmark | ✓ | ✓ | ✓ | ✓ + capacity table | claim only | ✓ | ✓ |
+| Release | – (Phase 9) | – | – | ✓ v0.1.0 signed | – | ✓ v0.1.1 | ✓ v0.4.2 |
+
+**Ahead:** still the only project stating web UI, HTTP API and MCP together with GitHub
+sign-in and directory ACLs on a Postgres + S3 store. **Behind:** no release (four projects
+ship one), no daemon/cache tier (six state one), no virtual checkout (two state one), and the
+merge stops at line conflicts where two projects advertise more.
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
