@@ -7,6 +7,40 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-11
+
+Same method as 2026-11-10 (repository search answered; per-repository API calls refused;
+commits from anonymous blob-less clones under the scratchpad, subjects only). Window: the last
+24 hours (since 2026-11-10 06:22 UTC). This branch sits on top of the unmerged 2026-11-10 notes,
+because `main` has not taken a notes PR since 2026-10-26 (see the last bullet below).
+
+| Repository | Stars / forks (11-10 → today) | Last 24 h | Noted |
+|---|---|---|---|
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 31 / 4 → 31 / 4 | **14 commits**, no new tag | Almost all tests: a per-file mutation-testing audit (blame, archive, floor, reply budget, memory pool, admin, meta) gains killing tests file by file; CI moves test jobs to a runner that names a hung test and fails fast. One behaviour fix: a blame version that can never fit the call's own budget counts as absent instead of being refused on every retry. |
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 1008 / 100 → 1009 / 101 | none (last push 11-05) | Tags still end at `v0.4.2`. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 292 / 25 → 295 / 25 | none (last commit 10-16) | Still gaining stars while quiet. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 143 / 21 → 146 / 21 | none | Default branch unchanged since 10-14. |
+| [yuchenZhangTG/graft](https://github.com/yuchenZhangTG/graft) | 22 / 0 → 22 / 0 | none (last commit 11-05) | No benchmark data yet beyond the README's workspace-time claims. |
+| `TheDancingDeveloper-org/graft`, `yumaitau/yuma-agent-git`, [rizaust/open-scion](https://github.com/rizaust/open-scion), [adrianchifor/scn](https://github.com/adrianchifor/scn), `kianaaa19/scionhub` | 0, 0, 3, 2, 0 | none | Quiet. |
+
+No repository created after 2026-10-13 newly reached 5 stars; the source-control newcomer from
+yesterday is the only one above the bar (the other matches are unrelated projects named Scion).
+No release, tag or benchmark claim appeared in the window, so no issue this run.
+
+### What it means for Scion
+
+- **Mutation testing as a public quality signal.** One project publishes a per-file audit of
+  surviving mutants and closes them one file at a time. Scion has property, golden, fuzz and
+  simulation tests but no mutation run; noted only, since a new CI job is a `.github/` change
+  this routine does not make and the roadmap does not call for it.
+- **Fail-fast on hung tests.** The same project switched its test runner so a hung test is named
+  and fails quickly. Recorded for the owner; no issue (tooling, not a roadmap step).
+- **`main` is red on `cargo-deny`, so notes PRs pile up.** Every notes PR since 2026-10-27 is
+  open and blocked by two RustSec advisories on the locked zstd crates (`zstd-sys` 2.1.1,
+  `zstd-safe` 8.1.0). The fix noted on the 2026-11-10 PR is a five-line `Cargo.lock` bump
+  (`cargo update -p zstd-safe -p zstd-sys`) in its own PR; it is outside what this routine
+  changes.
+
 ## 2026-11-10
 
 First reading since 2026-10-26 (no run in between). Repository search answered; per-repository
