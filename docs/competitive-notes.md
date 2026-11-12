@@ -7,6 +7,41 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-12
+
+First run since 2026-10-26. Repository search answered; per-repository API calls outside this
+repository were refused, so commits and tags come from anonymous shallow clones under the
+scratchpad (subjects only) and features from each README as the project states it. Window for
+"last 24 hours": since 2026-11-11 06:17 UTC.
+
+| Repository | Stars / forks (10-26 → today) | Last push | Last 24 h | Noted |
+|---|---|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 988/97 → 1010/101 | 2026-11-05 | none | **Tags `v0.4.1` and `v0.4.2`** (both 2026-11-05). Work since: refusing reference names git cannot hold, bounded Postgres pool, a conformance harness of stock git clients against its agent RPCs, README claims re-checked against its benchmark file. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 245/19 → 296/25 | 2026-10-16 (last commit) | none | Stars still climbing (+51) with no new code. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 119/18 → 148/21 | 2026-10-27 | none | No new commits on the default branch; 14 open issues. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30/3 → 31/4 | today | 20 commits | **Tag `v0.1.0`** (2026-11-01; README links a page on checking the signed tag, checksums and attestations). ~210 commits since 10-26, mostly a mutation-testing audit (one row per source file, "killing tests" per surviving mutant, run under nextest with an address-space cap), plus land/create statement-count cuts (a land now "costs 22 statements"), a read-only server `preflight` command for first boot, disk/inode/blob-count alerts, cancellation that frees permits at the call deadline. No web UI, HTTP API or MCP stated. |
+| [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub) | 0/0 | 2026-10-18 | none | Quiet. |
+| `OpenCSGs/scion` | 3/0 → – | – | – | No longer reachable by search (deleted or made private). |
+| **new ≥ 5:** [yuchenZhangTG/graft](https://github.com/yuchenZhangTG/graft) | 22/0 | 2026-11-05 | none | Created 2026-11-02, Rust, MIT/Apache-2.0. Not the AGPL `graft` tracked earlier. Claims: an isolated **writable workspace at any commit in < 50 ms** through a read-only lazy FUSE layer under a native copy-on-write upper layer, files fetched from CAS only when opened, diff/commit in O(modified); a server-side three-way tree merge plus a syntax-tree merge for Rust/Python/Go/JS; a `graftd` daemon with a remote blob store; local SQLite + S3-compatible CAS (Spanner/GCS in its diagram). Six commits in total; numbers are self-reported, no benchmark file. |
+
+Smaller newcomers since 10-13 (all < 5 stars, not tracked): several single-commit or docs-only
+repositories; one with 149 open issues and no stars.
+
+Scion: 0 stars / 0 forks; `main` has had no commit since 2026-10-26.
+
+### What it means for Scion
+
+- **Virtualized checkout is now a headline elsewhere.** The newest project leads its README with
+  lazy, sub-50 ms workspaces, the part of the reference design Scion parks last (Phase 8,
+  planned, no steps). #295 proposes a read-only mount as the first step.
+- **Releases.** Three projects now have tags (one with signed tags and attestations); Scion has
+  none (Phase 9 in progress, #281 already covers attestation).
+- **Statement counts as a perf metric.** One project reports the number of SQL statements per
+  land in each PR title; a cheap regression signal Phase 10 could borrow as a counter, noted only.
+- **Merge beyond diff3.** A syntax-aware merge appears as a claim; #292 (classify insert/insert
+  conflicts first) already covers measuring whether it matters.
+- **Momentum.** Scion's `main` is idle for 17 days while two projects ship daily.
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
