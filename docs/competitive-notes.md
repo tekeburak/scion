@@ -7,6 +7,76 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-13
+
+Repository search answered; per-repository API calls outside this repository were refused again,
+so commits and tags come from anonymous shallow clones under the scratchpad (subjects only).
+Window for "last 24 hours": since 2026-11-12 06:00 UTC. This branch is stacked on the
+2026-11-12 notes, whose PR is still open: `main` CI is red for reasons outside these notes
+(RUSTSEC-2026-0410 against `zstd-sys` in `Cargo.lock`, and a self-hosted runner out of disk).
+
+| Repository | Stars / forks (11-12 → today) | Last push | Last 24 h | Noted |
+|---|---|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 1010/101 → 1013/101 | 2026-11-05 | none | Newest tag still `v0.4.2`. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 296/25 → 299/25 | 2026-10-16 | none | Stars still rising with no new code. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 148/21 → 149/21 | 2026-10-27 | none | GPL-3.0 (nothing is copied from it); 14 open issues. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 31/4 → 31/4 | today | 29 commits | No new tag (`v0.1.0` stays the newest). The mutation-testing audit goes on file by file (client, checkout walk, mount VFS with two writable-mount bugs fixed, store, metrics, server and CLI binaries). New: **crash-point tests for a land** — the land path parks at named points, a kill between plan and settle leaves a land that a retry finishes, a lost reply replays, a stopped derive resumes from stored rows; and a signing-key rotation that keeps tickets of the old key valid and refuses unknown keys. |
+| [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub) | 0/0 | 2026-10-18 | none | Quiet. |
+| [yuchenZhangTG/graft](https://github.com/yuchenZhangTG/graft) | 22/0 → 23/0 | 2026-11-05 | none | Unchanged since its six commits; the < 50 ms writable-workspace claim is still self-reported, with no benchmark file. |
+| `TheDancingDeveloper-org/graft` | 0/0 | 2026-11-07 | none | AGPL-3.0, read only. Since 10-26 (~210 commits, tag `v0.1.1`): MCP tools for review and attestation, HMAC-signed outbound webhooks on its journal, per-line post-land check modes with a post-land benchmark, a mirror to a self-hosted forge (batch PRs and lands). |
+| [hermes98761234/sgit](https://github.com/hermes98761234/sgit) | 0/0 | – | none | Tags now up to `v0.3.0`. |
+
+No other repository created after 2026-10-13 that matches the searches has 5 stars or more (the
+`Scion-Project` repositories with 10 and 7 stars are phone firmware, unrelated).
+
+Scion: 0 stars / 0 forks; `main` has had no commit since 2026-10-26.
+
+### What it means for Scion
+
+- **Land crash-safety is tested, not argued, elsewhere.** One project kills the server at named
+  points inside a land and proves a retry converges. Scion's land worker (Phase 5.4, crash
+  recovery) and the hermetic simulation (Phase 7.10) cover the same ground; kill-point coverage
+  is worth checking when 7.10 lands. No issue: the roadmap already has the step.
+- **Outbound events on land.** Signed webhooks on every landed change appear in one project;
+  closest open item is #212 (`scn watch`). Noted only.
+- **The blocker is ours.** Nothing here is urgent compared with Scion's own red `main` CI, which
+  has kept the notes PRs since 2026-11-03 unmerged.
+
+## 2026-11-12
+
+First run since 2026-10-26. Repository search answered; per-repository API calls outside this
+repository were refused, so commits and tags come from anonymous shallow clones under the
+scratchpad (subjects only) and features from each README as the project states it. Window for
+"last 24 hours": since 2026-11-11 06:17 UTC.
+
+| Repository | Stars / forks (10-26 → today) | Last push | Last 24 h | Noted |
+|---|---|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 988/97 → 1010/101 | 2026-11-05 | none | **Tags `v0.4.1` and `v0.4.2`** (both 2026-11-05). Work since: refusing reference names git cannot hold, bounded Postgres pool, a conformance harness of stock git clients against its agent RPCs, README claims re-checked against its benchmark file. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 245/19 → 296/25 | 2026-10-16 (last commit) | none | Stars still climbing (+51) with no new code. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 119/18 → 148/21 | 2026-10-27 | none | No new commits on the default branch; 14 open issues. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30/3 → 31/4 | today | 20 commits | **Tag `v0.1.0`** (2026-11-01; README links a page on checking the signed tag, checksums and attestations). ~210 commits since 10-26, mostly a mutation-testing audit (one row per source file, "killing tests" per surviving mutant, run under nextest with an address-space cap), plus land/create statement-count cuts (a land now "costs 22 statements"), a read-only server `preflight` command for first boot, disk/inode/blob-count alerts, cancellation that frees permits at the call deadline. No web UI, HTTP API or MCP stated. |
+| [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub) | 0/0 | 2026-10-18 | none | Quiet. |
+| `OpenCSGs/scion` | 3/0 → – | – | – | No longer reachable by search (deleted or made private). |
+| **new ≥ 5:** [yuchenZhangTG/graft](https://github.com/yuchenZhangTG/graft) | 22/0 | 2026-11-05 | none | Created 2026-11-02, Rust, MIT/Apache-2.0. Not the AGPL `graft` tracked earlier. Claims: an isolated **writable workspace at any commit in < 50 ms** through a read-only lazy FUSE layer under a native copy-on-write upper layer, files fetched from CAS only when opened, diff/commit in O(modified); a server-side three-way tree merge plus a syntax-tree merge for Rust/Python/Go/JS; a `graftd` daemon with a remote blob store; local SQLite + S3-compatible CAS (Spanner/GCS in its diagram). Six commits in total; numbers are self-reported, no benchmark file. |
+
+Smaller newcomers since 10-13 (all < 5 stars, not tracked): several single-commit or docs-only
+repositories; one with 149 open issues and no stars.
+
+Scion: 0 stars / 0 forks; `main` has had no commit since 2026-10-26.
+
+### What it means for Scion
+
+- **Virtualized checkout is now a headline elsewhere.** The newest project leads its README with
+  lazy, sub-50 ms workspaces, the part of the reference design Scion parks last (Phase 8,
+  planned, no steps). #295 proposes a read-only mount as the first step.
+- **Releases.** Three projects now have tags (one with signed tags and attestations); Scion has
+  none (Phase 9 in progress, #281 already covers attestation).
+- **Statement counts as a perf metric.** One project reports the number of SQL statements per
+  land in each PR title; a cheap regression signal Phase 10 could borrow as a counter, noted only.
+- **Merge beyond diff3.** A syntax-aware merge appears as a claim; #292 (classify insert/insert
+  conflicts first) already covers measuring whether it matters.
+- **Momentum.** Scion's `main` is idle for 17 days while two projects ship daily.
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
