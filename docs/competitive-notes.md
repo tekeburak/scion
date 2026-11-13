@@ -7,6 +7,41 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-13
+
+Repository search answered; per-repository API calls outside this repository were refused again,
+so commits and tags come from anonymous shallow clones under the scratchpad (subjects only).
+Window for "last 24 hours": since 2026-11-12 06:00 UTC. This branch is stacked on the
+2026-11-12 notes, whose PR is still open: `main` CI is red for reasons outside these notes
+(RUSTSEC-2026-0410 against `zstd-sys` in `Cargo.lock`, and a self-hosted runner out of disk).
+
+| Repository | Stars / forks (11-12 → today) | Last push | Last 24 h | Noted |
+|---|---|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 1010/101 → 1013/101 | 2026-11-05 | none | Newest tag still `v0.4.2`. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 296/25 → 299/25 | 2026-10-16 | none | Stars still rising with no new code. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 148/21 → 149/21 | 2026-10-27 | none | GPL-3.0 (nothing is copied from it); 14 open issues. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 31/4 → 31/4 | today | 29 commits | No new tag (`v0.1.0` stays the newest). The mutation-testing audit goes on file by file (client, checkout walk, mount VFS with two writable-mount bugs fixed, store, metrics, server and CLI binaries). New: **crash-point tests for a land** — the land path parks at named points, a kill between plan and settle leaves a land that a retry finishes, a lost reply replays, a stopped derive resumes from stored rows; and a signing-key rotation that keeps tickets of the old key valid and refuses unknown keys. |
+| [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub) | 0/0 | 2026-10-18 | none | Quiet. |
+| [yuchenZhangTG/graft](https://github.com/yuchenZhangTG/graft) | 22/0 → 23/0 | 2026-11-05 | none | Unchanged since its six commits; the < 50 ms writable-workspace claim is still self-reported, with no benchmark file. |
+| `TheDancingDeveloper-org/graft` | 0/0 | 2026-11-07 | none | AGPL-3.0, read only. Since 10-26 (~210 commits, tag `v0.1.1`): MCP tools for review and attestation, HMAC-signed outbound webhooks on its journal, per-line post-land check modes with a post-land benchmark, a mirror to a self-hosted forge (batch PRs and lands). |
+| [hermes98761234/sgit](https://github.com/hermes98761234/sgit) | 0/0 | – | none | Tags now up to `v0.3.0`. |
+
+No other repository created after 2026-10-13 that matches the searches has 5 stars or more (the
+`Scion-Project` repositories with 10 and 7 stars are phone firmware, unrelated).
+
+Scion: 0 stars / 0 forks; `main` has had no commit since 2026-10-26.
+
+### What it means for Scion
+
+- **Land crash-safety is tested, not argued, elsewhere.** One project kills the server at named
+  points inside a land and proves a retry converges. Scion's land worker (Phase 5.4, crash
+  recovery) and the hermetic simulation (Phase 7.10) cover the same ground; kill-point coverage
+  is worth checking when 7.10 lands. No issue: the roadmap already has the step.
+- **Outbound events on land.** Signed webhooks on every landed change appear in one project;
+  closest open item is #212 (`scn watch`). Noted only.
+- **The blocker is ours.** Nothing here is urgent compared with Scion's own red `main` CI, which
+  has kept the notes PRs since 2026-11-03 unmerged.
+
 ## 2026-11-12
 
 First run since 2026-10-26. Repository search answered; per-repository API calls outside this
