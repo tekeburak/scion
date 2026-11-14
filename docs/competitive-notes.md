@@ -7,6 +7,48 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-14
+
+First run since 2026-10-26. Repository search answered; per-repository API calls stayed refused,
+so commits and tags come from anonymous partial clones under the scratchpad (subjects only) and
+features from each README as the project states it. "Last 24 h" is since 2026-11-13 06:00 UTC.
+
+| Repository | Stars / forks (10-26 → today) | Last push | Last 24 h | Noted |
+|---|---|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 988 → 996 / 100 | 2026-11-05 | none | **Tags `v0.4.1`, `v0.4.2`** since the last run. 0.4.2 work: a bounded, configurable Postgres pool with a commit-rate benchmark of concurrent writers, refusing reference-name pairs git cannot hold together, and a conformance harness. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 245 → 300 / 25 | 2026-10-16 | none | Stars still rising with no code since mid-October. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 119 → 150 / 21 | 2026-10-27 | none | Nothing on the default branch since 2026-10-25; 14 open issues. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30 → 31 / 4 | 2026-11-14 | 13 commits | **First release `v0.1.0`** (2026-11-01), with a signed tag, checksums and attestations documented in a `verify` guide plus stability and compatibility pages. ~340 commits since 10-26. Last 24 h: mutation-testing survivors in the CLI killed or labeled, tier/metrics rows re-counted from fresh runs, tests under `umask 002`, land tests judged by an event instead of a wall clock, operations and release guides matched to v0.1.0. |
+| [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub) | 0 / 0 | 2026-10-18 | none | Quiet. |
+| **new:** [yuchenZhangTG/graft](https://github.com/yuchenZhangTG/graft) | 23 / 0 | 2026-11-05 | none | Rust, Apache-2.0, created 2026-11-02; cites Piper/CitC and the post. Claims: a writable workspace at any commit in **< 50 ms** (read-only FUSE lower layer + native copy-on-write upper layer), diff in O(modified), a syntax-aware three-way merge for four languages, a `graftd` daemon with server-side merge, SQLite + S3 local setup, and an embedded **web UI with code search** and a REST API. Benchmark claims are stated in the README without a published method. |
+| `TheDancingDeveloper-org/graft`, [rizaust/open-scion](https://github.com/rizaust/open-scion), [adrianchifor/scn](https://github.com/adrianchifor/scn), `yumaitau/yuma-agent-git` | 0, 3, 2, 0 | 11-07, 10-14, 10-17, 11-09 | none | Small; no new tags read. |
+| `OpenCSGs/scion` | – | – | – | No longer reachable (search refuses the name, anonymous clone asks for credentials): deleted or made private. |
+
+Search for repositories created after 2026-10-13: the only newcomer with ≥ 5 stars that is about
+source control is the one marked new above. Two others above 5 stars (10 and 7) share the name
+for an unrelated phone-firmware project and are not tracked.
+
+### What it means for Scion
+
+- **Code search.** The new project ships searching file contents from its web UI. Scion's web
+  pages, HTTP API and MCP tools can read a tree and a file, but nothing finds a string across a
+  tree at a changeset, and `docs/ROADMAP.md` has no step for it. An agent that cannot check out
+  has to read files one by one to find a symbol. Opened as this run's issue (`idea:` + label
+  `competitor`).
+- **Virtual workspaces and smarter merge** are already proposed (#295 `scn mount`, #292
+  classifying insert/insert conflicts); the < 50 ms claim is a reason to keep #295 near the top
+  of Phase 4, not a new step.
+- **Releases.** Three projects now have tagged releases, one with signed tags and attestations
+  (#281 already proposes the same for Scion's Phase 9). Scion still has no tag.
+- **Hardening as the visible work.** The most active project spends nearly all commits on test
+  rigor (mutation survivors, timing-free tests, measured CI limits); its README and docs present
+  that rigor as a feature. Scion's `docs/BENCHMARKS.md` already ties numbers to runs; nothing new
+  to adopt.
+- **Stars** follow announcements, not commits: the two most-starred projects gained 8 and 55
+  with no code in the window.
+
+No weekly table today (Saturday); the next one is due Monday 2026-11-16.
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
