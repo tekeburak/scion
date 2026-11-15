@@ -7,6 +7,36 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-15
+
+Repository search answered; per-repository API calls stayed refused, so commits and tags come
+from anonymous partial clones under the scratchpad (subjects only). "Last 24 h" is since
+2026-11-14 06:00 UTC, the previous reading (its section is in the still-open #299, which, like
+every notes PR since 2026-10-27, waits on the red `cargo-deny` check described in #300).
+
+| Repository | Stars / forks (11-14 → today) | Last push | Last 24 h | Noted |
+|---|---|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 996 → 997 / 100 | 2026-11-05 | none | Newest tag still `v0.4.2`. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 300 → 306 / 25 | 2026-10-16 | none | Stars keep rising with no code since mid-October. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 150 → 152 / 21 | 2026-10-27 | none | 14 open issues. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 31 / 4 | 2026-11-14 | none | Its last commit (mutation survivors in the CLI) predates the previous reading; newest tag still `v0.1.0`. |
+| [yuchenZhangTG/graft](https://github.com/yuchenZhangTG/graft) | 23 / 0 | 2026-11-05 | none | No commits since its daemon and server-side merge landed. |
+| [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub), `TheDancingDeveloper-org/graft`, [rizaust/open-scion](https://github.com/rizaust/open-scion), [adrianchifor/scn](https://github.com/adrianchifor/scn), `yumaitau/yuma-agent-git` | 0, 0, 3, 2, 0 | 10-18, 11-07, 10-14, 10-17, 11-09 | none | Quiet; no new tags. |
+
+Search for repositories created after 2026-10-13 ("scion" with "source control", "monorepo" or
+"anthropic", and "redesigning source control"): no new project at ≥ 5 stars. The two phone-firmware
+projects that share the name (10 and 7 stars) stay untracked.
+
+### What it means for Scion
+
+- **Nothing new to adopt.** The field was quiet for 24 hours; every gap named on 2026-11-14 is
+  already an open issue (#298 code search, #295 `scn mount`, #292 merge classification, #281
+  release provenance). No issue opened today.
+- **The release gap widens by default.** Three projects carry tags; Scion has none, and Phase 9's
+  release steps cannot start merging until `main` is green again (#300).
+
+No weekly table today (Sunday); the next one is due Monday 2026-11-16.
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
