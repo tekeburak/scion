@@ -7,6 +7,66 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-16
+
+Repository search answered; per-repository API calls stayed refused, so commits and tags come
+from anonymous partial clones under the scratchpad (subjects only). "Last 24 h" is since
+2026-11-15 06:00 UTC. This branch is cut from `main`, which still ends at #267: the sections of
+2026-10-27 to 2026-11-15 sit in the open notes PRs #273–#301, all held by the red `cargo-deny`
+check on `main` that #300 describes (an MSRV decision for the owner). This PR will be red too.
+
+| Repository | Stars / forks (11-15 → today) | Last push | Last 24 h | Noted |
+|---|---|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 997 → 1001 / 100 | 2026-11-05 | none | Past 1,000 stars; newest tag still `v0.4.2`. README states 1,245–1,806 lands a minute (p99 2.0–3.4 s) in its 250-change race. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 306 → 307 / 25 | 2026-10-16 | none | No tags. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 152 → 154 / 21 | 2026-10-27 | none | 14 open issues; GPL-3.0. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 31 / 4 | 2026-11-15 | 1 commit | A land-model test (no step chosen while a land has no final reply). Newest tag still `v0.1.0` (2026-11-01). |
+| `TheDancingDeveloper-org/graft` | 0 / 0 | 2026-11-16 | 3 commits | A mirror skips a land already on its base instead of reporting a conflict; tests follow a newer toolchain's build-dir layout. Tag still `v0.1.1`. AGPL-3.0: nothing copied. |
+| [yuchenZhangTG/graft](https://github.com/yuchenZhangTG/graft) | 23 / 0 | 2026-11-05 | none | No tags. |
+| [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub), [rizaust/open-scion](https://github.com/rizaust/open-scion), [adrianchifor/scn](https://github.com/adrianchifor/scn), `yumaitau/yuma-agent-git` | 0, 3, 2, 0 | 10-18, 10-14, 10-17, 11-09 | none | Quiet. |
+
+Search for repositories created after 2026-10-13 ("scion" with "source control", "monorepo" or
+"anthropic", and "redesigning source control"): no new project at ≥ 5 stars. The only matches
+above 5 that are not listed are the phone-firmware projects that share the name (10 and 7).
+
+### What it means for Scion
+
+- **Nothing new to adopt.** One test commit and one mirror fix in 24 hours; the gaps found
+  since 10-27 are already open ideas (#265, #274, #278, #281, #290, #292, #295, #298). No issue
+  opened today.
+- **Land throughput: still ahead,** indicatively. The one race figure published (about 21–30
+  lands a second at 250 concurrent changes) stays below Scion's `land 16 writers` row in
+  `docs/BENCHMARKS.md` (about 45–50 a second), on different hardware and workloads.
+- **The gap is ours.** `main` has been red for 20 days; no notes PR, roadmap step or release
+  step can merge until #300 is decided, while three projects ship tags.
+
+### Weekly: ahead / behind (2026-11-16)
+
+From each README and docs as stated today; ✓ stated, – absent or stated as not done, ? not
+stated. Scion's column is from its own README and `docs/ROADMAP.md`. No column changed since
+the 2026-11-09 table (in #293) except the release and git-gateway notes below.
+
+| Feature | Scion | CarterT27 | tinyhumansai | bnsd55 | kianaaa19 | graft (TDD) | yuchenZhangTG | feder-cr |
+|---|---|---|---|---|---|---|---|---|
+| CLI | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Server-side land | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ server-side merge | ✓ |
+| Persistent store | ✓ Postgres + S3 | ✓ CockroachDB + S3 | ✓ SQLite, files | ✓ Postgres | ✓ SQLite | ? | ✓ SQLite + S3 | ✓ SQLite or Postgres + object store |
+| Derived data | ✓ | ✓ | ✓ | ✓ | ✓ | ? | ? | ✓ |
+| Daemon / cache tier | – (Phase 4) | ✓ | ✓ | ✓ | – | ✓ node | ✓ daemon + FUSE | ✓ |
+| Git import | ✓ | ✓ | ? | ✓ | ? | ✓ | ✓ | ✓ shadow mode |
+| Git gateway | – non-goal | – | – | – | – | – export, forge mirrors | ? | ✓ stock git clients |
+| Auth | ✓ GitHub, SPs, ACLs | ✓ tokens | ? | ✓ tokens, tickets | ✓ passwords, tokens | ✓ tokens, revocation | ? | ✓ per-agent tokens |
+| Web UI | ✓ | ? | ✓ | ? | ✓ | ? | ✓ | ? |
+| HTTP API | ✓ | ? | ✓ | ? | ✓ | ✓ | ✓ REST | ? |
+| MCP | ✓ | ? | ? | ? | – | ✓ | ? | ? |
+| Benchmark | ✓ | ✓ | ✓ | ✓ | – | ✓ | ✓ claims only | ✓ |
+| Release | – (Phase 9) | – | – | ✓ v0.1.0, signed + attested | – | ✓ v0.1.1 | – | ✓ v0.4.2 |
+
+**Ahead:** still the only project stating web UI, HTTP API and MCP together with GitHub sign-in
+and directory ACLs on Postgres + S3; land throughput ahead of the one comparable published rate.
+**Behind:** no release (three projects ship one), no daemon/cache tier (Phase 4; six projects
+state one), and a red `main` since 2026-10-27 that blocks every PR (#300).
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
