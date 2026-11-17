@@ -7,6 +7,38 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-17
+
+Repository search answered; per-repository API calls stayed refused, so commits and tags come
+from anonymous partial clones under the scratchpad (subjects only). "Last 24 h" is since
+2026-11-16 06:00 UTC. This branch is cut from `main`, which still ends at #267: the sections of
+2026-10-27 to 2026-11-16 sit in the open notes PRs #276–#302, all held by the red `cargo-deny`
+check on `main` (#300, an MSRV decision for the owner). This PR will be red too.
+
+| Repository | Stars / forks (11-16 → today) | Last push | Last 24 h | Noted |
+|---|---|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 1001 → 1002 / 100 | 2026-11-05 | none | Newest tag still `v0.4.2`. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 307 → 309 / 25 | 2026-10-16 | none | No tags. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 154 / 21 | 2026-10-27 | none | GPL-3.0. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 31 / 4 | 2026-11-16 (branches `pg-plan-1060`, `prep-1060`) | none on `main` | Two branches prepare a Postgres plan change; `main` ends 2026-11-15. Tag still `v0.1.0`. |
+| `TheDancingDeveloper-org/graft` | 0 / 0 | 2026-11-17 | 6 commits | **An opt-in start point for git import**: history before a chosen commit is never walked, persisted on the mirror row and exposed in CLI, import config and MCP. A token read from a file, with a sandbox hint when connect fails; a refused working copy names the lease owner. Tag still `v0.1.1`. AGPL-3.0: nothing copied. |
+| [yuchenZhangTG/graft](https://github.com/yuchenZhangTG/graft) | 23 / 0 | 2026-11-05 | none | No tags; README claims < 50 ms workspaces (no published run). |
+| [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub), [rizaust/open-scion](https://github.com/rizaust/open-scion), [adrianchifor/scn](https://github.com/adrianchifor/scn), `yumaitau/yuma-agent-git` | 0, 3, 2, 0 | 10-18, 10-14, 10-17, 11-09 | none | Quiet. |
+
+Search for repositories created after 2026-10-13 ("scion" with "source control", "monorepo" or
+"anthropic", and "redesigning source control"): no new project at ≥ 5 stars. The only
+unlisted matches above 5 are the phone-firmware projects that share the name (10 and 7).
+
+### What it means for Scion
+
+- **Import from a start point.** Phase 6 imports a repository's whole first-parent history;
+  a large monorepo's owner may want to start at a recent commit and keep history before it in
+  git. One project shipped exactly that today. Opened as an idea issue (one PR, Phase 6).
+- **Nothing else new.** The other gaps are already open ideas (#265, #274, #278, #281, #290,
+  #292, #295, #298).
+- **The gap is still ours.** `main` has been red for 21 days; no PR can merge until #300 is
+  decided. No weekly table today (Tuesday; the last one is in #302).
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
