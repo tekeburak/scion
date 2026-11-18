@@ -7,6 +7,47 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-18
+
+Repository search answered; per-repository API calls stayed refused, so commits and tags come
+from anonymous partial clones under the scratchpad (subjects and READMEs only). "Last 24 h" is
+since 2026-11-17 06:00 UTC. This branch is cut from `main`, which still ends at #267: the
+sections of 2026-10-27 to 2026-11-17 sit in the open notes PRs #273–#304, all held by the red
+`cargo-deny` check on `main` (#300). #305 (the dependency bump meant to clear it) is itself red
+on `cargo-deny` and on `fmt + clippy + test`, so this PR will be red too.
+
+| Repository | Stars / forks (11-17 → today) | Last push | Last 24 h | Noted |
+|---|---|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 1002 / 100 | 2026-11-05 | none | Newest tag still `v0.4.2`. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 309 / 25 | 2026-10-16 | none | No tags. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 154 / 21 | 2026-10-27 | none | GPL-3.0. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 31 / 4 | 2026-11-18 | 7 commits | All tests: land verdict bounds, reconnect after a lost Postgres connection, a stale view-memo row swept on refresh. Tag still `v0.1.0`. |
+| `TheDancingDeveloper-org/graft` | 0 / 0 | 2026-11-17 | none since the import start-point commits noted yesterday | Tag still `v0.1.1`. AGPL-3.0: nothing copied. |
+| [yuchenZhangTG/graft](https://github.com/yuchenZhangTG/graft) | 23 / 0 | 2026-11-05 | none | No tags; workspace-latency claims without a published run. |
+| **new to these notes:** [RKKatakam/veil](https://github.com/RKKatakam/veil) | 27 / 1 | 2026-11-15 | none | Rust, Apache-2.0, created 2026-11-03 (about 1,600 commits since). Not git-compatible. Names Anthropic's post as one of two inspirations. States: server-side batched land, "land first, test after" with a last-tested `main` and automatic bisect and revert, server-enforced folder permissions, Linux sandboxes per agent, millisecond workspaces, a web client with passkey sign-in, pull requests, embargoed security fixes. **Benchmark claim:** a ten-machine cloud run (2026-11-14/15): 3 servers behind a balancer, landing 93 / 185 / 279 changes a second on 1 / 2 / 3 servers, 283 a second across 100 projects, and a failover check (one server stopped mid-load, 17,386 changes landed each exactly once). No release yet. |
+| **new to these notes:** [baz-scm/gion](https://github.com/baz-scm/gion) | 32 / 4 | 2026-11-16 | none | Go, Apache-2.0. A git client, not a server: lazy reads over the standard git wire protocol for agents (read, grep, log, diff without a clone). Tags `v0.5.0` → `v0.7.0` this month. Claims 58× git on grep over a 66 GB repository (warm cache). Outside Scion's scope (git wire protocol is a non-goal); listed for its benchmark presentation. |
+| [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub), [rizaust/open-scion](https://github.com/rizaust/open-scion), [adrianchifor/scn](https://github.com/adrianchifor/scn), `yumaitau/yuma-agent-git` | 0, 3, 2, 0 | 10-18, 10-14, 10-17, 11-09 | none | Quiet. `OpenCSGs/scion` and `hermes98761234/sgit` no longer answer anonymously (gone or private). |
+
+Search for repositories created after 2026-10-13 ("scion" with "source control", "monorepo" or
+"anthropic", and "redesigning source control"): the two projects above are the only unlisted
+ones at ≥ 5 stars that are about source control. Earlier runs' searches did not surface them;
+the other matches above 5 (phone firmware, game mods, a game-server emulator, a service-manual
+skill) share only the word.
+
+### What it means for Scion
+
+- **Landing on more than one server.** The architecture states that servers are stateless and
+  horizontally scalable, but each repository's land worker and its crash recovery are tested
+  on one server only (`scion-sim` runs one server; the end-to-end stack starts one). One
+  project now publishes landing rates per server count and a mid-load failover with
+  exactly-once landing. Opened as an idea issue: a test with two servers on one Postgres + S3,
+  one stopped mid-load (one PR; Phase 5 land worker, under architecture principle 4).
+- **Land first, test after** maps to the open #274 (bisect); nothing new to open.
+- **Presentation.** Both newcomers lead with measured numbers on the first screen (a chart, or
+  a table with machine types, dates and the misses listed beside the passes). Scion's
+  measured chart is lower on its page; noted, as on 2026-10-18.
+- No weekly table today (Wednesday; the last one is in #302).
+
 ## 2026-10-26
 
 The GitHub API answered this session again (repository search; READMEs of repositories outside
@@ -309,27 +350,4 @@ Star counts from the GitHub search API that day. New since 2026-10-18 are marked
 
 ## 2026-10-18
 
-Star counts as shown on each repository page that day.
-
-| Repository | Stars | Language, license | First screen | Presentation technique worth noting |
-|---|---:|---|---|---|
-| [CarterT27/scion](https://github.com/CarterT27/scion) | 219 | Rust, Apache-2.0 | title and one paragraph, then a star-history chart; no logo, no badges | Benchmarks are the second section, split into "real repository with persistent storage" and "concurrent CI workloads"; numbers are labelled as measured on one named machine. No topics set. |
-| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 95 | Rust (+ Next.js web GUI), GPL-3.0-only | banner image, then a benchmark SVG against git (import, full clone, single-file commit, single-directory clone) | Leads with a benchmark chart before "Why"; also has "Releasing" and "Contributing" sections. Architecture is a text diagram. |
-| [bnsd55/open-scion](https://github.com/bnsd55/open-scion) | 25 | Rust, MIT OR Apache-2.0 | banner logo, badges (CI, license, Rust version, "proof of concept" status), one paragraph | A "What this is, and what it is not" section right after the intro; nine topics (ai-agents, content-addressable, git, grpc, monorepo, rust, source-control, vcs, version-control); demo as a "Try it" shell section. |
-| [VishiATChoudhary/graft](https://github.com/VishiATChoudhary/graft) | 1 | Go | not reviewed | Description names the post directly. |
-| [voduff/nugit](https://github.com/voduff/nugit) | 0 | Rust | not reviewed | Description names the post directly. |
-
-Not related despite the name: GoogleCloudPlatform/scion (agent orchestration) and
-annex-ai/scion (an AI agent).
-
-### What Scion could learn
-
-- **Repository topics.** The only project with GitHub topics set is easier to find; Scion's
-  repository has none. Setting topics is a repository setting, not a file in this repo.
-- **Repository description.** Scion's GitHub description still says "pre-MVP", which the
-  README no longer uses; the README calls the project alpha. Also a repository setting.
-- **Benchmarks near the top.** Two of the larger projects show measured numbers on the first
-  screen. Scion's measured chart (`docs/assets/bench-real.svg`) sits lower on the page; the
-  first screen stays logo, one sentence, badges, the inspiration note, "Why Scion" and the
-  architecture figure.
-- **"What it is not" early.** Scion's Scope section covers this; it is further down.
+First survey (compacted): five projects inspired by the post read for presentation; Scion noted topics, its repository description and benchmarks nearer the top.
