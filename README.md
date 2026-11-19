@@ -584,8 +584,9 @@ scripts/bench-real 3
 
 CI runs the same commands on Linux, on self-hosted runners (the header of
 `.github/workflows/ci.yml` says how they behave); macOS is covered by developing on it.
-Contributions go through pull requests; see [`CONTRIBUTING.md`](CONTRIBUTING.md) and the
-working rules in [`CLAUDE.md`](CLAUDE.md), which every change is reviewed against.
+Every change lands through a pull request from within the project; issues and pull requests
+from outside it are not accepted ([`CONTRIBUTING.md`](CONTRIBUTING.md)). The working rules every
+change is reviewed against are in [`CLAUDE.md`](CLAUDE.md).
 
 Golden-hash fixtures live in `crates/scion-types/tests/golden/`. They are the format
 specification's executable form; see `docs/DATA_MODEL.md` before touching them.
