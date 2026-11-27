@@ -7,6 +7,35 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-27
+
+Same method as 2026-11-26 (repository search for stars, forks and last push; anonymous shallow
+clones under the scratchpad for commits and tags). "Last 24 h" means commits dated 2026-11-26
+06:00 UTC or later. This branch is stacked on the 2026-11-26 notes, which are not on `main` yet.
+
+| Repository | Stars / forks (11-26 → today) | Last push | Last 24 h | Noted |
+|---|---|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 976 / 100 → 1,014 / 101 | 2026-11-22 | none | Passed 1,000 stars; no new commit. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 321 / 27 → 323 / 29 | 2026-10-16 | none | Quiet; no tag. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 163 / 24 → 165 / 24 | 2026-10-27 | none | Quiet; no tag. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30 / 5 → 30 / 5 | 2026-11-26 | 3 commits | A reopen right after a drop or refused open waits for the store lock (test); two dependency-bump PRs. Still at `v0.1.0`. |
+| [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub) | 0 / 0 | 2026-10-18 | none | Quiet. |
+| [RKKatakam/veil](https://github.com/RKKatakam/veil) | 30 / 2 → 30 / 2 | 2026-11-24 | none | Quiet since its README rewrite; about 2,000 commits since 2026-10-26. README benchmark claims unchanged (207 batched landings/s on one `main` across a cloud cluster; exactly-once landing through a server failover; 3.1× faster default clone than git on a 1 GB project). |
+| [yuchenZhangTG/graft](https://github.com/yuchenZhangTG/graft) | 24 / 0 | 2026-11-05 | none | Quiet. |
+| [baz-scm/gion](https://github.com/baz-scm/gion) | 32 / 4 | 2026-11-16 | none | Latest tag `v0.7.0`. |
+
+New repositories created after 2026-10-13 matching the searches: none reached 5 stars
+(`stigenai/scion`, 0 stars, was pushed today).
+
+### What it means for Scion
+
+- No new direction since yesterday. Each claim above already has an open idea issue: sustained
+  land throughput (#317), exactly-once landing through a server failover (#306), newest green
+  `main` (#319), bisect (#274). No issue filed this run.
+- **Our CI is red for reasons outside the diff**, so the daily notes PRs (2026-10-27 onward) stay
+  unmerged: on #320 the `fmt + clippy + test` job died with a linker bus error (signal 7) on the
+  self-hosted runner, and `cargo-deny` failed on advisories. Both need the owner.
+
 ## 2026-11-26
 
 First reading since 2026-10-26. Repository search answered (stars, forks, last push and license
