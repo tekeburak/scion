@@ -7,6 +7,37 @@ Scion takes no code, design decision or architecture from them, and copies no te
 from any of them (several are GPL-licensed). None of these names or links belong in the
 README.
 
+## 2026-11-28
+
+Same method as 2026-11-27 (repository search for stars, forks and last push; anonymous shallow
+clones under the scratchpad for commits and tags). "Last 24 h" means commits dated 2026-11-27
+06:00 UTC or later. This branch is stacked on the 2026-11-27 notes, which are not on `main` yet.
+
+| Repository | Stars / forks (11-27 → today) | Last push | Last 24 h | Noted |
+|---|---|---|---|---|
+| [feder-cr/git-ai](https://github.com/feder-cr/git-ai) | 1,014 / 101 → 957 / 96 | 2026-11-22 | none | Search reports fewer stars than yesterday (likely index lag, recorded as reported). Latest tag `v0.4.2`. |
+| [CarterT27/scion](https://github.com/CarterT27/scion) | 323 / 29 → 324 / 29 | 2026-10-16 | none | Quiet; no tag. |
+| [tinyhumansai/openscion](https://github.com/tinyhumansai/openscion) | 165 / 24 → 166 / 24 | 2026-10-27 | none | Quiet; no tag. |
+| [bnsd55/openscion](https://github.com/bnsd55/openscion) | 30 / 5 | 2026-11-26 | none | Still at `v0.1.0`. |
+| [kianaaa19/scionhub](https://github.com/kianaaa19/scionhub) | 0 / 0 | 2026-10-18 | none | Quiet. |
+| [RKKatakam/veil](https://github.com/RKKatakam/veil), [yuchenZhangTG/graft](https://github.com/yuchenZhangTG/graft), [baz-scm/gion](https://github.com/baz-scm/gion) | 30 / 2, 24 / 0, 32 / 4 (unchanged) | 11-24, 11-05, 11-16 | none | Quiet; `gion` still at `v0.7.0`. |
+| `TheDancingDeveloper-org/graft` | 0 / 0 | 2026-11-27 | 7 commits | **Tag `v0.1.2`** (2026-11-26): static musl Linux archives with `SHA256SUMS` and a container image per tag; macOS dropped from the release for now. Last day: README, user guide, status and roadmap rewritten; the mirror imports a fresh repository with its token alone. AGPL-3.0: nothing copied. |
+| [stigenai/scion](https://github.com/stigenai/scion) | 0 / 0 | 2026-11-28 | 1 merge | Appears to be the former `OpenCSGs/scion` (missing from search since 11-26): same tag line, now at `v0.1.12`, and its install command still points at the old owner. Last day: its git gateway's upload path reads trees and commits in parallel. README leads with a benchmark table against git and one other implementation on a third project's public workload set (1k and 10k files) plus one real repository, and a four-agent landing demo GIF. |
+| `yumaitau/yuma-agent-git` | 0 / 0 | 2026-11-27 | 1 commit | Dependency security bumps only. |
+
+New repositories created after 2026-10-13 matching the searches: none reached 5 stars.
+
+### What it means for Scion
+
+- **A shared, third-party workload set.** One project now benchmarks itself against git and a
+  peer on another project's published workloads rather than its own. Scion's `bench-real` already
+  runs peers on one real slice (6.10, 10.10); the peer adapters cover it, no new issue.
+- **Release packaging** (static musl archives, checksums, image per tag) keeps spreading; Phase 9
+  (9.2, 9.5) and #281 cover it. No issue filed this run.
+- **Still blocking: our CI.** `cargo-deny` fails on advisories in `Cargo.lock` (zstd-safe,
+  zstd-sys, pulldown-cmark, rmcp, url) on every PR based on `main`, so no notes PR has merged
+  since 2026-10-26. #305 takes most of the fixed releases; `url` may need adding. Owner's call.
+
 ## 2026-11-27
 
 Same method as 2026-11-26 (repository search for stars, forks and last push; anonymous shallow
